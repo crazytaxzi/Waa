@@ -9,102 +9,61 @@ $script:ReadOnly = $false
 
 function ConvertTo-SqlLiteral {
     param([AllowNull()]$Value)
-
     if ($null -eq $Value) { return 'NULL' }
     if ($Value -is [bool]) { if ($Value) { return '1' } else { return '0' } }
-    if ($Value -is [byte] -or
-        $Value -is [int16] -or
-        $Value -is [int] -or
-        $Value -is [long] -or
-        $Value -is [single] -or
-        $Value -is [double] -or
-        $Value -is [decimal]) {
+    if ($Value -is [byte] -or $Value -is [int16] -or $Value -is [int] -or $Value -is [long] -or
+        $Value -is [single] -or $Value -is [double] -or $Value -is [decimal]) {
         return [Convert]::ToString($Value, [Globalization.CultureInfo]::InvariantCulture)
     }
-
     return "'" + ([string]$Value).Replace("'", "''").Replace([string][char]0, '') + "'"
 }
 
 function Invoke-Sql {
-    param(
-        [Parameter(Mandatory = $true)][string]$Sql,
-        [switch]$Json,
-        [switch]$AllowWrite
-    )
-
-    if ($script:ReadOnly -and $AllowWrite) {
-        throw 'Database integrity mode is read-only. Restore a valid backup.'
-    }
-
+    param([Parameter(Mandatory = $true)][string]$Sql, [switch]$Json, [switch]$AllowWrite)
+    if ($script:ReadOnly -and $AllowWrite) { throw 'Database integrity mode is read-only. Restore a valid backup.' }
     $arguments = @('-batch', '-bail', $script:Db)
     if ($Json) { $arguments += '-json' }
-
     $input = ".timeout 5000`nPRAGMA foreign_keys=ON;`n$Sql"
     $output = $input | & $script:Sqlite @arguments 2>&1
     if ($LASTEXITCODE -ne 0) { throw "SQLite error: $output" }
-
     if (-not $Json) { return ($output -join "`n") }
-
     $text = ($output -join "`n").Trim()
     if ([string]::IsNullOrWhiteSpace($text)) { return @() }
-
     $parsed = ConvertFrom-Json -InputObject $text
     if ($parsed -is [System.Array]) {
         foreach ($item in $parsed) {
-            if ($item -is [System.Array]) {
-                foreach ($nested in $item) { Write-Output $nested }
-            }
-            else {
-                Write-Output $item
-            }
+            if ($item -is [System.Array]) { foreach ($nested in $item) { Write-Output $nested } }
+            else { Write-Output $item }
         }
     }
-    else {
-        Write-Output $parsed
-    }
+    else { Write-Output $parsed }
 }
 
 function Add-Audit {
-    param(
-        [Parameter(Mandatory = $true)][string]$Action,
-        [Parameter(Mandatory = $true)][string]$Entity,
-        [AllowNull()]$Id,
-        [AllowNull()]$Detail
-    )
-
-    $values = @($Action, $Entity, $Id, ($Detail | ConvertTo-Json -Compress -Depth 8)) |
-        ForEach-Object { ConvertTo-SqlLiteral $_ }
+    param([string]$Action, [string]$Entity, [AllowNull()]$Id, [AllowNull()]$Detail)
+    $values = @($Action, $Entity, $Id, ($Detail | ConvertTo-Json -Compress -Depth 8)) | ForEach-Object { ConvertTo-SqlLiteral $_ }
     Invoke-Sql "INSERT INTO audit_history(action,entity_type,entity_id,detail_json) VALUES($($values -join ','));" -AllowWrite | Out-Null
 }
 
 function Backup-Waa {
     param([string]$Reason = 'manual')
-
     $directory = Join-Path $script:DataRoot 'backups'
     [IO.Directory]::CreateDirectory($directory) | Out-Null
     $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss-fff')
     $destination = Join-Path $directory "waa-$stamp-$Reason.db"
-    $safeDestination = $destination.Replace("'", "''")
-    Invoke-Sql ".backup '$safeDestination'" | Out-Null
+    $safe = $destination.Replace("'", "''")
+    Invoke-Sql ".backup '$safe'" | Out-Null
     return @{ path = $destination; name = [IO.Path]::GetFileName($destination) }
 }
 
 function Initialize-Waa {
-    param(
-        [Parameter(Mandatory = $true)][string]$Root,
-        [Parameter(Mandatory = $true)][string]$DataRoot
-    )
-
+    param([string]$Root, [string]$DataRoot)
     $script:Root = $Root
     $script:DataRoot = $DataRoot
     [IO.Directory]::CreateDirectory($DataRoot) | Out-Null
-
     $script:Db = Join-Path $DataRoot 'waa.db'
     $script:Sqlite = if ($env:WAA_SQLITE_TEST) { $env:WAA_SQLITE_TEST } else { Join-Path $Root 'runtime/sqlite/sqlite3.exe' }
-    if (-not (Test-Path -LiteralPath $script:Sqlite)) {
-        throw "Bundled SQLite runtime missing: $script:Sqlite"
-    }
-
+    if (-not (Test-Path -LiteralPath $script:Sqlite)) { throw "Bundled SQLite runtime missing: $script:Sqlite" }
     if (Test-Path -LiteralPath $script:Db) { Backup-Waa 'startup' | Out-Null }
 
     $schema = @'
@@ -148,7 +107,6 @@ INSERT OR IGNORE INTO safety_notes(note) VALUES
 ('Check tires, lights, coupling, and brakes before every departure.');
 COMMIT;
 '@
-
     Invoke-Sql $schema -AllowWrite | Out-Null
     $integrity = (Invoke-Sql 'PRAGMA integrity_check;').Trim()
     if ($integrity -ne 'ok') { $script:ReadOnly = $true }
@@ -156,47 +114,31 @@ COMMIT;
 }
 
 function Get-Sha256 {
-    param([Parameter(Mandatory = $true)][string]$Text)
-
+    param([string]$Text)
     $sha = [Security.Cryptography.SHA256]::Create()
-    try {
-        return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)))).Replace('-', '').ToLowerInvariant()
-    }
-    finally {
-        $sha.Dispose()
-    }
+    try { return ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)))).Replace('-', '').ToLowerInvariant() }
+    finally { $sha.Dispose() }
 }
 
 function Convert-DriverCode {
-    param([Parameter(Mandatory = $true)][string]$FullName)
-
+    param([string]$FullName)
     $parts = @($FullName.Trim() -split '\s+' | Where-Object { $_ })
     if ($parts.Count -lt 2) { return $null }
-
     $first = $parts[0]
     $surname = (@($parts[1..($parts.Count - 1)] | Where-Object { $_.Length -gt 1 }) -join '')
     $surname = [Text.RegularExpressions.Regex]::Replace($surname.Normalize([Text.NormalizationForm]::FormD), '\p{Mn}', '')
     $surname = [Text.RegularExpressions.Regex]::Replace($surname.ToUpperInvariant(), '[^A-Z0-9]', '')
     if ([string]::IsNullOrWhiteSpace($surname)) { return $null }
-
     return $surname.Substring(0, [Math]::Min(7, $surname.Length)) + $first.Substring(0, 1).ToUpperInvariant()
 }
 
 function Find-Driver {
-    param(
-        [Parameter(Mandatory = $true)][string]$AliasType,
-        [Parameter(Mandatory = $true)][string]$Value,
-        [AllowNull()][string]$FullName
-    )
-
+    param([string]$AliasType, [string]$Value, [AllowNull()][string]$FullName)
     if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
-
     $valueSql = ConvertTo-SqlLiteral $Value
     $rows = @(Invoke-Sql "SELECT DISTINCT driver_id FROM driver_aliases WHERE alias_value=$valueSql COLLATE NOCASE;" -Json)
     if ($rows.Count -eq 1) { return [int]$rows[0].driver_id }
-    if ($rows.Count -gt 1) { return $null }
-    if ([string]::IsNullOrWhiteSpace($FullName)) { return $null }
-
+    if ($rows.Count -gt 1 -or [string]::IsNullOrWhiteSpace($FullName)) { return $null }
     $name = if ($FullName -eq 'Unknown') { $Value } else { $FullName }
     $nameSql = ConvertTo-SqlLiteral $name
     $ptaSql = if ($AliasType -eq 'pta_code') { ConvertTo-SqlLiteral $Value } else { 'NULL' }
@@ -209,19 +151,15 @@ function Find-Driver {
 
 function Parse-Date {
     param([AllowNull()][string]$Text)
-
     if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
     $date = [datetime]::MinValue
     $styles = [Globalization.DateTimeStyles]::AssumeLocal
-    if ([datetime]::TryParse($Text, [Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$date)) {
-        return $date.ToString('s')
-    }
+    if ([datetime]::TryParse($Text, [Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$date)) { return $date.ToString('s') }
     return $null
 }
 
 function Split-ImportRows {
-    param([Parameter(Mandatory = $true)][string]$Raw)
-
+    param([string]$Raw)
     $rows = [Collections.Generic.List[object]]::new()
     $reader = [IO.StringReader]::new($Raw)
     try {
@@ -229,67 +167,48 @@ function Split-ImportRows {
             $line = $reader.ReadLine()
             if ($null -eq $line) { break }
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
-
             $trimmed = $line.Trim()
-            if ($line.IndexOf("`t", [StringComparison]::Ordinal) -ge 0) {
-                $cells = [regex]::Split($line, "`t")
-            }
-            elseif ($trimmed.StartsWith('|')) {
-                $cells = @($trimmed.Trim('|') -split '(?<!\\)\|' | ForEach-Object { $_.Trim().Replace('\_', '_').Replace('\|', '|') })
-            }
-            else {
-                $cells = @($line -split ',(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)' | ForEach-Object { $_.Trim(' ', '"') })
-            }
-
+            if ($line.IndexOf("`t", [StringComparison]::Ordinal) -ge 0) { $cells = [regex]::Split($line, "`t") }
+            elseif ($trimmed.StartsWith('|')) { $cells = @($trimmed.Trim('|') -split '(?<!\\)\|' | ForEach-Object { $_.Trim().Replace('\_', '_').Replace('\|', '|') }) }
+            else { $cells = @($line -split ',(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)' | ForEach-Object { $_.Trim(' ', '"') }) }
             if (($cells -join '') -match '^[-: ]+$') { continue }
             [void]$rows.Add([object[]]$cells)
         }
     }
-    finally {
-        $reader.Dispose()
-    }
-
+    finally { $reader.Dispose() }
     return $rows
 }
 
 function Test-PtaSeparatorRow {
-    param([Parameter(Mandatory = $true)][string[]]$Cells)
-
+    param([string[]]$Cells)
     if ($Cells.Count -eq 0) { return $false }
-    foreach ($cell in $Cells) {
-        if (([string]$cell).Trim() -notmatch '^:?-{2,}:?$') { return $false }
-    }
+    foreach ($cell in $Cells) { if (([string]$cell).Trim() -notmatch '^:?-{2,}:?$') { return $false } }
     return $true
 }
 
 function Test-PtaHeaderRow {
-    param([Parameter(Mandatory = $true)][string[]]$Cells)
-
+    param([string[]]$Cells)
     if ($Cells.Count -eq 0) { return $false }
     $first = [regex]::Replace(([string]$Cells[0]).Trim().ToLowerInvariant(), '[^a-z0-9]', '')
     return $first -in @('truck', 'trucknumber', 'truckno', 'unit', 'unitnumber')
 }
 
 function ConvertFrom-PtaText {
-    param([Parameter(Mandatory = $true)][string]$Raw)
-
+    param([string]$Raw)
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $rows = [Collections.Generic.List[object]]::new()
     $warnings = [Collections.Generic.List[string]]::new()
     $sample = [Collections.Generic.List[object]]::new()
     $reader = [IO.StringReader]::new($Raw)
     $sourceRows = 0
-
     try {
         while ($true) {
             $line = $reader.ReadLine()
             if ($null -eq $line) { break }
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
-
             $sourceRows++
             $trimmed = $line.Trim()
             [string[]]$cells = @()
-
             if ($line.IndexOf("`t", [StringComparison]::Ordinal) -ge 0) {
                 $cells = $line.Split([char[]]@([char]9), [StringSplitOptions]::None)
                 for ($i = 0; $i -lt $cells.Length; $i++) { $cells[$i] = $cells[$i].Trim() }
@@ -297,24 +216,19 @@ function ConvertFrom-PtaText {
             elseif ($trimmed.StartsWith('|')) {
                 $parts = [regex]::Split($trimmed.Trim('|'), '(?<!\\)\|')
                 $cells = [string[]]::new($parts.Length)
-                for ($i = 0; $i -lt $parts.Length; $i++) {
-                    $cells[$i] = ([string]$parts[$i]).Trim().Replace('\_', '_').Replace('\|', '|')
-                }
+                for ($i = 0; $i -lt $parts.Length; $i++) { $cells[$i] = ([string]$parts[$i]).Trim().Replace('\_', '_').Replace('\|', '|') }
             }
             else {
                 $parts = [regex]::Split($line, ',(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)')
                 $cells = [string[]]::new($parts.Length)
                 for ($i = 0; $i -lt $parts.Length; $i++) { $cells[$i] = ([string]$parts[$i]).Trim(' ', '"') }
             }
-
-            if (Test-PtaSeparatorRow -Cells $cells) { continue }
-            if (Test-PtaHeaderRow -Cells $cells) { continue }
-
+            if (Test-PtaSeparatorRow $cells) { continue }
+            if (Test-PtaHeaderRow $cells) { continue }
             if ($cells.Count -lt 11) {
                 [void]$warnings.Add("Row $sourceRows has $($cells.Count) columns; expected 11.")
                 continue
             }
-
             $row = [string[]]::new(11)
             for ($i = 0; $i -lt 11; $i++) { $row[$i] = ([string]$cells[$i]).Trim() }
             [void]$rows.Add($row)
@@ -325,100 +239,51 @@ function ConvertFrom-PtaText {
         $reader.Dispose()
         $watch.Stop()
     }
-
     $errors = [Collections.Generic.List[string]]::new()
     if ($rows.Count -eq 0) { [void]$errors.Add('No valid PTA data rows were detected.') }
-
     return @{
-        rows = $rows
-        sample = $sample
-        warnings = $warnings
-        errors = $errors
-        total_rows = $sourceRows
-        valid_rows = $rows.Count
-        hash = Get-Sha256 $Raw
-        parse_ms = [math]::Round($watch.Elapsed.TotalMilliseconds, 1)
+        rows = $rows; sample = $sample; warnings = $warnings; errors = $errors; total_rows = $sourceRows;
+        valid_rows = $rows.Count; hash = Get-Sha256 $Raw; parse_ms = [math]::Round($watch.Elapsed.TotalMilliseconds, 1)
     }
 }
 
 function Get-PtaPreview {
-    param(
-        [Parameter(Mandatory = $true)][string]$Raw,
-        [string]$Filename = 'PTA paste'
-    )
-
+    param([string]$Raw, [string]$Filename = 'PTA paste')
     $parsed = ConvertFrom-PtaText $Raw
     return @{
-        type = 'pta'
-        parser_version = '2.0.0-bulk'
-        total_rows = $parsed.total_rows
-        valid_rows = $parsed.valid_rows
-        warnings = @($parsed.warnings)
-        errors = @($parsed.errors)
-        sample = @($parsed.sample)
-        hash = $parsed.hash
-        filename = $Filename
-        parse_ms = $parsed.parse_ms
+        type = 'pta'; parser_version = '2.0.0-bulk'; total_rows = $parsed.total_rows; valid_rows = $parsed.valid_rows;
+        warnings = @($parsed.warnings); errors = @($parsed.errors); sample = @($parsed.sample); hash = $parsed.hash;
+        filename = $Filename; parse_ms = $parsed.parse_ms
     }
 }
 
 function Import-PtaBulk {
-    param(
-        [Parameter(Mandatory = $true)][string]$Raw,
-        [string]$Filename = 'PTA paste'
-    )
-
+    param([string]$Raw, [string]$Filename = 'PTA paste')
     $totalWatch = [Diagnostics.Stopwatch]::StartNew()
     $parsed = ConvertFrom-PtaText $Raw
     if ($parsed.errors.Count -gt 0) { throw ($parsed.errors -join '; ') }
-
     $hashSql = ConvertTo-SqlLiteral $parsed.hash
-    $existing = @(Invoke-Sql "SELECT id FROM import_batches WHERE source_hash=$hashSql LIMIT 1;" -Json)
-    if ($existing.Count -gt 0) { throw 'Duplicate import: this exact source was already committed.' }
-
-    $summary = @{
-        type = 'pta'
-        parser_version = '2.0.0-bulk'
-        total_rows = $parsed.total_rows
-        valid_rows = $parsed.valid_rows
-        warnings = @($parsed.warnings)
-        errors = @()
-        hash = $parsed.hash
-        filename = $Filename
-        parse_ms = $parsed.parse_ms
+    if (@(Invoke-Sql "SELECT id FROM import_batches WHERE source_hash=$hashSql LIMIT 1;" -Json).Count -gt 0) {
+        throw 'Duplicate import: this exact source was already committed.'
     }
 
+    $summary = @{
+        type = 'pta'; parser_version = '2.0.0-bulk'; total_rows = $parsed.total_rows; valid_rows = $parsed.valid_rows;
+        warnings = @($parsed.warnings); errors = @(); hash = $parsed.hash; filename = $Filename; parse_ms = $parsed.parse_ms
+    }
     $summarySql = ConvertTo-SqlLiteral ($summary | ConvertTo-Json -Compress -Depth 6)
     $rawSql = ConvertTo-SqlLiteral $Raw
     $filenameSql = ConvertTo-SqlLiteral $Filename
-    $warningCount = $parsed.warnings.Count
-
     $sql = [Text.StringBuilder]::new([Math]::Max(32768, $parsed.valid_rows * 420))
     [void]$sql.AppendLine('BEGIN IMMEDIATE;')
-    [void]$sql.AppendLine(
-        "INSERT INTO import_batches(source_hash,import_type,parser_version,filename,source_type,raw_source,row_count,warning_count,error_count,summary_json) " +
-        "VALUES($hashSql,'pta','2.0.0-bulk',$filenameSql,'user',$rawSql,$($parsed.valid_rows),$warningCount,0,$summarySql);"
-    )
-
+    [void]$sql.AppendLine("INSERT INTO import_batches(source_hash,import_type,parser_version,filename,source_type,raw_source,row_count,warning_count,error_count,summary_json) VALUES($hashSql,'pta','2.0.0-bulk',$filenameSql,'user',$rawSql,$($parsed.valid_rows),$($parsed.warnings.Count),0,$summarySql);")
     [void]$sql.AppendLine(@'
 CREATE TEMP TABLE temp_waa_pta_stage(
-  row_no INTEGER NOT NULL,
-  truck TEXT,
-  division TEXT,
-  driver_code TEXT,
-  pta_raw TEXT,
-  pta_at TEXT,
-  sentinel INTEGER NOT NULL,
-  operational_status TEXT,
-  planning_status TEXT,
-  operational_note TEXT,
-  driver_type TEXT,
-  location TEXT,
-  source_numeric_1 TEXT,
-  source_numeric_2 TEXT
+ row_no INTEGER NOT NULL, truck TEXT, division TEXT, driver_code TEXT, pta_raw TEXT, pta_at TEXT,
+ sentinel INTEGER NOT NULL, operational_status TEXT, planning_status TEXT, operational_note TEXT,
+ driver_type TEXT, location TEXT, source_numeric_1 TEXT, source_numeric_2 TEXT
 );
 '@)
-
     [void]$sql.Append('INSERT INTO temp_waa_pta_stage VALUES ')
     $firstTuple = $true
     $rowNumber = 0
@@ -429,15 +294,8 @@ CREATE TEMP TABLE temp_waa_pta_stage(
         $ptaAt = Parse-Date $rawPta
         $driverCode = $row[2]
         $status = $row[4]
-        $sentinel = if ([string]::IsNullOrWhiteSpace($driverCode) -and
-            $rawPta -match '^12/31/26\s+23:59$' -and
-            $status -match '^(Shop|TruckPrep|Reserved|ClaimsHold|Clean_QA|GoodToGo)$') { 1 } else { 0 }
-
-        $values = @(
-            $rowNumber, $row[0], $row[1], $driverCode, $rawPta, $ptaAt, $sentinel,
-            $status, $row[5], $row[6], $row[7], $row[8], $row[9], $row[10]
-        ) | ForEach-Object { ConvertTo-SqlLiteral $_ }
-
+        $sentinel = if ([string]::IsNullOrWhiteSpace($driverCode) -and $rawPta -match '^12/31/26\s+23:59$' -and $status -match '^(Shop|TruckPrep|Reserved|ClaimsHold|Clean_QA|GoodToGo)$') { 1 } else { 0 }
+        $values = @($rowNumber,$row[0],$row[1],$driverCode,$rawPta,$ptaAt,$sentinel,$status,$row[5],$row[6],$row[7],$row[8],$row[9],$row[10]) | ForEach-Object { ConvertTo-SqlLiteral $_ }
         if (-not $firstTuple) { [void]$sql.Append(',') }
         $firstTuple = $false
         [void]$sql.Append('(' + ($values -join ',') + ')')
@@ -449,117 +307,55 @@ INSERT INTO driver_aliases(driver_id,alias_type,alias_value,confirmed)
 SELECT existing.driver_id,'pta_code',codes.driver_code,0
 FROM (SELECT DISTINCT driver_code FROM temp_waa_pta_stage WHERE trim(driver_code)<>'') codes
 JOIN (
-  SELECT alias_value,MIN(driver_id) driver_id
-  FROM driver_aliases
-  GROUP BY alias_value COLLATE NOCASE
-  HAVING COUNT(DISTINCT driver_id)=1
+  SELECT alias_value,MIN(driver_id) driver_id FROM driver_aliases
+  GROUP BY alias_value COLLATE NOCASE HAVING COUNT(DISTINCT driver_id)=1
 ) existing ON existing.alias_value=codes.driver_code COLLATE NOCASE
-WHERE NOT EXISTS(
-  SELECT 1 FROM driver_aliases p
-  WHERE p.alias_type='pta_code' AND p.alias_value=codes.driver_code COLLATE NOCASE
-)
+WHERE NOT EXISTS(SELECT 1 FROM driver_aliases p WHERE p.alias_type='pta_code' AND p.alias_value=codes.driver_code COLLATE NOCASE)
 ON CONFLICT(alias_type,alias_value) DO NOTHING;
 
 INSERT INTO drivers(full_name,pta_code)
 SELECT codes.driver_code,codes.driver_code
 FROM (SELECT DISTINCT driver_code FROM temp_waa_pta_stage WHERE trim(driver_code)<>'') codes
-WHERE NOT EXISTS(
-  SELECT 1 FROM driver_aliases p
-  WHERE p.alias_type='pta_code' AND p.alias_value=codes.driver_code COLLATE NOCASE
-)
-AND NOT EXISTS(
-  SELECT 1 FROM driver_aliases a
-  WHERE a.alias_value=codes.driver_code COLLATE NOCASE
-)
-AND NOT EXISTS(
-  SELECT 1 FROM drivers d
-  WHERE d.pta_code=codes.driver_code COLLATE NOCASE
-);
+WHERE NOT EXISTS(SELECT 1 FROM driver_aliases p WHERE p.alias_type='pta_code' AND p.alias_value=codes.driver_code COLLATE NOCASE)
+AND NOT EXISTS(SELECT 1 FROM driver_aliases a WHERE a.alias_value=codes.driver_code COLLATE NOCASE)
+AND NOT EXISTS(SELECT 1 FROM drivers d WHERE d.pta_code=codes.driver_code COLLATE NOCASE);
 
 INSERT INTO driver_aliases(driver_id,alias_type,alias_value,confirmed)
 SELECT d.id,'pta_code',codes.driver_code,0
 FROM (SELECT DISTINCT driver_code FROM temp_waa_pta_stage WHERE trim(driver_code)<>'') codes
 JOIN drivers d ON d.pta_code=codes.driver_code COLLATE NOCASE
-WHERE NOT EXISTS(
-  SELECT 1 FROM driver_aliases p
-  WHERE p.alias_type='pta_code' AND p.alias_value=codes.driver_code COLLATE NOCASE
-)
+WHERE NOT EXISTS(SELECT 1 FROM driver_aliases p WHERE p.alias_type='pta_code' AND p.alias_value=codes.driver_code COLLATE NOCASE)
 ON CONFLICT(alias_type,alias_value) DO NOTHING;
 '@)
 
-    [void]$sql.AppendLine(
-        "INSERT INTO identity_issues(import_batch_id,alias_type,alias_value,issue_type,detail) " +
-        "SELECT (SELECT id FROM import_batches WHERE source_hash=$hashSql),'pta_code',codes.driver_code,'unmatched','PTA row not linked' " +
-        "FROM (SELECT DISTINCT driver_code FROM temp_waa_pta_stage WHERE trim(driver_code)<>'') codes " +
-        "WHERE NOT EXISTS(SELECT 1 FROM driver_aliases p WHERE p.alias_type='pta_code' AND p.alias_value=codes.driver_code COLLATE NOCASE);"
-    )
-
-    [void]$sql.AppendLine(
-        "INSERT INTO pta_observations(" +
-        "driver_id,truck,division,driver_code,pta_raw,pta_at,actionable,operational_status,planning_status,operational_note,driver_type,location,source_numeric_1,source_numeric_2,source,import_batch_id) " +
-        "SELECT " +
-        "(SELECT p.driver_id FROM driver_aliases p WHERE p.alias_type='pta_code' AND p.alias_value=s.driver_code COLLATE NOCASE LIMIT 1)," +
-        "s.truck,s.division,s.driver_code,s.pta_raw,s.pta_at," +
-        "CASE WHEN s.sentinel=1 THEN 0 WHEN trim(coalesce(s.driver_code,''))='' THEN 0 " +
-        "WHEN EXISTS(SELECT 1 FROM driver_aliases p WHERE p.alias_type='pta_code' AND p.alias_value=s.driver_code COLLATE NOCASE) THEN 1 ELSE 0 END," +
-        "s.operational_status,s.planning_status,s.operational_note,s.driver_type,s.location,s.source_numeric_1,s.source_numeric_2,'import'," +
-        "(SELECT id FROM import_batches WHERE source_hash=$hashSql) " +
-        "FROM temp_waa_pta_stage s ORDER BY s.row_no;"
-    )
-
-    [void]$sql.AppendLine(
-        "INSERT INTO truck_history(driver_id,truck,observed_at,import_batch_id,source) " +
-        "SELECT p.driver_id,s.truck,CURRENT_TIMESTAMP,(SELECT id FROM import_batches WHERE source_hash=$hashSql),'pta' " +
-        "FROM temp_waa_pta_stage s " +
-        "JOIN driver_aliases p ON p.alias_type='pta_code' AND p.alias_value=s.driver_code COLLATE NOCASE " +
-        "WHERE trim(coalesce(s.driver_code,''))<>'' ORDER BY s.row_no;"
-    )
-
-    $auditSql = ConvertTo-SqlLiteral (@{ type = 'pta'; rows = $parsed.valid_rows; parser = '2.0.0-bulk' } | ConvertTo-Json -Compress)
-    [void]$sql.AppendLine(
-        "INSERT INTO audit_history(action,entity_type,entity_id,detail_json) VALUES(" +
-        "'import_committed','import_batch',(SELECT id FROM import_batches WHERE source_hash=$hashSql),$auditSql);"
-    )
+    [void]$sql.AppendLine("INSERT INTO identity_issues(import_batch_id,alias_type,alias_value,issue_type,detail) SELECT (SELECT id FROM import_batches WHERE source_hash=$hashSql),'pta_code',codes.driver_code,'unmatched','PTA row not linked' FROM (SELECT DISTINCT driver_code FROM temp_waa_pta_stage WHERE trim(driver_code)<>'') codes WHERE NOT EXISTS(SELECT 1 FROM driver_aliases p WHERE p.alias_type='pta_code' AND p.alias_value=codes.driver_code COLLATE NOCASE);")
+    [void]$sql.AppendLine("INSERT INTO pta_observations(driver_id,truck,division,driver_code,pta_raw,pta_at,actionable,operational_status,planning_status,operational_note,driver_type,location,source_numeric_1,source_numeric_2,source,import_batch_id) SELECT (SELECT p.driver_id FROM driver_aliases p WHERE p.alias_type='pta_code' AND p.alias_value=s.driver_code COLLATE NOCASE LIMIT 1),s.truck,s.division,s.driver_code,s.pta_raw,s.pta_at,CASE WHEN s.sentinel=1 THEN 0 WHEN trim(coalesce(s.driver_code,''))='' THEN 0 WHEN EXISTS(SELECT 1 FROM driver_aliases p WHERE p.alias_type='pta_code' AND p.alias_value=s.driver_code COLLATE NOCASE) THEN 1 ELSE 0 END,s.operational_status,s.planning_status,s.operational_note,s.driver_type,s.location,s.source_numeric_1,s.source_numeric_2,'import',(SELECT id FROM import_batches WHERE source_hash=$hashSql) FROM temp_waa_pta_stage s ORDER BY s.row_no;")
+    [void]$sql.AppendLine("INSERT INTO truck_history(driver_id,truck,observed_at,import_batch_id,source) SELECT p.driver_id,s.truck,CURRENT_TIMESTAMP,(SELECT id FROM import_batches WHERE source_hash=$hashSql),'pta' FROM temp_waa_pta_stage s JOIN driver_aliases p ON p.alias_type='pta_code' AND p.alias_value=s.driver_code COLLATE NOCASE WHERE trim(coalesce(s.driver_code,''))<>'' ORDER BY s.row_no;")
+    $auditSql = ConvertTo-SqlLiteral (@{ type='pta'; rows=$parsed.valid_rows; parser='2.0.0-bulk' } | ConvertTo-Json -Compress)
+    [void]$sql.AppendLine("INSERT INTO audit_history(action,entity_type,entity_id,detail_json) VALUES('import_committed','import_batch',(SELECT id FROM import_batches WHERE source_hash=$hashSql),$auditSql);")
     [void]$sql.AppendLine('DROP TABLE temp_waa_pta_stage;')
     [void]$sql.AppendLine('COMMIT;')
     [void]$sql.AppendLine("SELECT id FROM import_batches WHERE source_hash=$hashSql;")
 
     $dbWatch = [Diagnostics.Stopwatch]::StartNew()
-    try {
-        $result = @(Invoke-Sql $sql.ToString() -Json -AllowWrite)
-    }
+    try { $result = @(Invoke-Sql $sql.ToString() -Json -AllowWrite) }
     catch {
-        if ($_.Exception.Message -match '(?i)UNIQUE constraint failed: import_batches.source_hash') {
-            throw 'Duplicate import: this exact source was already committed.'
-        }
+        if ($_.Exception.Message -match '(?i)UNIQUE constraint failed: import_batches.source_hash') { throw 'Duplicate import: this exact source was already committed.' }
         throw
     }
     finally {
         $dbWatch.Stop()
         $totalWatch.Stop()
     }
-
     if ($result.Count -eq 0) { throw 'PTA import committed but the import batch could not be verified.' }
-
     return @{
-        id = [int]$result[0].id
-        type = 'pta'
-        rows = $parsed.valid_rows
-        warnings = @($parsed.warnings)
-        parser_version = '2.0.0-bulk'
-        parse_ms = $parsed.parse_ms
-        db_ms = [math]::Round($dbWatch.Elapsed.TotalMilliseconds, 1)
-        total_ms = [math]::Round($totalWatch.Elapsed.TotalMilliseconds, 1)
+        id=[int]$result[0].id; type='pta'; rows=$parsed.valid_rows; warnings=@($parsed.warnings); parser_version='2.0.0-bulk';
+        parse_ms=$parsed.parse_ms; db_ms=[math]::Round($dbWatch.Elapsed.TotalMilliseconds,1); total_ms=[math]::Round($totalWatch.Elapsed.TotalMilliseconds,1)
     }
 }
 
 function Get-ImportPreview {
-    param(
-        [Parameter(Mandatory = $true)][string]$Raw,
-        [string]$Filename,
-        [string]$RequestedType = 'auto'
-    )
-
+    param([string]$Raw, [string]$Filename, [string]$RequestedType = 'auto')
     $type = $RequestedType
     if ($type -eq 'auto') {
         $firstLine = (($Raw -split "`r?`n", 2)[0])
@@ -567,8 +363,7 @@ function Get-ImportPreview {
         elseif ($firstLine -match 'Rolling 7 Day|Measure Names|Engine Time') { $type = 'idle' }
         else { $type = 'pta' }
     }
-
-    if ($type -eq 'pta') { return Get-PtaPreview -Raw $Raw -Filename $Filename }
+    if ($type -eq 'pta') { return Get-PtaPreview $Raw $Filename }
 
     $rows = Split-ImportRows $Raw
     $warnings = [Collections.Generic.List[string]]::new()
@@ -576,348 +371,198 @@ function Get-ImportPreview {
     $sample = [Collections.Generic.List[object]]::new()
     $valid = 0
     $needed = if ($type -eq 'bol') { 29 } else { 7 }
-
     foreach ($row in $rows) {
-        $joined = $row -join ' '
-        if ($joined -match '^(Unit Code|Order|Group by)') { continue }
-        if ($row.Count -lt $needed) {
-            [void]$warnings.Add("Row has $($row.Count) columns; expected $needed")
-            continue
-        }
+        if (($row -join ' ') -match '^(Unit Code|Order|Group by)') { continue }
+        if ($row.Count -lt $needed) { [void]$warnings.Add("Row has $($row.Count) columns; expected $needed"); continue }
         $valid++
         if ($sample.Count -lt 8) { [void]$sample.Add($row) }
     }
-
     if ($valid -eq 0) { [void]$errors.Add('No valid data rows were detected.') }
-    return @{
-        type = $type
-        parser_version = '1.0.0'
-        total_rows = $rows.Count
-        valid_rows = $valid
-        warnings = @($warnings)
-        errors = @($errors)
-        sample = @($sample)
-        hash = Get-Sha256 $Raw
-        filename = $Filename
-    }
+    return @{ type=$type; parser_version='1.0.0'; total_rows=$rows.Count; valid_rows=$valid; warnings=@($warnings); errors=@($errors); sample=@($sample); hash=Get-Sha256 $Raw; filename=$Filename }
 }
 
 function Import-WaaData {
-    param(
-        [Parameter(Mandatory = $true)][string]$Raw,
-        [string]$Filename,
-        [string]$RequestedType = 'auto'
-    )
-
+    param([string]$Raw, [string]$Filename, [string]$RequestedType = 'auto')
     $preview = Get-ImportPreview $Raw $Filename $RequestedType
     if ($preview.errors.Count -gt 0) { throw ($preview.errors -join '; ') }
-    if ($preview.type -eq 'pta') { return Import-PtaBulk -Raw $Raw -Filename $Filename }
+    if ($preview.type -eq 'pta') { return Import-PtaBulk $Raw $Filename }
 
     $hashSql = ConvertTo-SqlLiteral $preview.hash
-    if ((Invoke-Sql "SELECT count(*) c FROM import_batches WHERE source_hash=$hashSql;" -Json)[0].c -gt 0) {
-        throw 'Duplicate import: this exact source was already committed.'
-    }
-
+    if ((Invoke-Sql "SELECT count(*) c FROM import_batches WHERE source_hash=$hashSql;" -Json)[0].c -gt 0) { throw 'Duplicate import: this exact source was already committed.' }
     $rows = Split-ImportRows $Raw
     $rawSql = ConvertTo-SqlLiteral $Raw
     $typeSql = ConvertTo-SqlLiteral $preview.type
     $fileSql = ConvertTo-SqlLiteral $Filename
     $summarySql = ConvertTo-SqlLiteral ($preview | ConvertTo-Json -Compress -Depth 8)
-    Invoke-Sql (
-        "BEGIN IMMEDIATE; " +
-        "INSERT INTO import_batches(source_hash,import_type,parser_version,filename,source_type,raw_source,row_count,warning_count,error_count,summary_json) " +
-        "VALUES($hashSql,$typeSql,'1.0.0',$fileSql,'user',$rawSql,$($preview.valid_rows),$($preview.warnings.Count),0,$summarySql); " +
-        "COMMIT;"
-    ) -AllowWrite | Out-Null
+    Invoke-Sql "BEGIN IMMEDIATE; INSERT INTO import_batches(source_hash,import_type,parser_version,filename,source_type,raw_source,row_count,warning_count,error_count,summary_json) VALUES($hashSql,$typeSql,'1.0.0',$fileSql,'user',$rawSql,$($preview.valid_rows),$($preview.warnings.Count),0,$summarySql); COMMIT;" -AllowWrite | Out-Null
     $batchId = [int](Invoke-Sql 'SELECT max(id) FROM import_batches;')
-
     try {
         foreach ($row in $rows) {
             if (($row -join ' ') -match '^(Unit Code|Order)' -or ($row -join '') -match '^[-: ]+$') { continue }
-
             if ($preview.type -eq 'idle' -and $row.Count -ge 7) {
                 $header = $rows[0]
                 $map = @{}
-                for ($i = 0; $i -lt $header.Count; $i++) { $map[$header[$i].Trim()] = $i }
+                for ($i=0; $i -lt $header.Count; $i++) { $map[$header[$i].Trim()] = $i }
                 if (-not $map.ContainsKey('Measure Names') -or $row[$map['Measure Names']] -ne 'Idle %') { continue }
-
-                $driverText = $row[$map['Group by  (copy)']].Trim()
-                $parts = $driverText -split ' ', 2
+                $parts = $row[$map['Group by  (copy)']].Trim() -split ' ',2
                 if ($parts.Count -lt 2) { continue }
                 $driver = Find-Driver 'dispatch_code' $parts[0] $parts[1]
                 $start = Parse-Date $row[$map['Rolling 7 Day Start Date']]
                 $end = Parse-Date $row[$map['Week Start Date']]
-                $engine = 0.0
-                $idle = 0.0
-                if (-not [double]::TryParse($row[$map['[Rolling 7 Day Engine Time]/60']], [ref]$engine) -or
-                    -not [double]::TryParse($row[$map['[Rolling 7 Day Idle Time]/60']], [ref]$idle)) {
-                    throw 'Invalid idle hours'
-                }
-                $values = @($driver, $row[$map['Unit Code']], $start, $end, $engine, $idle, $batchId) |
-                    ForEach-Object { ConvertTo-SqlLiteral $_ }
+                $engine=0.0; $idle=0.0
+                if (-not [double]::TryParse($row[$map['[Rolling 7 Day Engine Time]/60']],[ref]$engine) -or -not [double]::TryParse($row[$map['[Rolling 7 Day Idle Time]/60']],[ref]$idle)) { throw 'Invalid idle hours' }
+                $values = @($driver,$row[$map['Unit Code']],$start,$end,$engine,$idle,$batchId) | ForEach-Object { ConvertTo-SqlLiteral $_ }
                 Invoke-Sql "INSERT INTO idle_periods(driver_id,truck,period_start,period_end,engine_hours,idle_hours,import_batch_id) VALUES($($values -join ','));" -AllowWrite | Out-Null
             }
             elseif ($preview.type -eq 'bol' -and $row.Count -ge 29) {
                 $header = $rows[0]
                 $map = @{}
-                for ($i = 0; $i -lt $header.Count; $i++) { $map[$header[$i].Trim()] = $i }
-                if ($map.ContainsKey('Last Dispatch Driver cd')) {
-                    $code = $row[$map['Last Dispatch Driver cd']]
-                    $name = $row[$map['Last Dispatch Driver nm']]
-                }
-                else {
-                    $code = $row[27]
-                    $name = $row[28]
-                }
+                for ($i=0; $i -lt $header.Count; $i++) { $map[$header[$i].Trim()] = $i }
+                if ($map.ContainsKey('Last Dispatch Driver cd')) { $code=$row[$map['Last Dispatch Driver cd']]; $name=$row[$map['Last Dispatch Driver nm']] }
+                else { $code=$row[27]; $name=$row[28] }
                 $driver = Find-Driver 'dispatch_code' $code $name
-                $order = $row[0]
-                $date = if ($map.ContainsKey('Empty Call Date')) { $row[$map['Empty Call Date']] } else { $row[1] }
-                $origin = if ($map.ContainsKey('Origin')) { $row[$map['Origin']] } else { $row[2] }
-                $destination = if ($map.ContainsKey('Destination')) { $row[$map['Destination']] } else { $row[3] }
-                $rawJson = ConvertTo-SqlLiteral ($row | ConvertTo-Json -Compress)
-                $values = @($driver, $order, (Parse-Date $date), $origin, $destination, $rawJson, $batchId) |
-                    ForEach-Object { ConvertTo-SqlLiteral $_ }
+                $order=$row[0]
+                $date=if($map.ContainsKey('Empty Call Date')){$row[$map['Empty Call Date']]}else{$row[1]}
+                $origin=if($map.ContainsKey('Origin')){$row[$map['Origin']]}else{$row[2]}
+                $destination=if($map.ContainsKey('Destination')){$row[$map['Destination']]}else{$row[3]}
+                $rawJson=ConvertTo-SqlLiteral ($row | ConvertTo-Json -Compress)
+                $values=@($driver,$order,(Parse-Date $date),$origin,$destination,$rawJson,$batchId) | ForEach-Object { ConvertTo-SqlLiteral $_ }
                 Invoke-Sql "INSERT INTO missing_bols(driver_id,order_number,empty_call_date,origin,destination,raw_fields_json,import_batch_id) VALUES($($values -join ','));" -AllowWrite | Out-Null
             }
         }
     }
-    catch {
-        Invoke-Sql "DELETE FROM import_batches WHERE id=$batchId;" -AllowWrite | Out-Null
-        throw
-    }
-
-    Add-Audit 'import_committed' 'import_batch' $batchId @{ type = $preview.type; rows = $preview.valid_rows }
-    return @{ id = $batchId; type = $preview.type; rows = $preview.valid_rows; warnings = $preview.warnings }
+    catch { Invoke-Sql "DELETE FROM import_batches WHERE id=$batchId;" -AllowWrite | Out-Null; throw }
+    Add-Audit 'import_committed' 'import_batch' $batchId @{type=$preview.type;rows=$preview.valid_rows}
+    return @{id=$batchId;type=$preview.type;rows=$preview.valid_rows;warnings=$preview.warnings}
 }
 
 function Get-Dashboard {
-    $driverSql = @'
-WITH latest AS (
-  SELECT driver_id,max(period_end) e FROM idle_periods GROUP BY driver_id
-),
-s AS (
-  SELECT i.*,CASE WHEN i.engine_hours=0 THEN NULL ELSE round(i.idle_hours*100.0/i.engine_hours,2) END p
-  FROM idle_periods i JOIN latest l ON l.driver_id=i.driver_id AND l.e=i.period_end
-),
-ranked AS (
-  SELECT i.*,row_number() OVER(PARTITION BY driver_id ORDER BY period_end DESC) rn FROM idle_periods i
-),
-recent AS (
-  SELECT *,lag(period_end) OVER(PARTITION BY driver_id ORDER BY period_start) previous_end FROM ranked WHERE rn<=4
-),
-d28 AS (
-  SELECT driver_id,sum(engine_hours) e,sum(idle_hours) i,count(*) n,
-         sum(CASE WHEN previous_end IS NOT NULL AND period_start<=previous_end THEN 1 ELSE 0 END) overlaps
-  FROM recent GROUP BY driver_id
-)
+    $sql = @'
+WITH latest AS (SELECT driver_id,max(period_end) e FROM idle_periods GROUP BY driver_id),
+s AS (SELECT i.*,CASE WHEN i.engine_hours=0 THEN NULL ELSE round(i.idle_hours*100.0/i.engine_hours,2) END p FROM idle_periods i JOIN latest l ON l.driver_id=i.driver_id AND l.e=i.period_end),
+ranked AS (SELECT i.*,row_number() OVER(PARTITION BY driver_id ORDER BY period_end DESC) rn FROM idle_periods i),
+recent AS (SELECT *,lag(period_end) OVER(PARTITION BY driver_id ORDER BY period_start) previous_end FROM ranked WHERE rn<=4),
+d28 AS (SELECT driver_id,sum(engine_hours) e,sum(idle_hours) i,count(*) n,sum(CASE WHEN previous_end IS NOT NULL AND period_start<=previous_end THEN 1 ELSE 0 END) overlaps FROM recent GROUP BY driver_id)
 SELECT d.id,d.full_name,d.pta_code,s.truck,s.engine_hours engine7,s.idle_hours idle7,s.p p7,
-       CASE WHEN d28.e=0 OR d28.n<4 OR d28.overlaps>0 THEN NULL ELSE round(d28.i*100.0/d28.e,2) END p28,
-       d28.e engine28,d28.n weeks28,
-       CASE WHEN d28.n=4 AND d28.overlaps=0 THEN 'Complete' ELSE 'Partial Data' END coverage28
+CASE WHEN d28.e=0 OR d28.n<4 OR d28.overlaps>0 THEN NULL ELSE round(d28.i*100.0/d28.e,2) END p28,
+d28.e engine28,d28.n weeks28,CASE WHEN d28.n=4 AND d28.overlaps=0 THEN 'Complete' ELSE 'Partial Data' END coverage28
 FROM drivers d JOIN s ON s.driver_id=d.id LEFT JOIN d28 ON d28.driver_id=d.id;
 '@
-
-    $drivers = @(Invoke-Sql $driverSql -Json)
-    $history = @(Invoke-Sql "SELECT period_end,round(sum(idle_hours)*100.0/nullif(sum(engine_hours),0),2) p7 FROM idle_periods GROUP BY period_end ORDER BY period_end;" -Json)
-    $over = @($drivers | Where-Object { $null -ne $_.p7 -and [double]$_.p7 -gt 50 }).Count
-    $valid = @($drivers | Where-Object { $null -ne $_.p7 } | Sort-Object { [double]$_.p7 })
-
-    return @{
-        drivers = $drivers
-        heroes = @($valid | Select-Object -First 5)
-        training = @($valid | Sort-Object { [double]$_.p7 } -Descending | Select-Object -First 5)
-        over50 = $over
-        history7 = $history
-        history28 = $history
-    }
+    $drivers=@(Invoke-Sql $sql -Json)
+    $history=@(Invoke-Sql "SELECT period_end,round(sum(idle_hours)*100.0/nullif(sum(engine_hours),0),2) p7 FROM idle_periods GROUP BY period_end ORDER BY period_end;" -Json)
+    $over=@($drivers | Where-Object {$null -ne $_.p7 -and [double]$_.p7 -gt 50}).Count
+    $valid=@($drivers | Where-Object {$null -ne $_.p7} | Sort-Object {[double]$_.p7})
+    return @{drivers=$drivers;heroes=@($valid|Select-Object -First 5);training=@($valid|Sort-Object {[double]$_.p7} -Descending|Select-Object -First 5);over50=$over;history7=$history;history28=$history}
 }
 
 function Get-CurrentDrivers {
-    $sql = @'
-WITH p AS (
-  SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
-  FROM pta_observations WHERE driver_id IS NOT NULL
-),
-t AS (
-  SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM truck_history
-)
-SELECT d.id,d.full_name,d.pta_code,coalesce(p.truck,t.truck) truck,p.division,p.pta_at,p.pta_raw,p.actionable,
-       p.operational_status,p.planning_status,p.operational_note,p.driver_type,p.location,p.source,p.observed_at
-FROM drivers d
-LEFT JOIN p ON p.driver_id=d.id AND p.rn=1
-LEFT JOIN t ON t.driver_id=d.id AND t.rn=1;
+    $sql=@'
+WITH p AS (SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM pta_observations WHERE driver_id IS NOT NULL),
+t AS (SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM truck_history)
+SELECT d.id,d.full_name,d.pta_code,coalesce(p.truck,t.truck) truck,p.division,p.pta_at,p.pta_raw,p.actionable,p.operational_status,p.planning_status,p.operational_note,p.driver_type,p.location,p.source,p.observed_at
+FROM drivers d LEFT JOIN p ON p.driver_id=d.id AND p.rn=1 LEFT JOIN t ON t.driver_id=d.id AND t.rn=1;
 '@
     return Invoke-Sql $sql -Json
 }
 
 function Get-DriverCard {
-    param([Parameter(Mandatory = $true)][int]$Id)
-
-    $driver = @(Get-CurrentDrivers | Where-Object { [int]$_.id -eq $Id }) | Select-Object -First 1
-    if (-not $driver) { throw 'Driver not found' }
-
-    $idle = @(Invoke-Sql "SELECT period_start,period_end,engine_hours,idle_hours,round(idle_hours*100.0/nullif(engine_hours,0),2) percent FROM idle_periods WHERE driver_id=$Id ORDER BY period_end DESC LIMIT 12;" -Json)
-    $bols = @(Invoke-Sql "SELECT * FROM missing_bols WHERE driver_id=$Id ORDER BY empty_call_date DESC;" -Json)
-    $work = @(Invoke-Sql "SELECT * FROM driver_work_items WHERE driver_id=$Id;" -Json)
-    $notes = @(Invoke-Sql "SELECT * FROM driver_notes WHERE driver_id=$Id ORDER BY created_at DESC;" -Json)
-    $reminders = @(Invoke-Sql "SELECT * FROM reminders WHERE driver_id=$Id ORDER BY completed_at,due_at;" -Json)
-    $timers = @(Invoke-Sql "SELECT * FROM timers WHERE driver_id=$Id ORDER BY completed_at,target_at;" -Json)
-    $audit = @(Invoke-Sql "SELECT * FROM audit_history WHERE entity_type='driver' AND entity_id='$Id' ORDER BY occurred_at DESC LIMIT 50;" -Json)
-
-    return @{
-        driver = $driver
-        idle = $idle
-        bols = $bols
-        work = if ($work.Count) { $work[0] } else { $null }
-        notes = $notes
-        reminders = $reminders
-        timers = $timers
-        audit = $audit
-    }
+    param([int]$Id)
+    $driver=@(Get-CurrentDrivers | Where-Object {[int]$_.id -eq $Id}) | Select-Object -First 1
+    if(-not $driver){throw 'Driver not found'}
+    $idle=@(Invoke-Sql "SELECT period_start,period_end,engine_hours,idle_hours,round(idle_hours*100.0/nullif(engine_hours,0),2) percent FROM idle_periods WHERE driver_id=$Id ORDER BY period_end DESC LIMIT 12;" -Json)
+    $bols=@(Invoke-Sql "SELECT * FROM missing_bols WHERE driver_id=$Id ORDER BY empty_call_date DESC;" -Json)
+    $work=@(Invoke-Sql "SELECT * FROM driver_work_items WHERE driver_id=$Id;" -Json)
+    $notes=@(Invoke-Sql "SELECT * FROM driver_notes WHERE driver_id=$Id ORDER BY created_at DESC;" -Json)
+    $reminders=@(Invoke-Sql "SELECT * FROM reminders WHERE driver_id=$Id ORDER BY completed_at,due_at;" -Json)
+    $timers=@(Invoke-Sql "SELECT * FROM timers WHERE driver_id=$Id ORDER BY completed_at,target_at;" -Json)
+    $audit=@(Invoke-Sql "SELECT * FROM audit_history WHERE entity_type='driver' AND entity_id='$Id' ORDER BY occurred_at DESC LIMIT 50;" -Json)
+    return @{driver=$driver;idle=$idle;bols=$bols;work=if($work.Count){$work[0]}else{$null};notes=$notes;reminders=$reminders;timers=$timers;audit=$audit}
 }
 
 function Save-DriverAction {
-    param(
-        [Parameter(Mandatory = $true)][int]$Id,
-        [Parameter(Mandatory = $true)][hashtable]$Body
-    )
-
-    $action = [string]$Body.action
-    switch ($action) {
+    param([int]$Id,[hashtable]$Body)
+    $action=[string]$Body.action
+    switch($action){
         'pta' {
-            $pta = Parse-Date ([string]$Body.value)
-            if (-not $pta) { throw 'Invalid PTA date' }
-            $current = Get-CurrentDrivers | Where-Object { [int]$_.id -eq $Id } | Select-Object -First 1
-            $values = @(
-                $Id,$current.truck,$current.division,$current.pta_code,$Body.value,$pta,
-                $current.operational_status,$current.planning_status,$current.operational_note,$current.driver_type,$current.location
-            ) | ForEach-Object { ConvertTo-SqlLiteral $_ }
-            Invoke-Sql "INSERT INTO pta_observations(driver_id,truck,division,driver_code,pta_raw,pta_at,actionable,operational_status,planning_status,operational_note,driver_type,location,source) VALUES($($values[0..5]-join ','),1,$($values[6..10]-join ','),'manual');" -AllowWrite | Out-Null
+            $pta=Parse-Date ([string]$Body.value); if(!$pta){throw 'Invalid PTA date'}
+            $current=Get-CurrentDrivers|Where-Object{[int]$_.id-eq$Id}|Select-Object -First 1
+            $values=@($Id,$current.truck,$current.division,$current.pta_code,$Body.value,$pta,$current.operational_status,$current.planning_status,$current.operational_note,$current.driver_type,$current.location)|ForEach-Object{ConvertTo-SqlLiteral $_}
+            Invoke-Sql "INSERT INTO pta_observations(driver_id,truck,division,driver_code,pta_raw,pta_at,actionable,operational_status,planning_status,operational_note,driver_type,location,source) VALUES($($values[0..5]-join ','),1,$($values[6..10]-join ','),'manual');" -AllowWrite|Out-Null
         }
-        'note' {
-            $textSql = ConvertTo-SqlLiteral $Body.text
-            Invoke-Sql "INSERT INTO driver_notes(driver_id,note) VALUES($Id,$textSql);" -AllowWrite | Out-Null
-        }
-        'reminder' {
-            $textSql = ConvertTo-SqlLiteral $Body.text
-            $dateSql = ConvertTo-SqlLiteral (Parse-Date $Body.due_at)
-            Invoke-Sql "INSERT INTO reminders(driver_id,text,due_at) VALUES($Id,$textSql,$dateSql);" -AllowWrite | Out-Null
-        }
-        'timer' {
-            $labelSql = ConvertTo-SqlLiteral $Body.label
-            $dateSql = ConvertTo-SqlLiteral (Parse-Date $Body.target_at)
-            Invoke-Sql "INSERT INTO timers(driver_id,label,target_at) VALUES($Id,$labelSql,$dateSql);" -AllowWrite | Out-Null
-        }
-        'bol_mentioned' {
-            Invoke-Sql "UPDATE missing_bols SET mentioned_at=CASE WHEN mentioned_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite | Out-Null
-        }
-        'complete_reminder' {
-            Invoke-Sql "UPDATE reminders SET completed_at=CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite | Out-Null
-        }
-        'complete_timer' {
-            Invoke-Sql "UPDATE timers SET completed_at=CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite | Out-Null
-        }
+        'note' {$q=ConvertTo-SqlLiteral $Body.text;Invoke-Sql "INSERT INTO driver_notes(driver_id,note) VALUES($Id,$q);" -AllowWrite|Out-Null}
+        'reminder' {$t=ConvertTo-SqlLiteral $Body.text;$d=ConvertTo-SqlLiteral(Parse-Date $Body.due_at);Invoke-Sql "INSERT INTO reminders(driver_id,text,due_at) VALUES($Id,$t,$d);" -AllowWrite|Out-Null}
+        'timer' {$t=ConvertTo-SqlLiteral $Body.label;$d=ConvertTo-SqlLiteral(Parse-Date $Body.target_at);Invoke-Sql "INSERT INTO timers(driver_id,label,target_at) VALUES($Id,$t,$d);" -AllowWrite|Out-Null}
+        'bol_mentioned' {Invoke-Sql "UPDATE missing_bols SET mentioned_at=CASE WHEN mentioned_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
+        'complete_reminder' {Invoke-Sql "UPDATE reminders SET completed_at=CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
+        'complete_timer' {Invoke-Sql "UPDATE timers SET completed_at=CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
         default {
-            $allowed = @(
-                'home_checked','expected_work','home_status','home_reason','ontime_status','ontime_reason',
-                'preplan_reviewed','preplan_response','preplan_note','routing_checked','routing_status','routing_note',
-                'safety_note_id','safety_mentioned_at','include_transition','transition_note'
-            )
-            if ($allowed -notcontains $action) { throw 'Unknown action' }
-            $value = $Body.value
-            if ($action -eq 'safety_mentioned_at' -and $value) { $value = (Get-Date).ToUniversalTime().ToString('s') }
-            $valueSql = ConvertTo-SqlLiteral $value
-            Invoke-Sql "INSERT INTO driver_work_items(driver_id,$action) VALUES($Id,$valueSql) ON CONFLICT(driver_id) DO UPDATE SET $action=excluded.$action,updated_at=CURRENT_TIMESTAMP;" -AllowWrite | Out-Null
+            $allowed=@('home_checked','expected_work','home_status','home_reason','ontime_status','ontime_reason','preplan_reviewed','preplan_response','preplan_note','routing_checked','routing_status','routing_note','safety_note_id','safety_mentioned_at','include_transition','transition_note')
+            if($allowed -notcontains $action){throw 'Unknown action'}
+            $value=$Body.value
+            if($action -eq 'safety_mentioned_at' -and $value){$value=(Get-Date).ToUniversalTime().ToString('s')}
+            $q=ConvertTo-SqlLiteral $value
+            Invoke-Sql "INSERT INTO driver_work_items(driver_id,$action) VALUES($Id,$q) ON CONFLICT(driver_id) DO UPDATE SET $action=excluded.$action,updated_at=CURRENT_TIMESTAMP;" -AllowWrite|Out-Null
         }
     }
-
     Add-Audit $action 'driver' $Id $Body
     return Get-DriverCard $Id
 }
 
 function Get-Transition {
     param([switch]$Regenerate)
-
-    if ($Regenerate) {
-        $rows = @(Invoke-Sql @'
-WITH t AS (
-  SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM truck_history
-)
-SELECT t.truck,d.full_name,w.transition_note
-FROM driver_work_items w
-JOIN drivers d ON d.id=w.driver_id
-LEFT JOIN t ON t.driver_id=d.id AND t.rn=1
-WHERE w.include_transition=1
-ORDER BY CAST(t.truck AS INTEGER),t.truck;
-'@ -Json)
-        $lines = @("No Open ACE/ACI's") + @($rows | ForEach-Object { "$($_.truck) - $($_.full_name) : $($_.transition_note)" })
-        $body = $lines -join "`r`n"
-        $bodySql = ConvertTo-SqlLiteral $body
-        Invoke-Sql "UPDATE transition_drafts SET body=$bodySql,is_manual=0,updated_at=CURRENT_TIMESTAMP WHERE id=1;" -AllowWrite | Out-Null
-        Add-Audit 'transition_regenerated' 'transition' 1 @{ count = $rows.Count }
+    if($Regenerate){
+        $rows=@(Invoke-Sql "WITH t AS (SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM truck_history) SELECT t.truck,d.full_name,w.transition_note FROM driver_work_items w JOIN drivers d ON d.id=w.driver_id LEFT JOIN t ON t.driver_id=d.id AND t.rn=1 WHERE w.include_transition=1 ORDER BY CAST(t.truck AS INTEGER),t.truck;" -Json)
+        $lines=@("No Open ACE/ACI's")+@($rows|ForEach-Object{"$($_.truck) - $($_.full_name) : $($_.transition_note)"})
+        $body=$lines-join"`r`n";$q=ConvertTo-SqlLiteral $body
+        Invoke-Sql "UPDATE transition_drafts SET body=$q,is_manual=0,updated_at=CURRENT_TIMESTAMP WHERE id=1;" -AllowWrite|Out-Null
+        Add-Audit 'transition_regenerated' 'transition' 1 @{count=$rows.Count}
     }
-
     return (Invoke-Sql 'SELECT * FROM transition_drafts WHERE id=1;' -Json)[0]
 }
 
 function Save-Transition {
-    param([Parameter(Mandatory = $true)][string]$Body)
-
-    $bodySql = ConvertTo-SqlLiteral $Body
-    Invoke-Sql "UPDATE transition_drafts SET body=$bodySql,is_manual=1,updated_at=CURRENT_TIMESTAMP WHERE id=1;" -AllowWrite | Out-Null
+    param([string]$Body)
+    $q=ConvertTo-SqlLiteral $Body
+    Invoke-Sql "UPDATE transition_drafts SET body=$q,is_manual=1,updated_at=CURRENT_TIMESTAMP WHERE id=1;" -AllowWrite|Out-Null
     Add-Audit 'transition_saved' 'transition' 1 @{}
     return Get-Transition
 }
 
 function Get-DataQuality {
     return @{
-        issues = @(Invoke-Sql "SELECT * FROM identity_issues WHERE status='open' ORDER BY created_at DESC;" -Json)
-        imports = @(Invoke-Sql 'SELECT id,imported_at,import_type,filename,row_count,warning_count,error_count,source_hash FROM import_batches ORDER BY imported_at DESC;' -Json)
-        backups = @(
-            Get-ChildItem (Join-Path $script:DataRoot 'backups') -Filter '*.db' -ErrorAction SilentlyContinue |
-                Sort-Object LastWriteTime -Descending |
-                ForEach-Object { @{ name = $_.Name; size = $_.Length; created = $_.LastWriteTimeUtc.ToString('s') } }
-        )
-        integrity = (Invoke-Sql 'PRAGMA integrity_check;').Trim()
+        issues=@(Invoke-Sql "SELECT * FROM identity_issues WHERE status='open' ORDER BY created_at DESC;" -Json)
+        imports=@(Invoke-Sql 'SELECT id,imported_at,import_type,filename,row_count,warning_count,error_count,source_hash FROM import_batches ORDER BY imported_at DESC;' -Json)
+        backups=@(Get-ChildItem (Join-Path $script:DataRoot 'backups') -Filter '*.db' -ErrorAction SilentlyContinue|Sort-Object LastWriteTime -Descending|ForEach-Object{@{name=$_.Name;size=$_.Length;created=$_.LastWriteTimeUtc.ToString('s')}})
+        integrity=(Invoke-Sql 'PRAGMA integrity_check;').Trim()
     }
 }
 
 function Resolve-Identity {
-    param(
-        [Parameter(Mandatory = $true)][int]$IssueId,
-        [Parameter(Mandatory = $true)][int]$DriverId
-    )
-
-    $issue = (Invoke-Sql "SELECT * FROM identity_issues WHERE id=$IssueId AND status='open';" -Json)[0]
-    if (-not $issue) { throw 'Issue not found' }
-    $typeSql = ConvertTo-SqlLiteral $issue.alias_type
-    $valueSql = ConvertTo-SqlLiteral $issue.alias_value
-    Invoke-Sql "BEGIN;INSERT INTO driver_aliases(driver_id,alias_type,alias_value,confirmed) VALUES($DriverId,$typeSql,$valueSql,1) ON CONFLICT(alias_type,alias_value) DO UPDATE SET driver_id=excluded.driver_id,confirmed=1;UPDATE identity_issues SET status='resolved' WHERE id=$IssueId;COMMIT;" -AllowWrite | Out-Null
-    Add-Audit 'identity_linked' 'driver' $DriverId @{ issue = $IssueId }
-    return @{ ok = $true }
+    param([int]$IssueId,[int]$DriverId)
+    $issue=(Invoke-Sql "SELECT * FROM identity_issues WHERE id=$IssueId AND status='open';" -Json)[0]
+    if(!$issue){throw 'Issue not found'}
+    $t=ConvertTo-SqlLiteral $issue.alias_type;$v=ConvertTo-SqlLiteral $issue.alias_value
+    Invoke-Sql "BEGIN;INSERT INTO driver_aliases(driver_id,alias_type,alias_value,confirmed) VALUES($DriverId,$t,$v,1) ON CONFLICT(alias_type,alias_value) DO UPDATE SET driver_id=excluded.driver_id,confirmed=1;UPDATE identity_issues SET status='resolved' WHERE id=$IssueId;COMMIT;" -AllowWrite|Out-Null
+    Add-Audit 'identity_linked' 'driver' $DriverId @{issue=$IssueId}
+    return @{ok=$true}
 }
 
 function Get-SafetyNote {
-    param([int]$Except = 0)
-
-    $rows = @(Invoke-Sql "SELECT id,note FROM safety_notes WHERE active=1 AND id<>$Except ORDER BY random() LIMIT 1;" -Json)
-    if ($rows.Count -eq 0) { $rows = @(Invoke-Sql 'SELECT id,note FROM safety_notes WHERE active=1 LIMIT 1;' -Json) }
+    param([int]$Except=0)
+    $rows=@(Invoke-Sql "SELECT id,note FROM safety_notes WHERE active=1 AND id<>$Except ORDER BY random() LIMIT 1;" -Json)
+    if(!$rows.Count){$rows=@(Invoke-Sql 'SELECT id,note FROM safety_notes WHERE active=1 LIMIT 1;' -Json)}
     return $rows[0]
 }
 
 function Restore-Waa {
-    param([Parameter(Mandatory = $true)][string]$Name)
-
-    if ($Name -ne [IO.Path]::GetFileName($Name)) { throw 'Invalid backup name' }
-    $path = Join-Path (Join-Path $script:DataRoot 'backups') $Name
-    if (-not (Test-Path -LiteralPath $path)) { throw 'Backup not found' }
-    Backup-Waa 'pre-restore' | Out-Null
-    $safePath = $path.Replace("'", "''")
-    Invoke-Sql ".restore '$safePath'" | Out-Null
-    return @{ ok = $true }
+    param([string]$Name)
+    if($Name -ne [IO.Path]::GetFileName($Name)){throw 'Invalid backup name'}
+    $path=Join-Path (Join-Path $script:DataRoot 'backups') $Name
+    if(!(Test-Path -LiteralPath $path)){throw 'Backup not found'}
+    Backup-Waa 'pre-restore'|Out-Null
+    $safe=$path.Replace("'","''")
+    Invoke-Sql ".restore '$safe'"|Out-Null
+    return @{ok=$true}
 }
 
-Export-ModuleMember -Function `
-    Initialize-Waa,Invoke-Sql,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,` 
-    Get-DriverCard,Save-DriverAction,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,` 
-    Backup-Waa,Restore-Waa
+Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-DriverCard,Save-DriverAction,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa
