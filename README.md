@@ -2,7 +2,7 @@
 
 WAA is a fully local, driver-centered operations console for PTA, workflow, rolling idle, Missing BOL, transition, reminders, notes, safety coaching, audit history, imports, data quality, and backups.
 
-The **Notes & Reminders** tab is a separate driver-specific organizer: choose the canonical driver, capture a note or dated reminder, search across the fleet, and complete reminders without opening the call flow. The **Daily Review** tab turns WAA's audit trail into a readable day-by-day record with local-date and driver filters and direct links back to each Driver Work Card.
+The **Notes & Reminders** tab is a separate driver-specific organizer: choose the canonical driver, capture or delete a note or dated reminder, search across the fleet, and complete reminders without opening the call flow. The same items can be deleted from the Driver Work Card. The **Daily Review** tab turns WAA's audit trail into a readable day-by-day record with local-date and driver filters, direct links back to each Driver Work Card, and explicit deletion of unwanted review records. Deleting a review record removes the history entry; it does not reverse the underlying operational action.
 
 ## Launch on the company Windows PC
 
@@ -67,7 +67,7 @@ The UI uses the same neon operations-console design throughout the dashboard, qu
 
 The server binds `System.Net.IPAddress.Loopback` only. Static paths are canonicalized, imported content is data only, SQL values are escaped before statement construction, CORS is loopback-only, and a strict CSP blocks outside scripts, styles, frames, and connections. SQLite enables foreign keys, WAL, busy timeout, indexes and transactions. Startup performs an integrity check and enters read-only recovery mode on failure.
 
-Hot screens use purpose-built indexed queries. The complete Driver Work Card is returned by one SQLite JSON query instead of a chain of database-process launches. Browser routes use short-lived in-memory caching with explicit mutation invalidation, cancellable reads, delegated interaction handlers, render-once table filtering, section-level card updates, and contained off-screen layout. Static assets are held in memory by the loopback server and receive a short cache lifetime; API responses remain `no-store`.
+Hot screens use purpose-built indexed queries. The complete Driver Work Card is returned by one SQLite JSON query instead of a chain of database-process launches. Browser routes use short-lived in-memory caching with explicit mutation invalidation, cancellable reads, delegated interaction handlers, render-once table filtering, section-level card updates, and contained off-screen layout. Driver Work Card listeners have an explicit lifecycle: reopening or refreshing a card aborts the prior listener scope before binding the new one, preventing duplicate saves. Save controls also lock while their request is active. Static assets are versioned and held in memory by the loopback server; HTML revalidates so an upgrade cannot leave stale listener code in the browser, while API responses remain `no-store`.
 
 ## Run the tests
 

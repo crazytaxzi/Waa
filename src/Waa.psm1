@@ -597,6 +597,8 @@ function Save-DriverAction {
         }
         'note' {$text=([string]$Body.text).Trim();if(!$text){throw 'Note text is required'};$q=ConvertTo-SqlLiteral $text;Invoke-Sql "INSERT INTO driver_notes(driver_id,note) VALUES($Id,$q);" -AllowWrite|Out-Null}
         'reminder' {$text=([string]$Body.text).Trim();$due=Parse-Date $Body.due_at;if (-not $text -or -not $due) {throw 'Reminder text and a valid due time are required'};$t=ConvertTo-SqlLiteral $text;$d=ConvertTo-SqlLiteral $due;Invoke-Sql "INSERT INTO reminders(driver_id,text,due_at) VALUES($Id,$t,$d);" -AllowWrite|Out-Null}
+        'delete_note' {$item=[int]$Body.item_id;$changed=[int](Invoke-Sql "DELETE FROM driver_notes WHERE id=$item AND driver_id=$Id;SELECT changes();" -AllowWrite);if($changed-ne1){throw 'Driver note not found'}}
+        'delete_reminder' {$item=[int]$Body.item_id;$changed=[int](Invoke-Sql "DELETE FROM reminders WHERE id=$item AND driver_id=$Id;SELECT changes();" -AllowWrite);if($changed-ne1){throw 'Driver reminder not found'}}
         'timer' {$t=ConvertTo-SqlLiteral $Body.label;$d=ConvertTo-SqlLiteral(Parse-Date $Body.target_at);Invoke-Sql "INSERT INTO timers(driver_id,label,target_at) VALUES($Id,$t,$d);" -AllowWrite|Out-Null}
         'bol_mentioned' {Invoke-Sql "UPDATE missing_bols SET mentioned_at=CASE WHEN mentioned_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
         'complete_reminder' {Invoke-Sql "UPDATE reminders SET completed_at=CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
@@ -650,6 +652,18 @@ WHERE a.occurred_at >= $start AND a.occurred_at < $end
 ORDER BY a.occurred_at DESC,a.id DESC;
 "@
     return Invoke-Sql $sql -Json
+}
+
+function Remove-DailyActivity {
+    param([int]$ActivityId)
+    if($ActivityId-le0){throw 'Invalid activity record'}
+    $rows=@(Invoke-Sql "SELECT id,entity_type,entity_id FROM audit_history WHERE id=$ActivityId;" -Json)
+    if(!$rows.Count){throw 'Activity record not found'}
+    $changed=[int](Invoke-Sql "DELETE FROM audit_history WHERE id=$ActivityId;SELECT changes();" -AllowWrite)
+    if($changed-ne1){throw 'Activity record could not be deleted'}
+    $driverId=$null
+    if($rows[0].entity_type-eq'driver'){$driverId=[int]$rows[0].entity_id}
+    return @{ok=$true;driver_id=$driverId}
 }
 
 function Get-Transition {
@@ -709,4 +723,4 @@ function Restore-Waa {
     return @{ok=$true}
 }
 
-Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,ConvertTo-SqlLiteral,Parse-Date,Split-ImportRows,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-CurrentDriver,Get-DriverCard,Save-DriverAction,Get-Organizer,Get-DailyActivity,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa
+Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,ConvertTo-SqlLiteral,Parse-Date,Split-ImportRows,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-CurrentDriver,Get-DriverCard,Save-DriverAction,Get-Organizer,Get-DailyActivity,Remove-DailyActivity,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa

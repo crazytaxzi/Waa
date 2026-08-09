@@ -77,14 +77,14 @@ function Test-WaaClientDisconnect {
 }
 
 function Send-Response {
-    param($Stream,[int]$Status,[string]$Type,[byte[]]$Bytes,[switch]$Static)
+    param($Stream,[int]$Status,[string]$Type,[byte[]]$Bytes,[switch]$Static,[switch]$Revalidate)
 
     $reasons = @{200='OK';201='Created';204='No Content';400='Bad Request';404='Not Found';409='Conflict';500='Internal Server Error'}
     $reason = $reasons[$Status]
     $head = "HTTP/1.1 $Status $reason`r`n" +
         "Content-Type: $Type`r`n" +
         "Content-Length: $($Bytes.Length)`r`n" +
-        $(if ($Static) { "Cache-Control: public, max-age=300`r`n" } else { "Cache-Control: no-store`r`n" }) +
+        $(if ($Revalidate) { "Cache-Control: no-cache`r`n" } elseif ($Static) { "Cache-Control: public, max-age=300`r`n" } else { "Cache-Control: no-store`r`n" }) +
         "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`r`n" +
         "X-Content-Type-Options: nosniff`r`n" +
         "Referrer-Policy: no-referrer`r`n" +
@@ -275,6 +275,9 @@ try {
                         $endUtc = $endDate.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss')
                         Send-JsonArray $request.stream 200 @(Get-DailyActivity $startUtc $endUtc) | Out-Null
                     }
+                    elseif ($method -eq 'DELETE' -and $path -match '^/api/activity/(\d+)$') {
+                        Send-Json $request.stream 200 (Remove-DailyActivity ([int]$Matches[1])) | Out-Null
+                    }
                     elseif ($method -eq 'POST' -and $path -eq '/api/identity/resolve') {
                         $resolved = Resolve-Identity ([int]$body.issue_id) ([int]$body.driver_id)
                         Repair-WaaDriverIdentity | Out-Null
@@ -320,7 +323,8 @@ try {
                         $mime = @{'.html'='text/html; charset=utf-8';'.css'='text/css; charset=utf-8';'.js'='text/javascript; charset=utf-8';'.svg'='image/svg+xml'}[$extension]
                         if ([string]::IsNullOrWhiteSpace($mime)) { $mime='application/octet-stream' }
                         $bytes = if ($script:StaticCache.ContainsKey($file)) { $script:StaticCache[$file] } else { [IO.File]::ReadAllBytes($file) }
-                        Send-Response $request.stream 200 $mime $bytes -Static | Out-Null
+                        if ($extension -eq '.html') { Send-Response $request.stream 200 $mime $bytes -Revalidate | Out-Null }
+                        else { Send-Response $request.stream 200 $mime $bytes -Static | Out-Null }
                     }
                 }
             }

@@ -11,7 +11,7 @@ const api = async (path, options = {}) => {
   return body ?? [];
 };
 
-const state = { cache: new Map(), routeController: null };
+const state = { cache: new Map(), routeController: null, cardEventsController: null };
 const cachedApi = async (path, maxAge = 20000) => {
   const hit = state.cache.get(path);
   if (hit && Date.now() - hit.time < maxAge) return hit.value;
@@ -349,11 +349,12 @@ function driverOptions(list, selected = '') {
 
 function reminderRow(item) {
   const overdue = !item.completed_at && item.due_at && new Date(item.due_at) < new Date();
-  return `<label class="organizer-item reminder ${overdue ? 'late' : ''} ${item.completed_at ? 'complete' : ''}">
+  return `<div class="organizer-item reminder ${overdue ? 'late' : ''} ${item.completed_at ? 'complete' : ''}">
     <input data-organizer-complete="${item.id}" data-driver-id="${item.driver_id}" type="checkbox" ${item.completed_at ? 'checked' : ''}>
     <span class="organizer-driver"><b>${esc(item.truck)} · ${esc(item.full_name)}</b><small>${esc(displayDate(item.due_at))}</small></span>
     <span class="organizer-copy">${esc(item.text)}</span>
-  </label>`;
+    <button class="danger compact" data-organizer-delete="reminder" data-item="${item.id}" data-driver-id="${item.driver_id}" type="button">Delete</button>
+  </div>`;
 }
 
 async function organizer() {
@@ -368,6 +369,7 @@ async function organizer() {
     $('#notesList').innerHTML = notes.filter(matches).map(item => `<article class="organizer-item note">
       <span class="organizer-driver"><b>${esc(item.truck)} · ${esc(item.full_name)}</b><small>${esc(displayDate(item.created_at))}</small></span>
       <p class="organizer-copy">${esc(item.text)}</p>
+      <button class="danger compact" data-organizer-delete="note" data-item="${item.id}" data-driver-id="${item.driver_id}" type="button">Delete</button>
     </article>`).join('') || '<p class="empty-copy">No matching notes.</p>';
     $('#remindersList').innerHTML = reminders.filter(matches).map(reminderRow).join('') || '<p class="empty-copy">No matching reminders.</p>';
   };
@@ -396,11 +398,14 @@ async function organizer() {
   $('#organizerSearch').addEventListener('input', debounce(renderItems));
   $('#organizerDriverFilter').addEventListener('change', renderItems);
   $('#organizerSave').addEventListener('click', async () => {
+    const saveButton = $('#organizerSave');
+    if (saveButton.disabled) return;
     const driverId = Number($('#organizerDriver').value);
     const type = $('#organizerType').value;
     const text = $('#organizerText').value.trim();
     const due = $('#organizerDue').value;
     if (!driverId || !text || (type === 'reminder' && !due)) { toast('Choose a driver and complete the item'); return; }
+    saveButton.disabled = true;
     const body = type === 'note' ? { action: 'note', text } : { action: 'reminder', text, due_at: due };
     await api(`/api/drivers/${driverId}/action`, { method: 'POST', body: JSON.stringify(body) });
     invalidate('/api/organizer', '/api/activity', `/api/drivers/${driverId}`);
@@ -443,7 +448,7 @@ async function activity() {
       return `<article class="activity-row ${row.driver_id ? '' : 'system'}">
         <time>${esc(new Date(`${row.occurred_at.replace(' ', 'T')}Z`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}</time>
         <div><b>${esc(activityLabels[row.action] || row.action.replaceAll('_', ' '))}</b><small>${row.driver_id ? `${esc(row.truck)} · ${esc(row.full_name)}` : 'WAA operations'}</small>${detailText ? `<p>${esc(detailText)}</p>` : ''}</div>
-        ${row.driver_id ? `<button class="secondary open" data-id="${row.driver_id}" type="button">Open Driver</button>` : ''}
+        <div class="activity-actions">${row.driver_id ? `<button class="secondary open" data-id="${row.driver_id}" type="button">Open Driver</button>` : ''}<button class="danger" data-delete-activity="${row.id}" type="button">Delete Record</button></div>
       </article>`;
     }).join('') || '<p class="empty-copy">No recorded activity for this day.</p>';
     $('#activityCount').textContent = `${visible.length} action${visible.length === 1 ? '' : 's'}`;
@@ -591,12 +596,12 @@ function callStep(number, title, prompt, body, tone = '') {
 
 function noteList(notes) {
   return notes.length
-    ? notes.slice(0, 8).map(note => `<div class="note-chip"><p>${esc(note.note)}</p><small>${esc(displayDate(note.created_at))}</small></div>`).join('')
+    ? notes.slice(0, 8).map(note => `<div class="note-chip"><p>${esc(note.note)}</p><small>${esc(displayDate(note.created_at))}</small><button class="danger compact" data-delete-note="${note.id}" type="button">Delete</button></div>`).join('')
     : '<p class="empty-copy">Nothing captured yet. Keep this conversational—only save what will actually help later.</p>';
 }
 
 function followupList(reminders) {
-  return reminders.length ? reminders.map(reminder => `<label class="follow-row ${!reminder.completed_at && new Date(reminder.due_at) < new Date() ? 'late' : ''}"><input class="item-action" data-action="complete_reminder" data-item="${reminder.id}" type="checkbox" ${reminder.completed_at ? 'checked' : ''}><span>${esc(reminder.text)}<small>${esc(displayDate(reminder.due_at))}</small></span></label>`).join('') : '<p class="empty-copy">No reminders.</p>';
+  return reminders.length ? reminders.map(reminder => `<div class="follow-row ${!reminder.completed_at && new Date(reminder.due_at) < new Date() ? 'late' : ''}"><input class="item-action" data-action="complete_reminder" data-item="${reminder.id}" type="checkbox" ${reminder.completed_at ? 'checked' : ''}><span>${esc(reminder.text)}<small>${esc(displayDate(reminder.due_at))}</small></span><button class="danger compact" data-delete-reminder="${reminder.id}" type="button">Delete</button></div>`).join('') : '<p class="empty-copy">No reminders.</p>';
 }
 
 async function openCard(id) {
@@ -692,6 +697,9 @@ async function openCard(id) {
 
 function bindCardEvents(card) {
   const root = $('#card');
+  state.cardEventsController?.abort();
+  state.cardEventsController = new AbortController();
+  const listenerOptions = { signal: state.cardEventsController.signal };
   const setSaved = element => {
     const step = element.closest('.call-step');
     if (!step) return;
@@ -706,22 +714,32 @@ function bindCardEvents(card) {
 
   const saveNote = async () => {
     const box = $('#quickNote');
+    const button = $('#saveNote');
+    if (button.disabled) return;
     const text = box.value.trim();
     if (!text) return;
-    const updated = await driverAction('note', null, { text });
-    box.value = '';
-    $('#noteList').innerHTML = noteList(updated.notes || []);
-    toast('Note kept');
+    button.disabled = true;
+    try {
+      const updated = await driverAction('note', null, { text });
+      box.value = '';
+      $('#noteList').innerHTML = noteList(updated.notes || []);
+      toast('Note kept');
+    } finally { button.disabled = false; }
   };
   const addReminder = async () => {
+    const button = $('#addReminder');
+    if (button.disabled) return;
     const text = $('#remtext').value.trim();
     const due = $('#remdue').value;
     if (!text || !due) return;
-    const updated = await driverAction('reminder', null, { text, due_at: due });
-    $('#remtext').value = '';
-    $('#remdue').value = '';
-    $('#followupList').innerHTML = followupList(updated.reminders || []);
-    toast('Reminder added');
+    button.disabled = true;
+    try {
+      const updated = await driverAction('reminder', null, { text, due_at: due });
+      $('#remtext').value = '';
+      $('#remdue').value = '';
+      $('#followupList').innerHTML = followupList(updated.reminders || []);
+      toast('Reminder added');
+    } finally { button.disabled = false; }
   };
   const newSafetyNote = async () => {
     const note = await api('/api/safety/random');
@@ -745,21 +763,29 @@ function bindCardEvents(card) {
       await driverAction(element.dataset.action, value);
       setSaved(element);
     }
-  });
+  }, listenerOptions);
   root.addEventListener('click', event => {
     const button = event.target.closest('button');
     if (!button) return;
     if (button.id === 'saveNote') saveNote();
     else if (button.id === 'addReminder') addReminder();
     else if (button.id === 'random') newSafetyNote();
+    else if (button.dataset.deleteNote && confirm('Delete this driver note?')) {
+      button.disabled = true;
+      driverAction('delete_note', null, { item_id: Number(button.dataset.deleteNote) }).then(updated => { $('#noteList').innerHTML = noteList(updated.notes || []); toast('Note deleted'); }).catch(error => { button.disabled = false; toast(error.message); });
+    }
+    else if (button.dataset.deleteReminder && confirm('Delete this reminder?')) {
+      button.disabled = true;
+      driverAction('delete_reminder', null, { item_id: Number(button.dataset.deleteReminder) }).then(updated => { $('#followupList').innerHTML = followupList(updated.reminders || []); toast('Reminder deleted'); }).catch(error => { button.disabled = false; toast(error.message); });
+    }
     else if (button.dataset.jump) $(`.call-step[data-step="${button.dataset.jump}"]`, root)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  });
+  }, listenerOptions);
   root.addEventListener('keydown', event => {
     if (event.target.id === 'quickNote' && event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       saveNote();
     }
-  });
+  }, listenerOptions);
 
   root.addEventListener('focusin', event => {
     const step = event.target.closest('.call-step');
@@ -767,7 +793,7 @@ function bindCardEvents(card) {
     const number = step.dataset.step;
     $$('[data-jump]', root).forEach(button => button.classList.toggle('active', button.dataset.jump === number));
     $$('.call-step', root).forEach(node => node.classList.toggle('active', node === step));
-  });
+  }, listenerOptions);
 }
 
 async function driverAction(action, value, extra = {}) {
@@ -780,6 +806,8 @@ async function driverAction(action, value, extra = {}) {
 }
 
 function closeCard() {
+  state.cardEventsController?.abort();
+  state.cardEventsController = null;
   $('#modal').classList.add('hidden');
   document.body.classList.remove('modal-open');
   cardId = null;
@@ -796,7 +824,34 @@ document.addEventListener('keydown', event => {
     $('#quickNote')?.focus();
   }
 });
-document.addEventListener('click', event => {
+document.addEventListener('click', async event => {
+  const organizerDelete = event.target.closest('[data-organizer-delete]');
+  if (organizerDelete) {
+    if (!confirm(`Delete this driver ${organizerDelete.dataset.organizerDelete}?`)) return;
+    organizerDelete.disabled = true;
+    try {
+      const driverId = Number(organizerDelete.dataset.driverId);
+      await api(`/api/drivers/${driverId}/action`, {
+        method: 'POST', body: JSON.stringify({ action: `delete_${organizerDelete.dataset.organizerDelete}`, item_id: Number(organizerDelete.dataset.item) })
+      });
+      invalidate('/api/organizer', '/api/activity', `/api/drivers/${driverId}`);
+      toast('Item deleted');
+      await organizer();
+    } catch (error) { organizerDelete.disabled = false; toast(error.message); }
+    return;
+  }
+  const activityDelete = event.target.closest('[data-delete-activity]');
+  if (activityDelete) {
+    if (!confirm('Delete this Daily Review record? This does not reverse the original action.')) return;
+    activityDelete.disabled = true;
+    try {
+      await api(`/api/activity/${activityDelete.dataset.deleteActivity}`, { method: 'DELETE' });
+      invalidate('/api/activity');
+      toast('Activity record deleted');
+      await activity();
+    } catch (error) { activityDelete.disabled = false; toast(error.message); }
+    return;
+  }
   const opener = event.target.closest('.open[data-id]');
   if (opener && !event.target.closest('button,input,select,textarea,a')) openCard(Number(opener.dataset.id));
 });

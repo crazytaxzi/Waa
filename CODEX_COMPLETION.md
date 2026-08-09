@@ -4,7 +4,9 @@
 
 WAA is a complete local Windows driver-operations application with eight hash-routed pages: Dashboard, PTA Tracking, Workflow, Missing BOLs, Notes & Reminders, Daily Review, Transition, and Imports/Data Quality. The shared Driver Work Card centralizes PTA history/editing, weighted idle history, BOL mentions, home-time review, on-time state, preplan review/response, routing, randomized safety coaching, chronological notes, restart-safe reminders/timers, transition selection, and activity history.
 
-The application now also includes two first-class pages. **Notes & Reminders** is a fleet-wide organizer that requires a canonical driver for every item and supports capture, search, filtering, due-state display, and completion. **Daily Review** presents the immutable audit trail as a local-day chronological record, keeps driver actions attributed to the canonical driver/current truck, supports driver filtering, and opens the shared Driver Work Card directly.
+The application now also includes two first-class pages. **Notes & Reminders** is a fleet-wide organizer that requires a canonical driver for every item and supports capture, search, filtering, due-state display, and completion. **Daily Review** presents the activity trail as a local-day chronological record, keeps driver actions attributed to the canonical driver/current truck, supports driver filtering, and opens the shared Driver Work Card directly.
+
+Notes and reminders now have ownership-checked manual deletion from both the organizer and shared Driver Work Card. Daily Review records have explicit deletion through the core activity API; deleting a record removes that history entry without pretending to undo the original operational change. The Driver Work Card event lifecycle was corrected so each render aborts its previous delegated listener scope, and create controls lock during active requests. This eliminates the accumulated listeners that could previously save one click multiple times after reopening the card.
 
 Manual truck assignment is part of the canonical Workflow and Driver Work Card. Unassigned drivers can be filtered and assigned inline; the validated assignment is appended to standard `truck_history` with source `manual`, immediately feeds every current-truck query, and creates a driver-specific audit event. Trucks remain time-dependent observations and are never used as driver identity. Existing associations are protected from accidental overwrite.
 
@@ -33,10 +35,10 @@ Preview never writes. Commit reparses the supplied raw source, validates rows, r
 
 ## Validation completed — 2026-08-09 integrated performance/organizer revision
 
-- `tests/Run-Tests.ps1`: **48/48 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. Coverage includes targeted current-driver retrieval, driver-specific organizer data, daily activity attribution, manual truck assignment/history/audit/overwrite protection, performance indexes, HTTP limits/timeouts/static caching, and integrated navigation, in addition to the prior database/import/workflow/security coverage.
+- `tests/Run-Tests.ps1`: **55/55 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. Coverage includes targeted current-driver retrieval, driver-specific organizer data, daily activity attribution/deletion, ownership-checked note/reminder deletion, card-listener replacement, versioned client assets, manual truck assignment/history/audit/overwrite protection, performance indexes, HTTP limits/timeouts/static caching, and integrated navigation, in addition to the prior database/import/workflow/security coverage.
 - `tests/Identity.Tests.ps1`: **7/7 scenarios passed**, including Rolling-first, PTA-first, placeholder reconciliation, assignment history, and ambiguous derived-code isolation.
 - `tests/Measure-PtaPerformance.ps1`: **500 rows**, 149.6 ms parse, 87.9 ms database phase, result `responsive` in the validation environment.
-- End-to-end real TCP server exercises passed health, memory-cached static delivery, a multibyte Unicode PTA POST, Driver Note creation, organizer retrieval, local-day activity retrieval, manual truck assignment, Workflow refresh, driver audit attribution, and assignment overwrite protection.
+- End-to-end real TCP server exercises passed health, memory-cached static delivery, a multibyte Unicode PTA POST, single note/reminder creation, deletion ownership enforcement, note/reminder deletion, Daily Review deletion, organizer retrieval, local-day activity retrieval, manual truck assignment, Workflow refresh, driver audit attribution, and assignment overwrite protection.
 - JavaScript syntax, whitespace validation, SQLite schema execution, single-query Driver Card JSON, organizer SQL, daily activity SQL, latest-row tie handling, and contiguous weighted 28-day SQL all passed. The official SQLite Windows archive hash was verified as `88b4659fe747896b853af10157316b4ade143553efb89c1c8ca7423a278dcc8b`.
 
 ## Intentionally unresolved business rules
@@ -49,5 +51,5 @@ On the target Windows machine, double-click `Start-Waa.cmd` (or run `Start-Waa.p
 
 ## Codex Run Metadata
 
-- Integrated revision completed: 2026-08-09T15:42:14Z
+- Integrated revision completed: 2026-08-09T16:24:08Z
 - Validation status: complete
