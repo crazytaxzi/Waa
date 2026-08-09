@@ -92,6 +92,21 @@ IRAJ Ira Jones\t223861\t08/09/2026\t08/03/2026\t45\t9\tIdle %
     Assert-Identity ((Invoke-Sql "SELECT count(*) c FROM driver_aliases WHERE driver_id=$iraId AND alias_type='pta_code' AND alias_value='JONESIRA';" -Json)[0].c -eq 1) 'observed JONESIRA PTA alias is attached to Ira Jones'
     Assert-Identity ((Invoke-Sql "SELECT count(*) c FROM driver_aliases WHERE driver_id=$iraId AND alias_type='pta_code' AND alias_value='JONESI';" -Json)[0].c -eq 0) 'unobserved short JONESI candidate is retired after exact PTA evidence'
 
+    # Existing databases may contain both codes from different PTA snapshots after the
+    # truck changed. Code-family repair must not require a current-unit match.
+    Invoke-Sql @"
+BEGIN;
+INSERT INTO drivers(full_name,pta_code) VALUES('JONESI','JONESI');
+INSERT INTO driver_aliases(driver_id,alias_type,alias_value,confirmed) VALUES(last_insert_rowid(),'pta_code','JONESI',0);
+INSERT INTO pta_observations(driver_id,truck,driver_code,pta_raw,pta_at,actionable,source)
+VALUES((SELECT driver_id FROM driver_aliases WHERE alias_type='pta_code' AND alias_value='JONESI'),'998877','JONESI','08/18/26 08:00','2026-08-18 08:00:00',1,'import');
+COMMIT;
+"@ -AllowWrite|Out-Null
+    Repair-WaaDriverIdentity|Out-Null
+    Assert-Identity ((Invoke-Sql "SELECT count(*) FROM drivers WHERE full_name='JONESI' OR pta_code='JONESI';").Trim()-eq'0') 'historical JONESI placeholder merges after a truck change'
+    Assert-Identity ((Invoke-Sql "SELECT count(*) c FROM driver_aliases WHERE driver_id=$iraId AND alias_type='pta_code' AND alias_value IN('JONESI','JONESIRA');" -Json)[0].c-eq2) 'JONESI and JONESIRA both resolve to Ira Jones'
+    Assert-Identity ((Invoke-Sql "SELECT count(*) FROM pta_observations WHERE driver_id=$iraId AND driver_code='JONESI';").Trim()-eq'1') 'JONESI PTA history is rehomed to Ira Jones'
+
     # Unit is corroborating evidence only. Two named Rolling identities on the same unit
     # must never be collapsed even when one name is compatible with the PTA code.
     $sharedRolling = @'

@@ -39,7 +39,7 @@ function Update-WaaBackgroundScan {
             $summary = @($output | Where-Object { $_ -is [hashtable] -and $_.ContainsKey('maintenance_summary') } | Select-Object -Last 1)
             $changed = $summary.Count -and [bool]$summary[0].changed
             $repairVersion = [string](Invoke-Sql "SELECT value FROM settings WHERE key='identity_repair_version';")
-            $repairNeeded = $changed -or $repairVersion -ne '3'
+            $repairNeeded = $changed -or $repairVersion -ne '4'
             if($repairNeeded){Invoke-WaaLiveCheckpoint -Force | Out-Null}
             $identity = Invoke-WaaIdentityRepairIfNeeded -DataChanged:$changed
             if($repairNeeded){Reset-WaaLiveDomainFromSqlite | Out-Null}
@@ -274,7 +274,7 @@ try {
                         $scan = Invoke-WaaDownloadsScan -DeferIdentityRepair
                         $changed = @($scan.results.Values | Where-Object { $_.ContainsKey('imported') -and [bool]($_['imported']) }).Count -gt 0
                         $repairVersion = [string](Invoke-Sql "SELECT value FROM settings WHERE key='identity_repair_version';")
-                        $repairNeeded = $changed -or $repairVersion -ne '3'
+                        $repairNeeded = $changed -or $repairVersion -ne '4'
                         if($repairNeeded){Invoke-WaaLiveCheckpoint -Force | Out-Null}
                         $identity = Invoke-WaaIdentityRepairIfNeeded -DataChanged:$changed
                         if($repairNeeded){Reset-WaaLiveDomainFromSqlite | Out-Null}

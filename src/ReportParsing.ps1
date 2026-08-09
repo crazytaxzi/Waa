@@ -496,6 +496,44 @@ function Repair-WaaDriverIdentity {
         }
     }
 
+    # Reconcile observed PTA-code families to a real name without depending on the
+    # driver's current truck. Some valid codes extend the usual surname + first initial
+    # form (JONESI -> JONESIRA). A code is safe only when exactly one real driver record
+    # is structurally compatible with it; placeholder owners with no dispatch identity
+    # are then merged into that driver. Ambiguous prefixes remain untouched.
+    $familyDrivers = @(Invoke-Sql 'SELECT id,full_name,pta_code FROM drivers ORDER BY id;' -Json)
+    $familyAliases = @(Invoke-Sql "SELECT driver_id,alias_value FROM driver_aliases WHERE alias_type='pta_code';" -Json)
+    $familyDispatchCounts = @{}
+    foreach($row in @(Invoke-Sql "SELECT driver_id,count(*) alias_count FROM driver_aliases WHERE alias_type='dispatch_code' GROUP BY driver_id;" -Json)){$familyDispatchCounts[[int]$row.driver_id]=[int]$row.alias_count}
+    $observedCodes = @(
+        @($familyDrivers|ForEach-Object{Normalize-WaaPtaCode ([string]$_.pta_code)})+
+        @($familyAliases|ForEach-Object{Normalize-WaaPtaCode ([string]$_.alias_value)})
+        |Where-Object{$_}|Sort-Object Length,@{Expression={$_}} -Unique
+    )
+    foreach($actualCode in $observedCodes){
+        $compatible=@($familyDrivers|Where-Object{-not(Test-WaaDriverPlaceholder ([string]$_.full_name) ([string]$_.pta_code))-and(Test-WaaPtaCodeMatchesName ([string]$_.full_name) $actualCode)})
+        $compatibleIds=@($compatible|ForEach-Object{[int]$_.id}|Select-Object -Unique)
+        if($compatibleIds.Count-ne1){continue}
+        $winnerId=[int]$compatibleIds[0]
+        $owners=@(
+            @($familyDrivers|Where-Object{(Normalize-WaaPtaCode ([string]$_.pta_code))-eq$actualCode}|ForEach-Object{[int]$_.id})+
+            @($familyAliases|Where-Object{(Normalize-WaaPtaCode ([string]$_.alias_value))-eq$actualCode}|ForEach-Object{[int]$_.driver_id})
+            |Select-Object -Unique
+        )
+        foreach($ownerId in $owners){
+            $loserId=[int]$ownerId
+            if($loserId-eq$winnerId){continue}
+            $loser=@($familyDrivers|Where-Object{[int]$_.id-eq$loserId})
+            if($loser.Count-ne1){continue}
+            $dispatches=if($familyDispatchCounts.ContainsKey($loserId)){$familyDispatchCounts[$loserId]}else{0}
+            if((Test-WaaDriverPlaceholder ([string]$loser[0].full_name) ([string]$loser[0].pta_code))-and$dispatches-eq0){
+                Merge-WaaDriverRecords $winnerId $loserId $actualCode
+                $merged++
+            }
+        }
+        if(Set-WaaObservedPtaCode -DriverId $winnerId -PtaCode $actualCode){$assignmentLinks++}
+    }
+
     # Current unit is corroborating snapshot evidence, never permanent driver identity.
     # It may bridge a real Rolling/BOL identity to a PTA-only identity only when both
     # latest report snapshots are one-to-one on the same unit and the observed PTA code
@@ -611,7 +649,7 @@ AND NOT EXISTS(
 function Invoke-WaaIdentityRepairIfNeeded {
     param([switch]$DataChanged)
 
-    $version = '3'
+    $version = '4'
     $priorVersion = [string](Invoke-Sql "SELECT value FROM settings WHERE key='identity_repair_version';")
     $migrationRequired = $priorVersion -ne $version
     if (-not $DataChanged -and -not $migrationRequired) {

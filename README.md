@@ -101,3 +101,5 @@ The repository also includes `tests/Identity.Tests.ps1` for cross-report canonic
 ## Identity and business rules
 
 Drivers are canonical entities. Trucks are historical observations only. Aliases preserve PTA codes, dispatch codes, and full names independently. Automatic file reports use dispatch codes/full names and generated PTA-style name keys as identity evidence; uncertain matches must remain visible rather than being guessed. Final PTA numeric columns are stored verbatim as `source_numeric_1` and `source_numeric_2` because their meaning is unknown. Missing BOL items remain historical until explicitly handled; a missing row in a newer report is not treated as resolution.
+
+Observed PTA-code families can contain both a short derived form and a valid extended form. When exactly one real driver name is structurally compatible, codes such as `JONESI` and `JONESIRA` resolve to the same Ira Jones record even if the associated truck changed between reports. If a prefix is compatible with more than one real driver, WAA refuses the automatic merge and leaves an identity issue for review.
