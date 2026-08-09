@@ -1,0 +1,71 @@
+name: Stage canonical identity integration
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.event.head_commit.message == 'Stage canonical identity integration'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Materialize integrated source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          function Expand-StagedSource([string]$EncodedPath, [string]$Destination) {
+            $encoded = (Get-Content $EncodedPath -Raw).Trim()
+            $bytes = [Convert]::FromBase64String($encoded)
+            $input = [IO.MemoryStream]::new($bytes)
+            $gzip = [IO.Compression.GzipStream]::new($input, [IO.Compression.CompressionMode]::Decompress)
+            $reader = [IO.StreamReader]::new($gzip, [Text.Encoding]::UTF8)
+            try { $text = $reader.ReadToEnd() }
+            finally { $reader.Dispose(); $gzip.Dispose(); $input.Dispose() }
+            [IO.File]::WriteAllText((Join-Path $env:GITHUB_WORKSPACE $Destination), $text, [Text.UTF8Encoding]::new($false))
+          }
+
+          Expand-StagedSource '.staging/report-parsing.gz.b64' 'src/ReportParsing.ps1'
+          Expand-StagedSource '.staging/report-intake.gz.b64' 'src/ReportIntake.ps1'
+          Expand-StagedSource '.staging/server.gz.b64' 'src/Server.ps1'
+          Expand-StagedSource '.staging/identity-tests.gz.b64' 'tests/Identity.Tests.ps1'
+
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in @('src/ReportParsing.ps1','src/ReportIntake.ps1','src/Server.ps1','tests/Identity.Tests.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List | Out-String | Write-Error
+              throw "PowerShell parser errors in $file"
+            }
+          }
+
+      - name: Run WAA regression suite
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\tests\Run-Tests.ps1
+          .\tests\Identity.Tests.ps1
+
+      - name: Commit integrated architecture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item '.staging' -Recurse -Force
+          Remove-Item '.github/workflows/stage-canonical-identity.yml' -Force
+          git config user.name 'Sentionce'
+          git config user.email 'crazytaxzi@gmail.com'
+          git add -A
+          git commit -m 'Unify canonical driver identity across reports'
+          git push origin HEAD:main
