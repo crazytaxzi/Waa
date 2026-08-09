@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 
 Import-Module (Join-Path $PSScriptRoot 'Waa.psm1') -Force
 . (Join-Path $PSScriptRoot 'ReportParsing.ps1')
+. (Join-Path $PSScriptRoot 'PtaIntake.ps1')
 . (Join-Path $PSScriptRoot 'ReportIntake.ps1')
 . (Join-Path $PSScriptRoot 'Conversation.ps1')
 
@@ -80,8 +81,6 @@ function Send-Response {
     }
     catch {
         if (Test-WaaClientDisconnect $_) {
-            # Browsers routinely cancel requests during navigation, refresh, or cache races.
-            # That client is gone; the WAA server itself should keep running.
             return $false
         }
         throw
@@ -211,13 +210,13 @@ try {
                         if ($body.type -and $body.type -ne 'pta') {
                             throw 'Rolling 7-Day and Missing BOL reports are managed automatically from Downloads. PTA is paste-only.'
                         }
-                        Send-Json $request.stream 200 (Get-ImportPreview $body.raw 'PTA paste' 'pta') | Out-Null
+                        Send-Json $request.stream 200 (Get-WaaPtaPreview -Raw ([string]$body.raw) -Filename 'PTA paste') | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/import/commit') {
                         if ($body.type -and $body.type -ne 'pta') {
                             throw 'Rolling 7-Day and Missing BOL reports are managed automatically from Downloads. PTA is paste-only.'
                         }
-                        Send-Json $request.stream 201 (Import-WaaData $body.raw 'PTA paste' 'pta') | Out-Null
+                        Send-Json $request.stream 201 (Import-WaaPtaData -Raw ([string]$body.raw) -Filename 'PTA paste') | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/report-intake') {
                         Send-Json $request.stream 200 (Get-WaaReportIntakeStatus) | Out-Null
