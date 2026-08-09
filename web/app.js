@@ -19,7 +19,8 @@ const state = {
   cardQueue: [],
   cardStep: 1,
   pendingSaves: new Set(),
-  saveFailed: false
+  saveFailed: false,
+  activityRowsByDriver: new Map()
 };
 const cachedApi = async (path, maxAge = 20000) => {
   const hit = state.cache.get(path);
@@ -491,10 +492,41 @@ function localDayRange(value) {
   return { start: start.toISOString(), end: end.toISOString() };
 }
 
+function activityView(row) {
+  let detail = {};
+  try { detail = JSON.parse(row.detail_json || '{}'); } catch { detail = {}; }
+  const callLabel = row.action === 'call_flow_update' ? callFieldLabels[detail.field] : '';
+  return {
+    label: callLabel || activityLabels[row.action] || row.action.replaceAll('_', ' '),
+    detail: detail.text || detail.action || '',
+    time: new Date(`${row.occurred_at.replace(' ', 'T')}Z`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  };
+}
+
+function closeActivitySummary() {
+  $('#activityModal').classList.add('hidden');
+  if ($('#modal').classList.contains('hidden')) document.body.classList.remove('modal-open');
+}
+
+function openActivitySummary(driverId) {
+  const rows = state.activityRowsByDriver.get(Number(driverId)) || [];
+  if (!rows.length) return;
+  const driver = rows[0];
+  const counts = new Map();
+  rows.forEach(row => { const label = activityView(row).label; counts.set(label, (counts.get(label) || 0) + 1); });
+  $('#activityModalBody').innerHTML = `
+    <header class="activity-modal-head"><div><p class="eyebrow">Daily driver summary</p><h2 id="activityModalTitle">${esc(driver.truck)} · ${esc(driver.full_name)}</h2><p>${rows.length} recorded action${rows.length === 1 ? '' : 's'} for ${esc(activity.selectedDay)}</p></div><button class="open" data-id="${driver.driver_id}" type="button">Open Driver Work Card</button></header>
+    <div class="activity-summary-chips">${[...counts].map(([label, count]) => `<span><b>${count}</b>${esc(label)}</span>`).join('')}</div>
+    <div class="activity-popup-list">${rows.map(row => { const view = activityView(row); return `<article class="activity-row"><time>${esc(view.time)}</time><div><b>${esc(view.label)}</b>${view.detail ? `<p>${esc(view.detail)}</p>` : ''}</div><button class="danger compact" data-delete-activity="${row.id}" type="button">Delete</button></article>`; }).join('')}</div>`;
+  $('#activityModal').classList.remove('hidden');
+  document.body.classList.add('modal-open');
+}
+
 async function activity() {
   const today = new Date();
   const defaultDay = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
   const selected = activity.selectedDay || defaultDay;
+  activity.selectedDay = selected;
   const range = localDayRange(selected);
   const path = `/api/activity?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}`;
   const rows = await cachedApi(path, 5000);
@@ -502,20 +534,16 @@ async function activity() {
   const render = () => {
     const driverId = $('#activityDriver').value;
     const visible = rows.filter(row => !driverId || String(row.driver_id) === driverId);
-    $('#activityList').innerHTML = visible.map(row => {
-      let detail = {};
-      try { detail = JSON.parse(row.detail_json || '{}'); } catch { detail = {}; }
-      const callLabel = row.action === 'call_flow_update' ? callFieldLabels[detail.field] : '';
-      const detailText = detail.text || detail.action || '';
-      const actionLabel = callLabel || activityLabels[row.action] || row.action.replaceAll('_', ' ');
-      return `<article class="activity-row">
-        <time>${esc(new Date(`${row.occurred_at.replace(' ', 'T')}Z`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}</time>
-        <div><b>${esc(actionLabel)}</b><small>${esc(row.truck)} · ${esc(row.full_name)}</small>${detailText ? `<p>${esc(detailText)}</p>` : ''}</div>
-        <div class="activity-actions"><button class="secondary open" data-id="${row.driver_id}" type="button">Open Driver</button><button class="danger" data-delete-activity="${row.id}" type="button">Delete Record</button></div>
-      </article>`;
+    const groups = new Map();
+    visible.forEach(row => { const id = Number(row.driver_id); if (!groups.has(id)) groups.set(id, []); groups.get(id).push(row); });
+    state.activityRowsByDriver = groups;
+    $('#activityList').innerHTML = [...groups].map(([id, actions]) => {
+      const driver = actions[0];
+      const labels = [...new Set(actions.map(row => activityView(row).label))];
+      return `<button class="activity-driver-card" data-review-driver="${id}" type="button"><span class="activity-driver-count">${actions.length}</span><span><b>${esc(driver.truck)} · ${esc(driver.full_name)}</b><small>${esc(labels.slice(0, 3).join(' · '))}${labels.length > 3 ? ` · +${labels.length - 3} more` : ''}</small></span><strong>Review Summary →</strong></button>`;
     }).join('') || '<p class="empty-copy">No recorded activity for this day.</p>';
-    $('#activityCount').textContent = `${visible.length} action${visible.length === 1 ? '' : 's'}`;
-    setCardQueue(visible.map(row => row.driver_id));
+    $('#activityCount').textContent = `${groups.size} driver${groups.size === 1 ? '' : 's'} · ${visible.length} actions`;
+    setCardQueue([...groups.keys()]);
   };
   const uniqueDrivers = [...new Map(driverRows.map(row => [row.driver_id, row])).values()];
   $('#app').innerHTML = pageHead('Daily Activity Review', 'Review what you completed today with every action tied back to its driver.', 'WAA // Daily Record') + `
@@ -524,7 +552,7 @@ async function activity() {
       <label class="field"><span>Driver</span><select id="activityDriver"><option value="">All activity</option>${uniqueDrivers.map(row => `<option value="${row.driver_id}">${esc(row.truck)} · ${esc(row.full_name)}</option>`).join('')}</select></label>
       <div class="activity-summary"><span id="activityCount"></span><b>${uniqueDrivers.length} drivers with activity</b><button id="cleanupActivity" class="danger compact" type="button">Clean Up Review</button><small>Removes automated identity noise and exact duplicate records only.</small></div>
     </section>
-    <section class="glass-panel"><div class="panel-title"><div><p class="eyebrow">Chronological record</p><h3>${esc(new Date(`${selected}T12:00:00`).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }))}</h3></div></div><div id="activityList" class="activity-list"></div></section>`;
+    <section class="glass-panel"><div class="panel-title"><div><p class="eyebrow">One summary per driver</p><h3>${esc(new Date(`${selected}T12:00:00`).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }))}</h3></div></div><div id="activityList" class="activity-list"></div></section>`;
   $('#activityDate').addEventListener('change', event => { activity.selectedDay = event.target.value; invalidate('/api/activity'); activity(); });
   $('#activityDriver').addEventListener('change', render);
   $('#cleanupActivity').addEventListener('click', async event => {
@@ -1062,8 +1090,11 @@ $('.close').addEventListener('click', closeCard);
 $('#modal').addEventListener('click', event => {
   if (event.target === $('#modal')) closeCard();
 });
+$('.activity-modal-close').addEventListener('click', closeActivitySummary);
+$('#activityModal').addEventListener('click', event => { if (event.target === $('#activityModal')) closeActivitySummary(); });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && !$('#modal').classList.contains('hidden')) closeCard();
+  if (event.key === 'Escape' && !$('#activityModal').classList.contains('hidden')) closeActivitySummary();
+  else if (event.key === 'Escape' && !$('#modal').classList.contains('hidden')) closeCard();
   if (event.altKey && event.key.toLowerCase() === 'n' && !$('#modal').classList.contains('hidden')) {
     event.preventDefault();
     $('#quickNote')?.focus();
@@ -1100,13 +1131,16 @@ document.addEventListener('click', async event => {
       await api(`/api/activity/${activityDelete.dataset.deleteActivity}`, { method: 'DELETE' });
       invalidate('/api/activity');
       toast('Activity record deleted');
+      closeActivitySummary();
       await activity();
     } catch (error) { activityDelete.disabled = false; toast(error.message); }
     return;
   }
+  const reviewDriver = event.target.closest('[data-review-driver]');
+  if (reviewDriver) { openActivitySummary(reviewDriver.dataset.reviewDriver); return; }
   const opener = event.target.closest('.open[data-id]');
   const interactive = event.target.closest('button,input,select,textarea,a');
-  if (opener && (!interactive || interactive === opener)) openCard(Number(opener.dataset.id));
+  if (opener && (!interactive || interactive === opener)) { closeActivitySummary(); openCard(Number(opener.dataset.id)); }
 });
 document.addEventListener('submit', async event => {
   const form = event.target.closest('.quick-truck-form');

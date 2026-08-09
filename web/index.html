@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#070a0f">
   <title>WAA // Operations Console</title>
-  <link rel="stylesheet" href="styles.css?v=20260809.12">
+  <link rel="stylesheet" href="styles.css?v=20260809.13">
 </head>
 <body>
   <header class="mast">
@@ -34,6 +34,12 @@
       <div id="card"></div>
     </div>
   </div>
-  <script type="module" src="app.js?v=20260809.12"></script>
+  <div id="activityModal" class="activity-modal hidden" role="dialog" aria-modal="true" aria-labelledby="activityModalTitle">
+    <section class="activity-modal-card">
+      <button class="activity-modal-close" type="button" aria-label="Close daily summary">×</button>
+      <div id="activityModalBody"></div>
+    </section>
+  </div>
+  <script type="module" src="app.js?v=20260809.13"></script>
 </body>
 </html>
