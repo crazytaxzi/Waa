@@ -1,5 +1,37 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WAA // Operations Console</title><link rel="stylesheet" href="styles.css"></head><body>
-<header class="mast"><div class="sigil" aria-hidden="true">W</div><div><p class="eyebrow">Western Arc Analytics</p><h1>WAA <span>// Operations Console</span></h1></div><div id="health" class="status">SYSTEM CHECK</div></header>
-<nav aria-label="Primary"><a href="#dashboard">Dashboard</a><a href="#pta">PTA Tracking</a><a href="#workflow">Workflow</a><a href="#bols">Missing BOLs</a><a href="#transition">Transition</a><a href="#imports">Imports / Data Quality</a></nav>
-<main id="app" tabindex="-1"></main><div id="toast" role="status" aria-live="polite"></div><div id="modal" class="modal hidden" role="dialog" aria-modal="true"><div class="modal-shell"><button class="close" aria-label="Close">×</button><div id="card"></div></div></div>
-<script type="module" src="app.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#070a0f">
+  <title>WAA // Operations Console</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="mast">
+    <div class="sigil" aria-hidden="true">W</div>
+    <div>
+      <p class="eyebrow">Western Arc Analytics</p>
+      <h1>WAA <span>// Operations Console</span></h1>
+    </div>
+    <div id="health" class="status">SYSTEM CHECK</div>
+  </header>
+  <nav aria-label="Primary">
+    <a href="#dashboard">Dashboard</a>
+    <a href="#pta">PTA Tracking</a>
+    <a href="#workflow">Workflow</a>
+    <a href="#bols">Missing BOLs</a>
+    <a href="#transition">Transition</a>
+    <a href="#imports">Imports / Data Quality</a>
+  </nav>
+  <main id="app" tabindex="-1"></main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Driver conversation">
+    <div class="modal-shell">
+      <button class="close" type="button" aria-label="Close driver card">×</button>
+      <div id="card"></div>
+    </div>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
