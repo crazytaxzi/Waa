@@ -12,13 +12,16 @@ Import-Module (Join-Path $PSScriptRoot 'Waa.psm1') -Force
 . (Join-Path $PSScriptRoot 'ReportIntake.ps1')
 . (Join-Path $PSScriptRoot 'Conversation.ps1')
 
-$state = Initialize-Waa $Root $DataRoot
+$startupDatabase = Join-Path $DataRoot 'waa.db'
+$script:StartupBackupPending = Test-Path -LiteralPath $startupDatabase
+$state = Initialize-Waa $Root $DataRoot -SkipStartupBackup
 Initialize-WaaReportIntake $DataRoot
-$startupIntake = Invoke-WaaDownloadsScan
-$startupIdentity = Repair-WaaDriverIdentity
-$script:LastIntakeScan = Get-Date
+$script:LastIntakeScan = [datetime]::MinValue
 $script:IntakeRunner = $null
 $script:IntakeAsync = $null
+$script:MaintenanceStatus = 'pending'
+$script:MaintenanceDetail = 'Startup report scan is queued.'
+$script:MaintenanceGeneration = 0
 $web = [IO.Path]::GetFullPath((Join-Path $Root 'web'))
 $script:StaticCache = @{}
 foreach ($asset in @('index.html','styles.css','app.js')) {
@@ -29,30 +32,48 @@ foreach ($asset in @('index.html','styles.css','app.js')) {
 function Update-WaaBackgroundScan {
     if ($null -ne $script:IntakeAsync) {
         if (-not $script:IntakeAsync.IsCompleted) { return }
-        try { [void]$script:IntakeRunner.EndInvoke($script:IntakeAsync) }
-        catch { Write-Warning ("Background report scan failed: " + $_.Exception.Message) }
+        try {
+            $output = @($script:IntakeRunner.EndInvoke($script:IntakeAsync))
+            $summary = @($output | Where-Object { $_ -is [hashtable] -and $_.ContainsKey('maintenance_summary') } | Select-Object -Last 1)
+            $script:MaintenanceStatus = 'ready'
+            $script:MaintenanceDetail = if ($summary.Count) { [string]$summary[0].maintenance_summary } else { 'Background maintenance completed.' }
+            $script:MaintenanceGeneration++
+        }
+        catch {
+            $script:MaintenanceStatus = 'error'
+            $script:MaintenanceDetail = $_.Exception.Message
+            Write-Warning ("Background report scan failed: " + $_.Exception.Message)
+        }
         finally {
             $script:IntakeRunner.Dispose()
             $script:IntakeRunner = $null
             $script:IntakeAsync = $null
             $script:LastIntakeScan = Get-Date
         }
+        return
     }
     if (((Get-Date)-$script:LastIntakeScan).TotalSeconds -lt 60) { return }
-    $scriptText = @'
-param($ScanRoot,$ScanDataRoot)
+$scriptText = @'
+param($ScanRoot,$ScanDataRoot,$CreateStartupBackup)
 $ErrorActionPreference='Stop'
 Import-Module (Join-Path $ScanRoot 'src/Waa.psm1') -Force
 . (Join-Path $ScanRoot 'src/ReportParsing.ps1')
 . (Join-Path $ScanRoot 'src/ReportIntake.ps1')
 Initialize-Waa $ScanRoot $ScanDataRoot -SkipStartupBackup | Out-Null
 Initialize-WaaReportIntake $ScanDataRoot
-$scan=Invoke-WaaDownloadsScan
-if($scan.results.idle.imported -or $scan.results.bol.imported){Repair-WaaDriverIdentity|Out-Null}
+if($CreateStartupBackup){Backup-Waa 'startup'|Out-Null}
+$scan=Invoke-WaaDownloadsScan -DeferIdentityRepair
+$changed=@($scan.results.Values | Where-Object { $_.ContainsKey('imported') -and [bool]($_['imported']) }).Count -gt 0
+$identity=Invoke-WaaIdentityRepairIfNeeded -DataChanged:$changed
+$detail=if($changed){'New reports imported and identity links refreshed.'}elseif($identity.skipped){'Reports and identity links are current.'}else{'One-time identity migration completed.'}
+@{maintenance_summary=$detail;scan=$scan;identity=$identity}
 '@
+    $script:MaintenanceStatus = 'running'
+    $script:MaintenanceDetail = 'Checking Downloads and identity links in the background.'
     $script:IntakeRunner = [PowerShell]::Create()
-    [void]$script:IntakeRunner.AddScript($scriptText).AddArgument($Root).AddArgument($DataRoot)
+    [void]$script:IntakeRunner.AddScript($scriptText).AddArgument($Root).AddArgument($DataRoot).AddArgument($script:StartupBackupPending)
     $script:IntakeAsync = $script:IntakeRunner.BeginInvoke()
+    $script:StartupBackupPending = $false
 }
 
 function Test-WaaClientDisconnect {
@@ -182,10 +203,8 @@ for ($candidate=8765; $candidate -le 8775; $candidate++) {
 $url = "http://127.0.0.1:$port/"
 Write-Host "WAA console ready at $url" -ForegroundColor Green
 Write-Host "Database: $($state.db) | Integrity: $($state.integrity)"
-Write-Host "Downloads intake: $((Get-WaaReportIntakeStatus).downloads_path)"
-if ($startupIdentity.merged -gt 0 -or $startupIdentity.evidence -gt 0) {
-    Write-Host "Driver identity: $($startupIdentity.evidence) evidence sets | $($startupIdentity.merged) legacy fragments merged"
-}
+Update-WaaBackgroundScan
+Write-Host 'Report and identity maintenance is running in the background.'
 if (-not $NoBrowser) { Start-Process $url }
 
 try {
@@ -211,7 +230,7 @@ try {
                     }
 
                     if ($method -eq 'GET' -and $path -eq '/api/health') {
-                        Send-Json $request.stream 200 @{ok=$true;integrity=$state.integrity;read_only=$state.read_only} | Out-Null
+                        Send-Json $request.stream 200 @{ok=$true;integrity=$state.integrity;read_only=$state.read_only;maintenance_status=$script:MaintenanceStatus;maintenance_detail=$script:MaintenanceDetail;maintenance_generation=$script:MaintenanceGeneration} | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/dashboard') {
                         Send-Json $request.stream 200 (Get-Dashboard) | Out-Null
@@ -236,7 +255,7 @@ try {
                     elseif ($method -eq 'POST' -and $path -eq '/api/import/commit') {
                         if ($body.type -and $body.type -ne 'pta') { throw 'Rolling 7-Day and Missing BOL reports are managed automatically from Downloads. PTA is paste-only.' }
                         $result = Import-WaaData ([string]$body.raw) 'PTA paste' 'pta'
-                        Repair-WaaDriverIdentity | Out-Null
+                        Invoke-WaaIdentityRepairIfNeeded -DataChanged | Out-Null
                         Send-Json $request.stream 201 $result | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/report-intake') {
@@ -244,8 +263,9 @@ try {
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/report-intake/scan') {
                         if ($null -ne $script:IntakeAsync -and -not $script:IntakeAsync.IsCompleted) { throw 'A report scan is already running.' }
-                        $scan = Invoke-WaaDownloadsScan
-                        $identity = Repair-WaaDriverIdentity
+                        $scan = Invoke-WaaDownloadsScan -DeferIdentityRepair
+                        $changed = @($scan.results.Values | Where-Object { $_.ContainsKey('imported') -and [bool]($_['imported']) }).Count -gt 0
+                        $identity = Invoke-WaaIdentityRepairIfNeeded -DataChanged:$changed
                         $script:LastIntakeScan = Get-Date
                         $scan.identity = $identity
                         Send-Json $request.stream 200 $scan | Out-Null
@@ -280,7 +300,7 @@ try {
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/identity/resolve') {
                         $resolved = Resolve-Identity ([int]$body.issue_id) ([int]$body.driver_id)
-                        Repair-WaaDriverIdentity | Out-Null
+                        Invoke-WaaIdentityRepairIfNeeded -DataChanged | Out-Null
                         Send-Json $request.stream 200 $resolved | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/transition') {

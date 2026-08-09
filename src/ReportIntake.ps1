@@ -458,7 +458,7 @@ function Import-WaaManagedReport {
     [void]$sql.AppendLine('COMMIT;')
     Invoke-Sql $sql.ToString() -AllowWrite | Out-Null
 
-    $repair = if ($SkipIdentityRepair) { @{evidence=0;merged=0;ambiguous=0} } else { Repair-WaaDriverIdentity }
+    $repair = if ($SkipIdentityRepair) { @{evidence=0;merged=0;ambiguous=0} } else { Invoke-WaaIdentityRepairIfNeeded -DataChanged }
     $batch = @(Invoke-Sql "SELECT id FROM import_batches WHERE source_hash=$hashSql;" -Json)
     return @{
         status = 'Imported'
@@ -537,7 +537,7 @@ function Get-WaaDownloadCandidates {
 }
 
 function Invoke-WaaDownloadsScan {
-    param([string]$DownloadsPath)
+    param([string]$DownloadsPath,[switch]$DeferIdentityRepair)
     Initialize-WaaReportIntake
     $downloads = if (-not [string]::IsNullOrWhiteSpace($DownloadsPath)) { $DownloadsPath } else { Get-WaaDownloadsPath }
     $reportRoot = Get-WaaReportRoot
@@ -584,7 +584,7 @@ function Invoke-WaaDownloadsScan {
                     }
                     catch { [void]$historyErrors.Add("$($historyFile.Name): $($_.Exception.Message)") }
                 }
-                if ($importedCount -gt 0) { Repair-WaaDriverIdentity | Out-Null }
+                if ($importedCount -gt 0 -and -not $DeferIdentityRepair) { Invoke-WaaIdentityRepairIfNeeded -DataChanged | Out-Null }
                 Invoke-Sql "INSERT INTO settings(key,value,updated_at) VALUES('idle_download_signature',$signatureSql,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP;" -AllowWrite | Out-Null
                 $fileHash = Get-WaaFileSha256 $file.FullName
                 $status = if($null-eq$latestImport){'Error'}elseif($importedCount){'Imported'}else{'Current'}
@@ -613,7 +613,7 @@ function Invoke-WaaDownloadsScan {
             $managedPath = Join-Path $folder ($stamp + '_' + $file.Name)
             if (-not (Test-Path -LiteralPath $managedPath)) { Copy-Item -LiteralPath $file.FullName -Destination $managedPath -Force }
 
-            $import = Import-WaaManagedReport -Canonical $canonical -Filename $file.Name -Type $type
+            $import = Import-WaaManagedReport -Canonical $canonical -Filename $file.Name -Type $type -SkipIdentityRepair:$DeferIdentityRepair
             Set-WaaIntakeStatus -Type $type -Downloads $downloads -File $file -Status $import.status -Detail $import.detail -Managed $managedPath -Hash $fileHash -ImportId $import.import_batch_id
             $results[$type] = @{ status=$import.status; file=$file.Name; managed=$managedPath; imported=$import.imported; detail=$import.detail }
         }

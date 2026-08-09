@@ -174,43 +174,47 @@ function Add-WaaIdentityEvidence {
 }
 
 function Get-WaaDriverIdentityEvidence {
+    param([switch]$IncludeHistoricalRaw)
+
     $evidence = [Collections.Generic.List[object]]::new()
 
-    # The stored raw report is evidence. Reading it here makes identity resolution independent
-    # of report import order and can repair databases created by older WAA builds.
-    $imports = @(Invoke-Sql "SELECT id,import_type,raw_source FROM import_batches WHERE import_type IN ('idle','bol') ORDER BY id;" -Json)
-    foreach ($import in $imports) {
-        $rows = @(Split-ImportRows ([string]$import.raw_source))
-        if ($rows.Count -lt 2) { continue }
-        $header = @($rows[0])
+    # Raw report replay is a versioned migration path for legacy databases, not routine
+    # startup work. Current imports normalize aliases as they are committed.
+    if ($IncludeHistoricalRaw) {
+        $imports = @(Invoke-Sql "SELECT id,import_type,raw_source FROM import_batches WHERE import_type IN ('idle','bol') ORDER BY id;" -Json)
+        foreach ($import in $imports) {
+            $rows = @(Split-ImportRows ([string]$import.raw_source))
+            if ($rows.Count -lt 2) { continue }
+            $header = @($rows[0])
 
-        if ([string]$import.import_type -eq 'idle') {
-            $group = Get-WaaHeaderIndex $header @('Group by  (copy)','Group by (copy)','Driver')
-            $unit = Get-WaaHeaderIndex $header @('Unit Code','Unit','Truck')
-            $measure = Get-WaaHeaderIndex $header @('Measure Names','Measure Name')
-            if ($group -lt 0) { continue }
+            if ([string]$import.import_type -eq 'idle') {
+                $group = Get-WaaHeaderIndex $header @('Group by  (copy)','Group by (copy)','Driver')
+                $unit = Get-WaaHeaderIndex $header @('Unit Code','Unit','Truck')
+                $measure = Get-WaaHeaderIndex $header @('Measure Names','Measure Name')
+                if ($group -lt 0) { continue }
 
-            for ($rowIndex=1; $rowIndex -lt $rows.Count; $rowIndex++) {
-                $row = @($rows[$rowIndex])
-                if ($group -ge $row.Count) { continue }
-                if ($measure -ge 0 -and $measure -lt $row.Count -and [string]$row[$measure] -ne 'Idle %') { continue }
+                for ($rowIndex=1; $rowIndex -lt $rows.Count; $rowIndex++) {
+                    $row = @($rows[$rowIndex])
+                    if ($group -ge $row.Count) { continue }
+                    if ($measure -ge 0 -and $measure -lt $row.Count -and [string]$row[$measure] -ne 'Idle %') { continue }
 
-                $cell = [regex]::Replace(([string]$row[$group]).Trim(),'\s+',' ')
-                # Rolling 7-Day contract: <=6 character dispatch code, one boundary,
-                # then the complete driver name regardless of how many name parts follow.
-                if ($cell -notmatch '^([^\s]{1,6})\s+(.+?)\s*$') { continue }
-                $truck = if ($unit -ge 0 -and $unit -lt $row.Count) { [string]$row[$unit] } else { '' }
-                Add-WaaIdentityEvidence $evidence $Matches[1] $Matches[2] $truck 'rolling-7-day'
+                    $cell = [regex]::Replace(([string]$row[$group]).Trim(),'\s+',' ')
+                    # Rolling 7-Day contract: <=6 character dispatch code, one boundary,
+                    # then the complete driver name regardless of how many name parts follow.
+                    if ($cell -notmatch '^([^\s]{1,6})\s+(.+?)\s*$') { continue }
+                    $truck = if ($unit -ge 0 -and $unit -lt $row.Count) { [string]$row[$unit] } else { '' }
+                    Add-WaaIdentityEvidence $evidence $Matches[1] $Matches[2] $truck 'rolling-7-day'
+                }
             }
-        }
-        else {
-            $code = Get-WaaHeaderIndex $header @('Last Dispatch Driver cd','Last Dispatch Driver Code','Driver cd')
-            $name = Get-WaaHeaderIndex $header @('Last Dispatch Driver nm','Last Dispatch Driver Name','Driver Name')
-            if ($code -lt 0 -or $name -lt 0) { continue }
-            for ($rowIndex=1; $rowIndex -lt $rows.Count; $rowIndex++) {
-                $row = @($rows[$rowIndex])
-                if ($code -ge $row.Count -or $name -ge $row.Count) { continue }
-                Add-WaaIdentityEvidence $evidence ([string]$row[$code]) ([string]$row[$name]) '' 'missing-bol'
+            else {
+                $code = Get-WaaHeaderIndex $header @('Last Dispatch Driver cd','Last Dispatch Driver Code','Driver cd')
+                $name = Get-WaaHeaderIndex $header @('Last Dispatch Driver nm','Last Dispatch Driver Name','Driver Name')
+                if ($code -lt 0 -or $name -lt 0) { continue }
+                for ($rowIndex=1; $rowIndex -lt $rows.Count; $rowIndex++) {
+                    $row = @($rows[$rowIndex])
+                    if ($code -ge $row.Count -or $name -ge $row.Count) { continue }
+                    Add-WaaIdentityEvidence $evidence ([string]$row[$code]) ([string]$row[$name]) '' 'missing-bol'
+                }
             }
         }
     }
@@ -315,12 +319,13 @@ function Set-WaaObservedPtaCode {
     )
 
     if ($DriverId -le 0) { return $false }
-    $driverRows = @(Invoke-Sql "SELECT id,full_name,pta_code FROM drivers WHERE id=$DriverId;" -Json)
+    $driverRows = @(Invoke-Sql "SELECT id,full_name,pta_code,EXISTS(SELECT 1 FROM driver_aliases a WHERE a.driver_id=drivers.id AND a.alias_type='pta_code' AND a.alias_value=$(ConvertTo-WaaIdentitySqlLiteral (Normalize-WaaPtaCode $PtaCode)) COLLATE NOCASE) observed_alias FROM drivers WHERE id=$DriverId;" -Json)
     if ($driverRows.Count -eq 0) { return $false }
 
     $driver = $driverRows[0]
     $actual = Normalize-WaaPtaCode $PtaCode
     if (-not (Test-WaaPtaCodeMatchesName ([string]$driver.full_name) $actual)) { return $false }
+    if ((Normalize-WaaPtaCode ([string]$driver.pta_code)) -eq $actual -and [int]$driver.observed_alias -eq 1) { return $false }
 
     $actualSql = ConvertTo-WaaIdentitySqlLiteral $actual
     $conflicts = [int](Invoke-Sql @"
@@ -364,8 +369,10 @@ COMMIT;
 }
 
 function Repair-WaaDriverIdentity {
+    param([switch]$IncludeHistoricalRaw)
+
     $watch = [Diagnostics.Stopwatch]::StartNew()
-    $evidence = @(Get-WaaDriverIdentityEvidence)
+    $evidence = @(Get-WaaDriverIdentityEvidence -IncludeHistoricalRaw:$IncludeHistoricalRaw)
     $byDispatch = @{}
     foreach ($item in $evidence) {
         $key = ([string]$item.dispatch_code).ToUpperInvariant()
@@ -599,4 +606,22 @@ AND NOT EXISTS(
 
     $watch.Stop()
     return @{ evidence=$evidenceCount; merged=$merged; assignment_links=$assignmentLinks; ambiguous=$ambiguous; elapsed_ms=[math]::Round($watch.Elapsed.TotalMilliseconds,1) }
+}
+
+function Invoke-WaaIdentityRepairIfNeeded {
+    param([switch]$DataChanged)
+
+    $version = '3'
+    $priorVersion = [string](Invoke-Sql "SELECT value FROM settings WHERE key='identity_repair_version';")
+    $migrationRequired = $priorVersion -ne $version
+    if (-not $DataChanged -and -not $migrationRequired) {
+        return @{ skipped=$true; version=$version; evidence=0; merged=0; assignment_links=0; ambiguous=0; elapsed_ms=0 }
+    }
+
+    $result = Repair-WaaDriverIdentity -IncludeHistoricalRaw:$migrationRequired
+    $versionSql = ConvertTo-WaaIdentitySqlLiteral $version
+    Invoke-Sql "INSERT INTO settings(key,value,updated_at) VALUES('identity_repair_version',$versionSql,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP;" -AllowWrite | Out-Null
+    $result['skipped'] = $false
+    $result['version'] = $version
+    return $result
 }

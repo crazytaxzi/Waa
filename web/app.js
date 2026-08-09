@@ -1163,7 +1163,37 @@ async function route() {
 }
 
 window.addEventListener('hashchange', route);
-api('/api/health')
-  .then(health => { $('#health').textContent = health.integrity === 'ok' ? 'LOOPBACK · SECURE' : 'RESTORE REQUIRED'; })
-  .catch(() => { $('#health').textContent = 'OFFLINE'; });
 route();
+
+let maintenanceWasRunning = false;
+async function monitorHealth() {
+  try {
+    const health = await api('/api/health');
+    if (health.integrity !== 'ok') {
+      $('#health').textContent = 'RESTORE REQUIRED';
+      return;
+    }
+    if (health.maintenance_status === 'pending' || health.maintenance_status === 'running') {
+      maintenanceWasRunning = true;
+      $('#health').textContent = 'LOOPBACK · SYNCING';
+      setTimeout(monitorHealth, 750);
+      return;
+    }
+    if (health.maintenance_status === 'error') {
+      $('#health').textContent = 'SYNC NEEDS ATTENTION';
+      toast(health.maintenance_detail || 'Background report scan failed');
+      return;
+    }
+    $('#health').textContent = 'LOOPBACK · SECURE';
+    if (maintenanceWasRunning) {
+      maintenanceWasRunning = false;
+      invalidate('/api/dashboard', '/api/drivers', '/api/bols', '/api/report-intake', '/api/data-quality');
+      await route();
+      toast('Reports and driver identities are current');
+    }
+  }
+  catch {
+    $('#health').textContent = 'OFFLINE';
+  }
+}
+monitorHealth();
