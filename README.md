@@ -46,6 +46,10 @@ Normal Tab navigation follows that order. Call-flow answers auto-save into a per
 
 Notes are intentionally separate from the structured call questions. The sticky **Remember This** rail is a conversational scratchpad for short, useful notes. Press `Alt+N` while a Driver Work Card is open to jump to it; Enter saves the note and Shift+Enter adds a line break.
 
+## Manual truck assignment
+
+Drivers without a current truck association are surfaced by the **Needs Truck** filter on Workflow. Assign the truck directly in that row or from the shared Driver Work Card. WAA validates and normalizes the truck number, appends a `manual` observation to `truck_history`, and audits the action against the canonical driver. The assignment never becomes driver identity and cannot silently replace an existing current truck; later imported assignment evidence remains historical in the same unified model.
+
 ## Dashboard and charts
 
 The UI uses the same neon operations-console design throughout the dashboard, queues, imports, transition screen, and Driver Work Card. Charts are custom SVG components with actual connected trend lines, area glow, axes, keyboard-focusable/hoverable inspection bands, crosshairs, tooltips, and horizontal scrolling as history grows. The same chart component is reused for fleet history and driver idle coaching.

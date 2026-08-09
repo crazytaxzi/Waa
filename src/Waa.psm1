@@ -501,7 +501,7 @@ function Get-CurrentDrivers {
     $sql=@'
 WITH p AS (SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM pta_observations WHERE driver_id IS NOT NULL),
 t AS (SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM truck_history)
-SELECT d.id,d.full_name,d.pta_code,coalesce(p.truck,t.truck) truck,p.division,p.pta_at,p.pta_raw,p.actionable,p.operational_status,p.planning_status,p.operational_note,p.driver_type,p.location,p.source,p.observed_at
+SELECT d.id,d.full_name,d.pta_code,coalesce(nullif(trim(p.truck),''),t.truck) truck,p.division,p.pta_at,p.pta_raw,p.actionable,p.operational_status,p.planning_status,p.operational_note,p.driver_type,p.location,p.source,p.observed_at
 FROM drivers d LEFT JOIN p ON p.driver_id=d.id AND p.rn=1 LEFT JOIN t ON t.driver_id=d.id AND t.rn=1;
 '@
     return Invoke-Sql $sql -Json
@@ -517,7 +517,7 @@ WITH p AS (
   SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
   FROM truck_history WHERE driver_id=$Id
 )
-SELECT d.id,d.full_name,d.pta_code,coalesce(p.truck,t.truck) truck,p.division,p.pta_at,p.pta_raw,
+SELECT d.id,d.full_name,d.pta_code,coalesce(nullif(trim(p.truck),''),t.truck) truck,p.division,p.pta_at,p.pta_raw,
        p.actionable,p.operational_status,p.planning_status,p.operational_note,p.driver_type,p.location,p.source,p.observed_at
 FROM drivers d LEFT JOIN p ON p.driver_id=d.id AND p.rn=1 LEFT JOIN t ON t.driver_id=d.id AND t.rn=1
 WHERE d.id=$Id;
@@ -537,7 +537,7 @@ WITH p AS (
   SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
   FROM truck_history WHERE driver_id=$Id
 ), current_driver AS (
-  SELECT d.id,d.full_name,d.pta_code,coalesce(p.truck,t.truck) truck,p.division,p.pta_at,p.pta_raw,
+  SELECT d.id,d.full_name,d.pta_code,coalesce(nullif(trim(p.truck),''),t.truck) truck,p.division,p.pta_at,p.pta_raw,
          p.actionable,p.operational_status,p.planning_status,p.operational_note,p.driver_type,p.location,p.source,p.observed_at
   FROM drivers d LEFT JOIN p ON p.driver_id=d.id AND p.rn=1 LEFT JOIN t ON t.driver_id=d.id AND t.rn=1
   WHERE d.id=$Id
@@ -579,6 +579,16 @@ function Save-DriverAction {
     param([int]$Id,[hashtable]$Body)
     $action=[string]$Body.action
     switch($action){
+        'assign_truck' {
+            $current=Get-CurrentDriver $Id
+            if($null -eq $current){throw 'Driver not found'}
+            if(-not [string]::IsNullOrWhiteSpace([string]$current.truck)){throw "Driver is already associated with truck $($current.truck)."}
+            $truck=([string]$Body.value).Trim().ToUpperInvariant()
+            if($truck -notmatch '^[A-Z0-9][A-Z0-9 ._-]{0,23}$'){throw 'Truck number must be 1-24 letters, numbers, spaces, periods, underscores, or hyphens.'}
+            $truckSql=ConvertTo-SqlLiteral $truck
+            Invoke-Sql "INSERT INTO truck_history(driver_id,truck,observed_at,source) VALUES($Id,$truckSql,CURRENT_TIMESTAMP,'manual');" -AllowWrite|Out-Null
+            $Body.value=$truck
+        }
         'pta' {
             $pta=Parse-Date ([string]$Body.value); if(!$pta){throw 'Invalid PTA date'}
             $current=Get-CurrentDriver $Id

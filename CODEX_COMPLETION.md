@@ -6,6 +6,8 @@ WAA is a complete local Windows driver-operations application with eight hash-ro
 
 The application now also includes two first-class pages. **Notes & Reminders** is a fleet-wide organizer that requires a canonical driver for every item and supports capture, search, filtering, due-state display, and completion. **Daily Review** presents the immutable audit trail as a local-day chronological record, keeps driver actions attributed to the canonical driver/current truck, supports driver filtering, and opens the shared Driver Work Card directly.
 
+Manual truck assignment is part of the canonical Workflow and Driver Work Card. Unassigned drivers can be filtered and assigned inline; the validated assignment is appended to standard `truck_history` with source `manual`, immediately feeds every current-truck query, and creates a driver-specific audit event. Trucks remain time-dependent observations and are never used as driver identity. Existing associations are protected from accidental overwrite.
+
 The Gothic cybernetic interface uses centralized dark gunmetal/neon tokens, angular panels, responsive tables, strong focus states, text-backed alert colors, inline SVG charts, and reduced-motion support. It contains no third-party frontend code, CDN, build step, or Internet dependency.
 
 Performance work is integrated into the existing architecture: the Driver Work Card is assembled by one SQLite JSON query; current-driver lookups are targeted; dashboard latest-row ties and true contiguous weighted 28-day history are handled correctly; driver/audit/organizer indexes are migrated in place; automatic Downloads scans run in a non-blocking runspace and reconcile identity only after actual imports; startup backups retain the newest ten automatic copies; static assets are memory-cached; and the byte-accurate HTTP reader enforces header/body limits and timeouts. The client uses cancellable cached route reads, explicit invalidation, render-once table filtering, delegated table/card/chart interactions, partial card-section refreshes, and CSS layout/paint containment.
@@ -31,10 +33,10 @@ Preview never writes. Commit reparses the supplied raw source, validates rows, r
 
 ## Validation completed — 2026-08-09 integrated performance/organizer revision
 
-- `tests/Run-Tests.ps1`: **43/43 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. New coverage includes targeted current-driver retrieval, driver-specific organizer data, daily activity attribution, performance indexes, HTTP limits/timeouts/static caching, and integrated navigation, in addition to the prior database/import/workflow/security coverage.
+- `tests/Run-Tests.ps1`: **48/48 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. Coverage includes targeted current-driver retrieval, driver-specific organizer data, daily activity attribution, manual truck assignment/history/audit/overwrite protection, performance indexes, HTTP limits/timeouts/static caching, and integrated navigation, in addition to the prior database/import/workflow/security coverage.
 - `tests/Identity.Tests.ps1`: **7/7 scenarios passed**, including Rolling-first, PTA-first, placeholder reconciliation, assignment history, and ambiguous derived-code isolation.
 - `tests/Measure-PtaPerformance.ps1`: **500 rows**, 149.6 ms parse, 87.9 ms database phase, result `responsive` in the validation environment.
-- End-to-end real TCP server exercise passed health, memory-cached static delivery, a multibyte Unicode PTA POST, Driver Note creation, organizer retrieval, and local-day activity retrieval.
+- End-to-end real TCP server exercises passed health, memory-cached static delivery, a multibyte Unicode PTA POST, Driver Note creation, organizer retrieval, local-day activity retrieval, manual truck assignment, Workflow refresh, driver audit attribution, and assignment overwrite protection.
 - JavaScript syntax, whitespace validation, SQLite schema execution, single-query Driver Card JSON, organizer SQL, daily activity SQL, latest-row tie handling, and contiguous weighted 28-day SQL all passed. The official SQLite Windows archive hash was verified as `88b4659fe747896b853af10157316b4ade143553efb89c1c8ca7423a278dcc8b`.
 
 ## Intentionally unresolved business rules
@@ -47,5 +49,5 @@ On the target Windows machine, double-click `Start-Waa.cmd` (or run `Start-Waa.p
 
 ## Codex Run Metadata
 
-- Integrated revision completed: 2026-08-09T15:22:47Z
+- Integrated revision completed: 2026-08-09T15:42:14Z
 - Validation status: complete

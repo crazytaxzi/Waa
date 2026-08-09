@@ -36,6 +36,7 @@ const fmtPercent = value => value == null || !Number.isFinite(Number(value))
   : `${Number(value).toFixed(1)}%`;
 
 const fmtHours = value => Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)} h` : '—';
+const hasTruck = driver => !!String(driver?.truck ?? '').trim();
 const displayDate = value => {
   if (!value) return '—';
   const date = new Date(value);
@@ -262,9 +263,9 @@ async function loadDrivers() {
 
 function driverRows(list, showPta) {
   return list.map(driver => `
-    <tr class="open" data-id="${driver.id}" data-search="${esc(driver._search)}" data-priority="${priority(driver)}">
+    <tr class="open" data-id="${driver.id}" data-search="${esc(driver._search)}" data-priority="${priority(driver)}" data-truck-state="${hasTruck(driver) ? 'assigned' : 'unassigned'}">
       ${showPta ? `<td class="pta-cell ${priority(driver)}"><span class="priority-chip">${priority(driver).toUpperCase()}</span><b>${esc(driver.pta_raw || 'N/A')}</b><small>${esc(relative(driver.pta_at))}</small></td>` : ''}
-      <td><b class="truck-no">${esc(driver.truck)}</b></td>
+      <td>${hasTruck(driver) ? `<b class="truck-no">${esc(driver.truck)}</b>` : `<form class="quick-truck-form" data-driver-id="${driver.id}"><input name="truck" aria-label="Truck number for ${esc(driver.full_name)}" placeholder="Truck #" maxlength="24" required><button type="submit">Assign</button></form>`}</td>
       <td><b>${esc(driver.full_name)}</b><small class="subline">${esc(driver.pta_code)}</small></td>
       <td>${esc(driver.division)}</td>
       <td>${esc(driver.operational_status)}</td>
@@ -286,12 +287,8 @@ async function queue(isPta) {
     <section class="glass-panel table-panel">
       <div class="table-toolbar">
         <div class="searchbox"><span aria-hidden="true">⌕</span><input id="search" placeholder="Search driver, truck, division, status, location"></div>
-        <select id="filter" aria-label="Priority filter">
-          <option value="">All states</option>
-          <option value="pinned">Pinned 23:57</option>
-          <option value="overdue">Overdue</option>
-          <option value="immediate">Immediate</option>
-          <option value="future">Future</option>
+        <select id="filter" aria-label="${isPta ? 'Priority' : 'Truck assignment'} filter">
+          ${isPta ? '<option value="">All states</option><option value="pinned">Pinned 23:57</option><option value="overdue">Overdue</option><option value="immediate">Immediate</option><option value="future">Future</option>' : '<option value="">All drivers</option><option value="unassigned">Needs Truck</option><option value="assigned">Truck Assigned</option>'}
         </select>
       </div>
       <div class="table-scroll"><table><thead><tr>${isPta ? '<th>PTA / Priority</th>' : ''}<th>Truck</th><th>Driver</th><th>Div</th><th>Operational</th><th>Planning</th><th>Note</th><th>Type</th><th>Location</th></tr></thead><tbody></tbody></table></div>
@@ -307,7 +304,7 @@ async function queue(isPta) {
   const draw = () => {
     const query = $('#search').value.toLowerCase();
     const filter = $('#filter').value;
-    $$('tbody tr').forEach(row => { row.hidden = !row.dataset.search.includes(query) || !!filter && row.dataset.priority !== filter; });
+    $$('tbody tr').forEach(row => { const stateValue = isPta ? row.dataset.priority : row.dataset.truckState; row.hidden = !row.dataset.search.includes(query) || !!filter && stateValue !== filter; });
   };
 
   $('#search').addEventListener('input', debounce(draw));
@@ -415,7 +412,7 @@ async function organizer() {
 
 const activityLabels = {
   note: 'Note added', reminder: 'Reminder created', complete_reminder: 'Reminder status changed',
-  pta: 'PTA updated', bol_mentioned: 'Missing BOL status changed', call_flow_update: 'Call flow updated',
+  pta: 'PTA updated', assign_truck: 'Truck assigned', bol_mentioned: 'Missing BOL status changed', call_flow_update: 'Call flow updated',
   transition_regenerated: 'Transition regenerated', transition_saved: 'Transition saved',
   home_checked: 'Home time reviewed', preplan_reviewed: 'Preplan reviewed', routing_checked: 'Routing reviewed',
   safety_mentioned_at: 'Safety discussed', include_transition: 'Transition selection changed'
@@ -680,7 +677,7 @@ async function openCard(id) {
     <div class="call-layout">
       <main class="call-main">${flow}</main>
       <aside class="call-side">
-        <section class="side-card snapshot"><p class="eyebrow">Driver snapshot</p><dl><div><dt>Truck</dt><dd>${esc(driver.truck)}</dd></div><div><dt>Location</dt><dd>${esc(driver.location)}</dd></div><div><dt>Status</dt><dd>${esc(driver.operational_status)}</dd></div><div><dt>Planning</dt><dd>${esc(driver.planning_status)}</dd></div><div><dt>Freshness</dt><dd>${esc(displayDate(driver.observed_at))}</dd></div></dl></section>
+        <section class="side-card snapshot"><p class="eyebrow">Driver snapshot</p><dl><div><dt>Truck</dt><dd>${esc(driver.truck)}</dd></div><div><dt>Location</dt><dd>${esc(driver.location)}</dd></div><div><dt>Status</dt><dd>${esc(driver.operational_status)}</dd></div><div><dt>Planning</dt><dd>${esc(driver.planning_status)}</dd></div><div><dt>Freshness</dt><dd>${esc(displayDate(driver.observed_at))}</dd></div></dl>${hasTruck(driver) ? '' : `<div class="unassigned-truck"><p>No truck association is on record.</p><form class="quick-truck-form" data-driver-id="${driver.id}"><input name="truck" aria-label="Truck number" placeholder="Enter truck #" maxlength="24" required><button type="submit">Assign Truck</button></form></div>`}</section>
         <section class="side-card notes-rail"><div class="side-title"><div><p class="eyebrow">Remember this</p><h3>Call Notes</h3></div><span>Alt+N</span></div><p class="rail-copy">Use this like a scratchpad, not a form. Save the sentence you would tell yourself later.</p><div class="quick-note"><textarea id="quickNote" placeholder="Driver mentioned…"></textarea><button id="saveNote" type="button">Save Note</button></div><div id="noteList">${noteList(card.notes || [])}</div></section>
         <section class="side-card followups"><p class="eyebrow">After the call</p><h3>Follow-ups</h3><div class="follow-add"><input id="remtext" placeholder="Reminder"><input id="remdue" type="datetime-local"><button id="addReminder" type="button">Add</button></div><div id="followupList">${followupList(card.reminders || [])}</div></section>
       </aside>
@@ -801,7 +798,26 @@ document.addEventListener('keydown', event => {
 });
 document.addEventListener('click', event => {
   const opener = event.target.closest('.open[data-id]');
-  if (opener) openCard(Number(opener.dataset.id));
+  if (opener && !event.target.closest('button,input,select,textarea,a')) openCard(Number(opener.dataset.id));
+});
+document.addEventListener('submit', async event => {
+  const form = event.target.closest('.quick-truck-form');
+  if (!form) return;
+  event.preventDefault();
+  const driverId = Number(form.dataset.driverId);
+  const truck = new FormData(form).get('truck')?.trim();
+  if (!driverId || !truck) return;
+  const button = $('button', form);
+  button.disabled = true;
+  try {
+    await api(`/api/drivers/${driverId}/action`, {
+      method: 'POST', body: JSON.stringify({ action: 'assign_truck', value: truck })
+    });
+    invalidate('/api/drivers', '/api/dashboard', '/api/organizer', '/api/activity', `/api/drivers/${driverId}`);
+    toast(`Truck ${truck.toUpperCase()} assigned`);
+    if (cardId === driverId) await openCard(driverId);
+    else if ((location.hash.slice(1) || 'dashboard') === 'workflow') await queue(false);
+  } catch (error) { toast(error.message); button.disabled = false; }
 });
 document.addEventListener('change', async event => {
   const checkbox = event.target.closest('[data-organizer-complete]');
