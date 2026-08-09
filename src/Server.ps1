@@ -1,13 +1,14 @@
 [CmdletBinding()]param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][string]$DataRoot,[switch]$NoBrowser)
-$ErrorActionPreference='Stop';Import-Module (Join-Path $PSScriptRoot 'Waa.psm1') -Force
-$state=Initialize-Waa $Root $DataRoot;$web=[IO.Path]::GetFullPath((Join-Path $Root 'web'))
+$ErrorActionPreference='Stop';Import-Module (Join-Path $PSScriptRoot 'Waa.psm1') -Force;. (Join-Path $PSScriptRoot 'ReportIntake.ps1')
+$state=Initialize-Waa $Root $DataRoot;Initialize-WaaReportIntake;$startupIntake=Invoke-WaaDownloadsScan;$script:LastIntakeScan=Get-Date;$web=[IO.Path]::GetFullPath((Join-Path $Root 'web'))
 function Send-Response($stream,[int]$status,[string]$type,[byte[]]$bytes){$reason=@{200='OK';201='Created';204='No Content';400='Bad Request';404='Not Found';409='Conflict';500='Internal Server Error'}[$status];$head="HTTP/1.1 $status $reason`r`nContent-Type: $type`r`nContent-Length: $($bytes.Length)`r`nCache-Control: no-store`r`nContent-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`r`nX-Content-Type-Options: nosniff`r`nReferrer-Policy: no-referrer`r`nAccess-Control-Allow-Origin: http://127.0.0.1`r`nConnection: close`r`n`r`n";$hb=[Text.Encoding]::ASCII.GetBytes($head);$stream.Write($hb,0,$hb.Length);if($bytes.Length){$stream.Write($bytes,0,$bytes.Length)}}
 function Send-Json($s,[int]$code,$data){$json=$data|ConvertTo-Json -Depth 20 -Compress;Send-Response $s $code 'application/json; charset=utf-8' ([Text.Encoding]::UTF8.GetBytes($json))}
 function Send-JsonArray($s,[int]$code,$data){$json=ConvertTo-Json -InputObject @($data) -Depth 20 -Compress;Send-Response $s $code 'application/json; charset=utf-8' ([Text.Encoding]::UTF8.GetBytes($json))}
 function Read-Request($client){$s=$client.GetStream();$reader=[IO.StreamReader]::new($s,[Text.Encoding]::UTF8,$false,4096,$true);$line=$reader.ReadLine();if(!$line){return $null};$p=$line.Split(' ');$headers=@{};while(($line=$reader.ReadLine()) -ne ''){$i=$line.IndexOf(':');if($i-gt0){$headers[$line.Substring(0,$i).ToLowerInvariant()]=$line.Substring($i+1).Trim()}};$body='';if($headers['content-length']){$buf=New-Object char[] ([int]$headers['content-length']);$n=$reader.ReadBlock($buf,0,$buf.Length);$body=-join $buf[0..($n-1)]};return @{method=$p[0];target=$p[1];headers=$headers;body=$body;stream=$s}}
+function Refresh-DownloadsIfDue{if(((Get-Date)-$script:LastIntakeScan).TotalSeconds-ge60){try{Invoke-WaaDownloadsScan|Out-Null}catch{};$script:LastIntakeScan=Get-Date}}
 $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,8765);$port=8765;for($p=8765;$p-le8775;$p++){try{$listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,$p);$listener.Start();$port=$p;break}catch{if($p-eq8775){throw}}}
-$url="http://127.0.0.1:$port/";Write-Host "WAA console ready at $url" -ForegroundColor Green;Write-Host "Database: $($state.db) | Integrity: $($state.integrity)";if(!$NoBrowser){Start-Process $url}
-try{while($true){$client=$listener.AcceptTcpClient();try{$req=Read-Request $client;if(!$req){continue};$uri=[Uri]("http://127.0.0.1"+$req.target);$path=[Uri]::UnescapeDataString($uri.AbsolutePath);$method=$req.method
+$url="http://127.0.0.1:$port/";Write-Host "WAA console ready at $url" -ForegroundColor Green;Write-Host "Database: $($state.db) | Integrity: $($state.integrity)";Write-Host "Downloads intake: $((Get-WaaReportIntakeStatus).downloads_path)";if(!$NoBrowser){Start-Process $url}
+try{while($true){$client=$listener.AcceptTcpClient();try{$req=Read-Request $client;if(!$req){continue};Refresh-DownloadsIfDue;$uri=[Uri]("http://127.0.0.1"+$req.target);$path=[Uri]::UnescapeDataString($uri.AbsolutePath);$method=$req.method
   try{
     if($path.StartsWith('/api/')){$body=@{};if($req.body){$obj=$req.body|ConvertFrom-Json;if($obj){foreach($prop in $obj.PSObject.Properties){$body[$prop.Name]=$prop.Value}}}
       if($method-eq'GET'-and$path-eq'/api/health'){Send-Json $req.stream 200 @{ok=$true;integrity=$state.integrity;read_only=$state.read_only}}
@@ -15,8 +16,10 @@ try{while($true){$client=$listener.AcceptTcpClient();try{$req=Read-Request $clie
       elseif($method-eq'GET'-and$path-eq'/api/drivers'){Send-JsonArray $req.stream 200 @(Get-CurrentDrivers)}
       elseif($method-eq'GET'-and$path-match'^/api/drivers/(\d+)$'){Send-Json $req.stream 200 (Get-DriverCard ([int]$Matches[1]))}
       elseif($method-eq'POST'-and$path-match'^/api/drivers/(\d+)/action$'){Send-Json $req.stream 200 (Save-DriverAction ([int]$Matches[1]) $body)}
-      elseif($method-eq'POST'-and$path-eq'/api/import/preview'){Send-Json $req.stream 200 (Get-ImportPreview $body.raw $body.filename $body.type)}
-      elseif($method-eq'POST'-and$path-eq'/api/import/commit'){Send-Json $req.stream 201 (Import-WaaData $body.raw $body.filename $body.type)}
+      elseif($method-eq'POST'-and$path-eq'/api/import/preview'){if($body.type-and$body.type-ne'pta'){throw 'Rolling 7-Day and Missing BOL reports are managed automatically from Downloads. PTA is paste-only.'};Send-Json $req.stream 200 (Get-ImportPreview $body.raw 'PTA paste' 'pta')}
+      elseif($method-eq'POST'-and$path-eq'/api/import/commit'){if($body.type-and$body.type-ne'pta'){throw 'Rolling 7-Day and Missing BOL reports are managed automatically from Downloads. PTA is paste-only.'};Send-Json $req.stream 201 (Import-WaaData $body.raw 'PTA paste' 'pta')}
+      elseif($method-eq'GET'-and$path-eq'/api/report-intake'){Send-Json $req.stream 200 (Get-WaaReportIntakeStatus)}
+      elseif($method-eq'POST'-and$path-eq'/api/report-intake/scan'){$scan=Invoke-WaaDownloadsScan;$script:LastIntakeScan=Get-Date;Send-Json $req.stream 200 $scan}
       elseif($method-eq'GET'-and$path-eq'/api/data-quality'){Send-Json $req.stream 200 (Get-DataQuality)}
       elseif($method-eq'POST'-and$path-eq'/api/identity/resolve'){Send-Json $req.stream 200 (Resolve-Identity ([int]$body.issue_id) ([int]$body.driver_id))}
       elseif($method-eq'GET'-and$path-eq'/api/transition'){Send-Json $req.stream 200 (Get-Transition)}
