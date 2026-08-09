@@ -6,6 +6,51 @@ $script:DataRoot = $null
 $script:Db = $null
 $script:Sqlite = $null
 $script:ReadOnly = $false
+$script:SqlProcess = $null
+$script:SqlLock = New-Object object
+
+function Stop-WaaSqlSession {
+    if ($null -eq $script:SqlProcess) { return }
+    try {
+        if (-not $script:SqlProcess.HasExited) {
+            $script:SqlProcess.StandardInput.WriteLine('.quit')
+            $script:SqlProcess.StandardInput.Flush()
+            if (-not $script:SqlProcess.WaitForExit(1000)) { $script:SqlProcess.Kill() }
+        }
+    }
+    catch { }
+    finally {
+        try { $script:SqlProcess.Dispose() } catch { }
+        $script:SqlProcess = $null
+    }
+}
+
+function Start-WaaSqlSession {
+    Stop-WaaSqlSession
+    $start = New-Object Diagnostics.ProcessStartInfo
+    $start.FileName = $script:Sqlite
+    $escapedDb = $script:Db.Replace('"','\"')
+    $start.Arguments = "-batch `"$escapedDb`""
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $false
+    $process = New-Object Diagnostics.Process
+    $process.StartInfo = $start
+    if (-not $process.Start()) { throw 'Unable to start the bundled SQLite runtime.' }
+    $process.StandardInput.AutoFlush = $true
+    $process.StandardInput.WriteLine('.bail off')
+    $process.StandardInput.WriteLine('.log stdout')
+    $process.StandardInput.WriteLine('.timeout 5000')
+    $process.StandardInput.WriteLine('PRAGMA foreign_keys=ON;')
+    $marker = '__WAA_SQL_READY__'
+    $process.StandardInput.WriteLine(".print $marker")
+    while ($process.StandardOutput.ReadLine() -ne $marker) {
+        if ($process.HasExited) { throw 'The bundled SQLite runtime stopped during startup.' }
+    }
+    $script:SqlProcess = $process
+}
 
 function ConvertTo-SqlLiteral {
     param([AllowNull()]$Value)
@@ -21,11 +66,26 @@ function ConvertTo-SqlLiteral {
 function Invoke-Sql {
     param([Parameter(Mandatory = $true)][string]$Sql, [switch]$Json, [switch]$AllowWrite)
     if ($script:ReadOnly -and $AllowWrite) { throw 'Database integrity mode is read-only. Restore a valid backup.' }
-    $arguments = @('-batch', '-bail', $script:Db)
-    if ($Json) { $arguments += '-json' }
-    $input = ".timeout 5000`nPRAGMA foreign_keys=ON;`n$Sql"
-    $output = $input | & $script:Sqlite @arguments 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "SQLite error: $output" }
+    [Threading.Monitor]::Enter($script:SqlLock)
+    try {
+        if ($null -eq $script:SqlProcess -or $script:SqlProcess.HasExited) { Start-WaaSqlSession }
+        $marker = '__WAA_SQL_END_' + [Guid]::NewGuid().ToString('N') + '__'
+        $script:SqlProcess.StandardInput.WriteLine($(if ($Json) { '.mode json' } else { '.mode list' }))
+        $script:SqlProcess.StandardInput.WriteLine('.headers off')
+        $script:SqlProcess.StandardInput.WriteLine($Sql)
+        $script:SqlProcess.StandardInput.WriteLine(".print $marker")
+        $lines = New-Object 'Collections.Generic.List[string]'
+        while ($true) {
+            $line = $script:SqlProcess.StandardOutput.ReadLine()
+            if ($null -eq $line) { throw 'The bundled SQLite runtime stopped unexpectedly.' }
+            if ($line -eq $marker) { break }
+            [void]$lines.Add($line)
+        }
+        $errors = @($lines | Where-Object { $_ -match '^(Parse error|Runtime error|Error:)' })
+        if ($errors.Count) { throw "SQLite error: $($errors -join ' ')" }
+        $output = @($lines | Where-Object { $_ -notmatch '^\(\d+\) ' })
+    }
+    finally { [Threading.Monitor]::Exit($script:SqlLock) }
     if (-not $Json) { return ($output -join "`n") }
     $text = ($output -join "`n").Trim()
     if ([string]::IsNullOrWhiteSpace($text)) { return @() }
@@ -70,6 +130,7 @@ function Initialize-Waa {
     $script:Db = Join-Path $DataRoot 'waa.db'
     $script:Sqlite = if ($env:WAA_SQLITE_TEST) { $env:WAA_SQLITE_TEST } else { Join-Path $Root 'runtime/sqlite/sqlite3.exe' }
     if (-not (Test-Path -LiteralPath $script:Sqlite)) { throw "Bundled SQLite runtime missing: $script:Sqlite" }
+    Start-WaaSqlSession
     if ((Test-Path -LiteralPath $script:Db) -and -not $SkipStartupBackup) { Backup-Waa 'startup' | Out-Null }
 
     $schema = @'
@@ -123,6 +184,8 @@ COMMIT;
     if ($integrity -ne 'ok') { $script:ReadOnly = $true }
     return @{ db = $script:Db; integrity = $integrity; read_only = $script:ReadOnly }
 }
+
+$ExecutionContext.SessionState.Module.OnRemove = { Stop-WaaSqlSession }
 
 function Get-Sha256 {
     param([string]$Text)

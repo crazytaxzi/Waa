@@ -12,7 +12,7 @@ Manual truck assignment is part of the canonical Workflow and Driver Work Card. 
 
 The Gothic cybernetic interface uses centralized dark gunmetal/neon tokens, angular panels, responsive tables, strong focus states, text-backed alert colors, inline SVG charts, and reduced-motion support. It contains no third-party frontend code, CDN, build step, or Internet dependency.
 
-Performance work is integrated into the existing architecture: the Driver Work Card is assembled by one SQLite JSON query; current-driver lookups are targeted; dashboard latest-row ties and true contiguous weighted 28-day history are handled correctly; driver/audit/organizer indexes are migrated in place; automatic Downloads scans run in a non-blocking runspace and reconcile identity only after actual imports; startup backups retain the newest ten automatic copies; static assets are memory-cached; and the byte-accurate HTTP reader enforces header/body limits and timeouts. The client uses cancellable cached route reads, explicit invalidation, render-once table filtering, delegated table/card/chart interactions, partial card-section refreshes, and CSS layout/paint containment.
+Performance work is integrated into the existing architecture: the database layer now maintains one synchronized, self-restarting SQLite shell session for the application lifetime instead of launching `sqlite3.exe` for every query. It preserves the portable-runtime constraint and disposes the child process with the module. In a same-machine 100-query comparison, this reduced database transport time from 1010.8 ms to 308.2 ms (3.28x faster). The Driver Work Card is assembled by one SQLite JSON query; current-driver lookups are targeted; dashboard latest-row ties and true contiguous weighted 28-day history are handled correctly; driver/audit/organizer indexes are migrated in place; automatic Downloads scans run in a non-blocking runspace and reconcile identity only after actual imports; startup backups retain the newest ten automatic copies; static assets are memory-cached; and the byte-accurate HTTP reader enforces header/body limits and timeouts. The client uses cancellable cached route reads, explicit invalidation, render-once table filtering, delegated table/card/chart interactions, partial card-section refreshes, and CSS layout/paint containment.
 
 ## Architecture and major files
 
@@ -33,9 +33,9 @@ Operational SQLite lives only at `%LOCALAPPDATA%\Waa\waa.db`. The schema covers 
 
 Preview never writes. Commit reparses the supplied raw source, validates rows, records parser/source metadata and the exact source, and rejects exact duplicates by SHA-256. Ambiguous or unmatched identity evidence remains visible for explicit alias resolution.
 
-## Validation completed — 2026-08-09 integrated performance/organizer revision
+## Validation completed — 2026-08-09 persistent database-session revision
 
-- `tests/Run-Tests.ps1`: **55/55 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. Coverage includes targeted current-driver retrieval, driver-specific organizer data, daily activity attribution/deletion, ownership-checked note/reminder deletion, card-listener replacement, versioned client assets, manual truck assignment/history/audit/overwrite protection, performance indexes, HTTP limits/timeouts/static caching, and integrated navigation, in addition to the prior database/import/workflow/security coverage.
+- `tests/Run-Tests.ps1`: **56/56 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. Coverage includes persistent SQLite-session lifecycle, targeted current-driver retrieval, driver-specific organizer data, daily activity attribution/deletion, ownership-checked note/reminder deletion, card-listener replacement, versioned client assets, manual truck assignment/history/audit/overwrite protection, performance indexes, HTTP limits/timeouts/static caching, and integrated navigation, in addition to the prior database/import/workflow/security coverage.
 - `tests/Identity.Tests.ps1`: **7/7 scenarios passed**, including Rolling-first, PTA-first, placeholder reconciliation, assignment history, and ambiguous derived-code isolation.
 - `tests/Measure-PtaPerformance.ps1`: **500 rows**, 149.6 ms parse, 87.9 ms database phase, result `responsive` in the validation environment.
 - End-to-end real TCP server exercises passed health, memory-cached static delivery, a multibyte Unicode PTA POST, single note/reminder creation, deletion ownership enforcement, note/reminder deletion, Daily Review deletion, organizer retrieval, local-day activity retrieval, manual truck assignment, Workflow refresh, driver audit attribution, and assignment overwrite protection.
@@ -51,5 +51,5 @@ On the target Windows machine, double-click `Start-Waa.cmd` (or run `Start-Waa.p
 
 ## Codex Run Metadata
 
-- Integrated revision completed: 2026-08-09T16:24:08Z
+- Integrated revision completed: 2026-08-09T17:02:00Z
 - Validation status: complete
