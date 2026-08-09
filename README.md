@@ -60,6 +60,8 @@ The UI uses the same neon operations-console design throughout the dashboard, qu
 
 The two 7-day Top 5 lists exclude exact 0% and 100% readings as likely telemetry/reporting edge cases. Those records remain stored and visible, and the safeguard does not filter, clamp, or otherwise alter the fleet or driver weighted 28-day calculations.
 
+The **Above 50% Coached** dashboard card measures drivers whose latest Rolling 7-Day idle is above 50% and who have a non-empty Idle Coaching plan saved in any Driver Card call session. It shows the coached percentage plus the exact coached/eligible driver counts. This coaching metric does not change idle measurements or Top 5 membership.
+
 ## Architecture and security
 
 - `Start-Waa.ps1` — dependency-free launcher

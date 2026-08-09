@@ -24,6 +24,8 @@ The main dashboard 28-day chart now explicitly binds the shared chart renderer t
 
 Driver Card transition selection now synchronizes the persisted transition draft immediately. Generated drafts use `<truck> - <driver name> : <transition note>` lines in truck order. For manually edited drafts, synchronization surgically replaces only the affected driver's generated line, preserving unrelated manual content instead of requiring Regenerate or overwriting the draft.
 
+The dashboard includes **Above 50% Coached**: the percentage of drivers whose latest Rolling 7-Day idle exceeds 50% and who have a non-empty Idle Coaching plan saved in a Driver Card call session. The card also exposes the exact coached/eligible counts, keeping the result auditable.
+
 Rendering was simplified for low-end PCs: continuous ambient/signal/pulse animation, full-window backdrop blur, SVG point drop shadows, and large live blur layers were removed while retaining the dark neon visual hierarchy. Copy such as “Heroes in Training,” “Steal the good habits,” and the invented organization expansion was replaced with direct operational language.
 
 ## Architecture and major files
@@ -47,7 +49,7 @@ Preview never writes. Commit reparses the supplied raw source, validates rows, r
 
 ## Validation completed — 2026-08-09 full audit and 28-day idle revision
 
-- `tests/Run-Tests.ps1`: **67/67 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. Coverage proves the dashboard binds `history28` to `p28` and invalidates stale import caches, exact 0%/100% readings are excluded only from the 7-day Top 5 lists, and their weighted 28-day values remain intact. It also covers historical idle backfill, the unchanged-history fast path, consolidated context reads, compact mutations, reminder snooze, timer deletion, and on-time controls. Prior database/import/identity/workflow/security coverage remains intact.
+- `tests/Run-Tests.ps1`: **68/68 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. Coverage proves the coached share uses distinct currently-above-50% drivers with saved idle plans, the dashboard binds `history28` to `p28`, exact 0%/100% readings are excluded only from 7-day Top 5 rankings, and weighted 28-day values remain intact. It also covers historical idle backfill, consolidated context reads, compact mutations, reminders, timers, transitions, and on-time controls.
 - `tests/Identity.Tests.ps1`: **7/7 scenarios passed**, including Rolling-first, PTA-first, placeholder reconciliation, assignment history, and ambiguous derived-code isolation.
 - `tests/Measure-PtaPerformance.ps1`: **500 rows**, 147.7 ms parse, 31.7 ms database phase, 1959.7 ms complete preview/reparse/import/identity pipeline, result `responsive` in the validation environment.
 - End-to-end real TCP server exercises passed health, the consolidated driver-context route, compact conversation update, and minimal driver-action response, in addition to the prior static delivery, Unicode PTA, organizer, deletion, activity, assignment, and ownership exercises.

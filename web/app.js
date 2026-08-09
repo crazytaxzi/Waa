@@ -238,6 +238,7 @@ async function dashboard() {
       ${metricCard('Tracked drivers', String(data.drivers.length), 'Drivers with current idle data', 'blue')}
       ${metricCard('28-day ready', `${data.coverage28?.complete_drivers || 0}/${data.coverage28?.tracked_drivers || 0}`, `Fleet history ${data.coverage28?.fleet_weeks || 0}/4 weeks`, data.coverage28?.fleet_ready ? 'green' : 'purple')}
       ${metricCard('Best current idle', data.heroes?.[0] ? fmtPercent(data.heroes[0].p7) : '—', data.heroes?.[0]?.full_name || 'Awaiting data', 'green')}
+      ${metricCard('Above 50% coached', data.coaching?.percent == null ? '—' : fmtPercent(data.coaching.percent), `${data.coaching?.coached || 0} of ${data.coaching?.eligible || 0} drivers coached`, data.coaching?.eligible && data.coaching.coached === data.coaching.eligible ? 'green' : 'purple')}
     </section>
     <section class="dashboard-grid">
       <div class="glass-panel chart-panel green-edge">

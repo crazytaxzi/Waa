@@ -537,7 +537,8 @@ d28.e engine28,d28.n weeks28,CASE WHEN d28.n=4 AND d28.gaps=0 AND d28.valid_week
 CASE WHEN d28.n<4 THEN CAST(d28.n AS TEXT)||'/4 weekly reports'
      WHEN d28.valid_weeks<4 THEN 'A source period is not seven days'
      WHEN d28.gaps>0 THEN 'Weekly reports are not consecutive'
-     WHEN d28.e=0 THEN 'No engine-hour data' ELSE 'Four consecutive weekly reports' END coverage28_detail
+     WHEN d28.e=0 THEN 'No engine-hour data' ELSE 'Four consecutive weekly reports' END coverage28_detail,
+EXISTS(SELECT 1 FROM driver_call_sessions c WHERE c.driver_id=d.id AND trim(coalesce(c.idle_plan,''))<>'') coached
 FROM drivers d JOIN s ON s.driver_id=d.id LEFT JOIN d28 ON d28.driver_id=d.id;
 '@
     $drivers=@(Invoke-Sql $sql -Json)
@@ -561,13 +562,15 @@ SELECT period_end,weeks,gaps,CASE WHEN weeks=4 AND gaps=0 THEN round(idle28*100.
 FROM rolling ORDER BY period_end;
 '@ -Json)
     $over=@($drivers | Where-Object {$null -ne $_.p7 -and [double]$_.p7 -gt 50}).Count
+    $coachedOver=@($drivers | Where-Object {$null -ne $_.p7 -and [double]$_.p7 -gt 50 -and [int]$_.coached-eq1}).Count
+    $coachedPercent=if($over-gt0){[math]::Round($coachedOver*100.0/$over,1)}else{$null}
     # Exact 0% and 100% weekly values are retained as source data but excluded from
     # comparative Top 5 rankings as likely telemetry/reporting edge cases. This guard
     # intentionally does not alter fleet history or any weighted 28-day calculation.
     $valid=@($drivers | Where-Object {$null -ne $_.p7 -and [double]$_.p7 -gt 0 -and [double]$_.p7 -lt 100} | Sort-Object {[double]$_.p7})
     $complete28=@($drivers|Where-Object{$_.coverage28-eq'Complete'}).Count
     $latestFleet28=if($history28.Count){$history28[-1]}else{$null}
-    return @{drivers=$drivers;heroes=@($valid|Select-Object -First 5);training=@($valid|Sort-Object {[double]$_.p7} -Descending|Select-Object -First 5);over50=$over;history7=$history;history28=$history28;coverage28=@{complete_drivers=$complete28;tracked_drivers=$drivers.Count;fleet_weeks=$(if($null-ne$latestFleet28){[int]$latestFleet28.weeks}else{0});fleet_ready=($null-ne$latestFleet28-and$null-ne$latestFleet28.p28)}}
+    return @{drivers=$drivers;heroes=@($valid|Select-Object -First 5);training=@($valid|Sort-Object {[double]$_.p7} -Descending|Select-Object -First 5);over50=$over;coaching=@{coached=$coachedOver;eligible=$over;percent=$coachedPercent};history7=$history;history28=$history28;coverage28=@{complete_drivers=$complete28;tracked_drivers=$drivers.Count;fleet_weeks=$(if($null-ne$latestFleet28){[int]$latestFleet28.weeks}else{0});fleet_ready=($null-ne$latestFleet28-and$null-ne$latestFleet28.p28)}}
 }
 
 function Get-CurrentDrivers {
