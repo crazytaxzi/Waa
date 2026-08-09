@@ -20,6 +20,8 @@ Rolling reports can contain many historical weekly records in one file; WAA impo
 
 The 7-day Top 5 lists apply a display-only telemetry safeguard: exact 0% and 100% weekly readings are excluded from both comparative rankings. The original measurements stay in SQLite and remain available elsewhere. Fleet history, per-driver history, 28-day coverage, and weighted 28-day values are explicitly outside this filter.
 
+The main dashboard 28-day chart now explicitly binds the shared chart renderer to `p28`; it previously inherited the renderer's `p7` default and therefore displayed an empty chart despite valid API data. Successful report scans and PTA commits also invalidate dashboard/driver caches immediately, so the next navigation cannot show a stale pre-import snapshot.
+
 Rendering was simplified for low-end PCs: continuous ambient/signal/pulse animation, full-window backdrop blur, SVG point drop shadows, and large live blur layers were removed while retaining the dark neon visual hierarchy. Copy such as “Heroes in Training,” “Steal the good habits,” and the invented organization expansion was replaced with direct operational language.
 
 ## Architecture and major files
@@ -43,7 +45,7 @@ Preview never writes. Commit reparses the supplied raw source, validates rows, r
 
 ## Validation completed — 2026-08-09 full audit and 28-day idle revision
 
-- `tests/Run-Tests.ps1`: **66/66 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. New coverage proves exact 0%/100% readings are excluded from both 7-day Top 5 lists while their weighted 28-day values remain intact. It also covers four-file idle backfill, the unchanged-history fast path, consolidated context reads, compact mutations, reminder snooze, timer deletion, and on-time controls. Prior database/import/identity/workflow/security coverage remains intact.
+- `tests/Run-Tests.ps1`: **67/67 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. Coverage proves the dashboard binds `history28` to `p28` and invalidates stale import caches, exact 0%/100% readings are excluded only from the 7-day Top 5 lists, and their weighted 28-day values remain intact. It also covers historical idle backfill, the unchanged-history fast path, consolidated context reads, compact mutations, reminder snooze, timer deletion, and on-time controls. Prior database/import/identity/workflow/security coverage remains intact.
 - `tests/Identity.Tests.ps1`: **7/7 scenarios passed**, including Rolling-first, PTA-first, placeholder reconciliation, assignment history, and ambiguous derived-code isolation.
 - `tests/Measure-PtaPerformance.ps1`: **500 rows**, 147.7 ms parse, 31.7 ms database phase, 1959.7 ms complete preview/reparse/import/identity pipeline, result `responsive` in the validation environment.
 - End-to-end real TCP server exercises passed health, the consolidated driver-context route, compact conversation update, and minimal driver-action response, in addition to the prior static delivery, Unicode PTA, organizer, deletion, activity, assignment, and ownership exercises.

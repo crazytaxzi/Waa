@@ -246,7 +246,7 @@ async function dashboard() {
       </div>
       <div class="glass-panel chart-panel purple-edge">
         <div class="panel-title"><div><p class="eyebrow">Long view</p><h3>28-Day Coverage</h3></div><span class="pulse-dot purple"></span></div>
-        ${chart(data.history28, { tone: 'purple', title: 'Fleet weighted 28-day idle', emptyMessage: `Building 28-day history: ${data.coverage28?.fleet_weeks || 0}/4 weeks`, emptyDetail: 'WAA backfills up to eight recent weekly reports from Downloads. Four consecutive seven-day reports are required.' })}
+        ${chart(data.history28, { field: 'p28', tone: 'purple', title: 'Fleet weighted 28-day idle', emptyMessage: `Building 28-day history: ${data.coverage28?.fleet_weeks || 0}/4 weeks`, emptyDetail: 'WAA backfills up to eight recent weekly reports from Downloads. Four consecutive seven-day reports are required.' })}
       </div>
     </section>
     <section class="dashboard-grid rank-grid">
@@ -532,6 +532,7 @@ async function imports() {
   $('#scan').addEventListener('click', async () => {
     const result = await api('/api/report-intake/scan', { method: 'POST', body: '{}' });
     const changed = result.results?.idle?.imported || result.results?.bol?.imported;
+    if (changed) invalidate('/api/dashboard', '/api/drivers', '/api/bols', '/api/data-quality');
     toast(changed ? 'Report history imported' : 'Downloads already current');
     imports();
   });
@@ -542,6 +543,7 @@ async function imports() {
   });
   $('#commit').addEventListener('click', async () => {
     await api('/api/import/commit', { method: 'POST', body: JSON.stringify({ raw: $('#raw').value, type: 'pta' }) });
+    invalidate('/api/dashboard', '/api/drivers', '/api/data-quality');
     toast('PTA snapshot committed');
     imports();
   });
