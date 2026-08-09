@@ -1,4 +1,6 @@
-# Redis-to-SQLite migration audit
+# Redis-to-SQLite migration audit (superseded)
+
+> Historical decision record only. Redis was rejected because it cannot meet WAA's locked-down, zero-install Windows contract. The implemented architecture is the bundled LMDB + SQLite hybrid documented in `LMDB_SQLITE_ARCHITECTURE.md`.
 
 Status: implementation contract drafted; Redis runtime selection is unresolved for the locked-down Windows target.
 

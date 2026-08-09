@@ -26,16 +26,11 @@ function Get-WaaConversation {
     param([Parameter(Mandatory = $true)][int]$DriverId)
 
     $cycle = Get-WaaConversationCycle -DriverId $DriverId
-    $cycleSql = ConvertTo-SqlLiteral $cycle
-    $rows = @(
-        Invoke-Sql (
-            "INSERT OR IGNORE INTO driver_call_sessions(driver_id,cycle_key) VALUES($DriverId,$cycleSql);" +
-            "SELECT * FROM driver_call_sessions WHERE driver_id=$DriverId AND cycle_key=$cycleSql LIMIT 1;"
-        ) -Json -AllowWrite
-    )
-    if ($rows.Count -eq 0) { throw 'Unable to open driver call session' }
-
-    return $rows[0]
+    $session = Get-WaaLiveCall -DriverId $DriverId -CycleKey $cycle
+    if ($null -ne $session) { return $session }
+    # Opening a card is a read. Create the default session in LMDB without forcing
+    # a synchronous SQLite write onto the UI request path.
+    return Set-WaaLiveCallField -DriverId $DriverId -CycleKey $cycle -Field 'fuel_status' -Value 'Unknown' -NoAudit
 }
 
 function Save-WaaConversation {
@@ -59,20 +54,6 @@ function Save-WaaConversation {
     )
     if ($allowed -notcontains $field) { throw 'Unknown conversation field' }
 
-    $session = Get-WaaConversation -DriverId $DriverId
-    $sessionId = [int]$session.id
-    $valueSql = if ($field -eq 'completed_at') {
-        if ([bool]$Body.value) { 'CURRENT_TIMESTAMP' } else { 'NULL' }
-    }
-    else { ConvertTo-SqlLiteral $Body.value }
-
-    $detail = @{
-        field = $field
-        session_id = $sessionId
-        cycle_key = [string]$session.cycle_key
-        value = $Body.value
-    } | ConvertTo-Json -Compress
-    $detailSql = ConvertTo-SqlLiteral $detail
-    $rows = @(Invoke-Sql "BEGIN;UPDATE driver_call_sessions SET $field=$valueSql,updated_at=CURRENT_TIMESTAMP WHERE id=$sessionId;INSERT INTO audit_history(action,entity_type,entity_id,detail_json) VALUES('call_flow_update','driver','$DriverId',$detailSql);COMMIT;SELECT * FROM driver_call_sessions WHERE id=$sessionId;" -Json -AllowWrite)
-    return $rows[0]
+    $cycle = Get-WaaConversationCycle -DriverId $DriverId
+    return Set-WaaLiveCallField -DriverId $DriverId -CycleKey $cycle -Field $field -Value $Body.value
 }

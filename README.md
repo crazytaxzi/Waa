@@ -11,7 +11,7 @@ The **Notes & Reminders** tab is a separate driver-specific organizer: choose th
 3. WAA opens the default browser at `http://127.0.0.1:8765` (or the first open port through 8775).
 4. Keep the PowerShell window open while using WAA. Press `Ctrl+C` there to stop it.
 
-No installation, administrator access, Internet, Python, Node, Java, module download, browser extension, or cloud account is needed. Runtime data is in `%LOCALAPPDATA%\Waa\waa.db`; safe backups are in `%LOCALAPPDATA%\Waa\backups`. The portable SQLite shell is bundled under `runtime\sqlite`.
+No installation, administrator access, Internet, Python, Node, Java, module download, browser extension, or cloud account is needed. Runtime data is in `%LOCALAPPDATA%\Waa`: LMDB live state under `live\`, durable SQLite history in `waa.db`, and safe backups under `backups\`. Both native runtimes are bundled.
 
 ## Report intake
 
@@ -42,7 +42,7 @@ The Driver Work Card is designed to follow a real phone conversation rather than
 6. Missing BOL/admin close-out
 7. Safety and wrap-up
 
-Use **Start Queue** to open the first visible pending driver. The card shows one task at a time, resumes at the first unfinished step, and provides Back/Next controls plus `Alt+Left` / `Alt+Right` shortcuts. Call-flow answers auto-save into a persistent `driver_call_sessions` record scoped to the driver's current truck/PTA work cycle, so a new operating cycle does not blindly inherit stale phone-call answers. **Finish Call & Next Driver** drains every pending save, marks that cycle complete, and immediately opens the next visible driver. Workflow defaults to pending calls, keeps completed calls separately filterable, and returns a driver to Pending when a new PTA cycle begins.
+Use **Start Queue** to open the first visible pending driver. The card shows one task at a time, resumes at the first unfinished step, and provides Back/Next controls plus `Alt+Left` / `Alt+Right` shortcuts. Step navigation advances immediately while its LMDB autosave completes; finishing or changing drivers still drains pending saves. Call-flow answers are scoped to the driver's current truck/PTA work cycle, so a new operating cycle does not inherit stale answers. Workflow defaults to pending calls, keeps completed calls separately filterable, and returns a driver to Pending when a new PTA cycle begins.
 
 Notes are intentionally separate from the structured call questions. The sticky **Remember This** rail is a conversational scratchpad for short, useful notes. Press `Alt+N` while a Driver Work Card is open to jump to it; Enter saves the note and Shift+Enter adds a line break.
 
@@ -69,6 +69,7 @@ Daily Review is intentionally driver-specific. System-level audit events such as
 - `Start-Waa.ps1` — dependency-free launcher
 - `src/Server.ps1` — loopback-only HTTP/static/API server and service coordinator
 - `src/Waa.psm1` — centralized SQLite, driver/workflow domain, PTA parsing, dashboard queries, audit, backup/restore
+- `src/LiveStore.ps1` — bundled LMDB interop, live domain state, recovery, and atomic SQLite checkpoints
 - `src/Conversation.ps1` — persisted driver call-flow sessions and call-cycle state
 - `src/ReportParsing.ps1` — shared tab/CSV row parsing and date normalization
 - `src/ReportIntake.ps1` — Downloads discovery, native XLSX/OpenXML reading, report adapters, managed copies, Rolling 7-Day and Missing BOL ingestion
@@ -77,9 +78,13 @@ Daily Review is intentionally driver-specific. System-level audit events such as
 
 The server binds `System.Net.IPAddress.Loopback` only. Static paths are canonicalized, imported content is data only, SQL values are escaped before statement construction, CORS is loopback-only, and a strict CSP blocks outside scripts, styles, frames, and connections. SQLite enables foreign keys, WAL, busy timeout, indexes and transactions. Startup performs an integrity check and enters read-only recovery mode on failure.
 
+LMDB is authoritative for latency-sensitive calls, Driver Work Card fields, notes, reminders, timers, and transition drafts. Each mutation is one atomic embedded write with a monotonic revision and pending audit event. SQLite remains authoritative for identity, imported evidence, idle/BOL history, durable audit, reporting, and backups. Dirty LMDB revisions checkpoint to SQLite in one transaction after a short interval, at a batch threshold, before backup/restore and identity repair, during Daily Review reads, and on clean shutdown. On restart, any LMDB revision ahead of SQLite is replayed before requests are served. See `LMDB_SQLITE_ARCHITECTURE.md`.
+
 Hot screens use purpose-built indexed queries. The centralized database layer keeps one long-lived SQLite shell session open for the lifetime of WAA, sends every query through that session under a synchronization lock, and cleans it up when the module closes. This removes the process startup/teardown pause that previously occurred on every database call while retaining the portable official `sqlite3.exe` runtime. The session automatically restarts if SQLite exits unexpectedly. Driver-card data and the current call session now arrive through one context endpoint; redundant standalone card/conversation reads were removed. Conversation writes use consolidated SQL, ordinary field mutations return only `{ok}`, and follow-up mutations return only notes/reminders/timers instead of rebuilding history, charts, BOLs, work state, and audit data.
 
-Browser routes use short-lived in-memory caching with explicit mutation invalidation, cancellable reads, delegated interaction handlers, render-once table filtering, queue-aware driver progression, and contained off-screen layout. Driver-card reads cancel stale requests, only one workflow step is laid out at a time, navigation waits for active saves, and save failures stop progression instead of silently losing an answer. Driver Work Card listeners have an explicit lifecycle: reopening or refreshing a card aborts the prior listener scope before binding the new one, preventing duplicate saves. Create controls also lock while their request is active. Static assets are versioned and held in memory by the loopback server; HTML revalidates so an upgrade cannot leave stale listener code in the browser, while API responses remain `no-store`. Continuous decorative animations, SVG Gaussian blur, full-window backdrop filters, and large live blur effects were removed to avoid idle GPU work and expensive recomposition on modest PCs. Card responses no longer transport unused audit history, and the organizer now reads only the compact driver identity fields its selector needs.
+Browser routes use short-lived in-memory caching with explicit mutation invalidation, cancellable reads, delegated interaction handlers, render-once table filtering, queue-aware driver progression, and contained off-screen layout. Driver-card reads cancel stale requests, only one workflow step is laid out at a time, step changes advance immediately after queuing their autosave, and driver changes still drain pending saves. Driver Work Card listeners have an explicit lifecycle: reopening or refreshing a card aborts the prior listener scope before binding the new one, preventing duplicate saves. Create controls also lock while their request is active. Static assets are versioned and held in memory by the loopback server; HTML revalidates so an upgrade cannot leave stale listener code in the browser, while API responses remain `no-store`. Continuous decorative animations, SVG Gaussian blur, full-window backdrop filters, and large live blur effects were removed to avoid idle GPU work and expensive recomposition on modest PCs. Card responses no longer transport unused audit history, and the organizer now reads only the compact driver identity fields its selector needs.
+
+Step-to-step card navigation advances immediately after queuing the field's autosave. Queue changes and **Finish Call & Next Driver** still drain pending saves before changing drivers.
 
 ## Run the tests
 

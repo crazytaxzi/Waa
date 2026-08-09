@@ -2,6 +2,10 @@
 
 ## Delivered
 
+WAA now runs a fully integrated LMDB + SQLite hybrid persistence core. Bundled LMDB is the authoritative low-latency store for Driver Work Card state, call sessions, notes, reminders, timers, and transition drafts; SQLite remains the durable authority for imported evidence, identity, idle/BOL history, audit, reports, and backups. Live mutations use atomic revisioned LMDB transactions and leave the UI request path without a SQLite round trip. Batched SQLite checkpoints are idempotent, forced before backup/restore and identity repair, and replayed automatically on restart. A recovery test confirmed an uncheckpointed LMDB note moved from SQLite count 0 to 1 during restart recovery with no remaining dirty state.
+
+Driver navigation is consistent across the application. Dashboard rank buttons and the best-idle metric, Workflow/PTA rows, Missing BOL rows, organizer driver labels, and Daily Review buttons all open the same Driver Work Card. The delegated click guard now accepts an interactive element when that element is itself the driver opener. Driver-card **Next Step** advances immediately after focus queues the LMDB autosave, so a slow or stale request cannot trap the operator on the current task; changing drivers and finishing a call still drain pending saves.
+
 WAA is a complete local Windows driver-operations application with eight hash-routed pages: Dashboard, PTA Tracking, Workflow, Missing BOLs, Notes & Reminders, Daily Review, Transition, and Imports/Data Quality. The shared Driver Work Card centralizes PTA history/editing, weighted idle history, BOL mentions, home-time review, on-time state, preplan review/response, routing, randomized safety coaching, chronological notes, restart-safe reminders/timers, transition selection, and activity history.
 
 The application now also includes two first-class pages. **Notes & Reminders** is a fleet-wide organizer that requires a canonical driver for every item and supports capture, search, filtering, due-state display, and completion. **Daily Review** presents the activity trail as a local-day chronological record, keeps driver actions attributed to the canonical driver/current truck, supports driver filtering, and opens the shared Driver Work Card directly.
@@ -41,8 +45,10 @@ Rendering was simplified for low-end PCs: continuous ambient/signal/pulse animat
 - `Start-Waa.cmd` / `Start-Waa.ps1`: no-install Windows entry points.
 - `src/Server.ps1`: `TcpListener` HTTP server bound only to `127.0.0.1`, static-root confinement, strict response headers, and JSON API routing.
 - `src/Waa.psm1`: the single database layer, schema/migration bootstrap, SQLite safety settings, parsers, identity handling, operational queries/actions, audit, transition, and backup/restore.
+- `src/LiveStore.ps1`: LMDB native interop, live entity model, revisions, checkpointing, hydration, health, and restart recovery.
 - `web/index.html`, `web/styles.css`, `web/app.js`: accessible vanilla browser client, reusable work-card renderer, filtering/sorting, and SVG visualization.
 - `runtime/sqlite/sqlite3.exe`: official portable SQLite 3.53.4 Windows x64 shell; archive SHA3-256 was verified against sqlite.org.
+- `runtime/lmdb/lmdb.dll`: pinned LMDB 1.0.1 Windows x64 runtime, with license, provenance, and a Linux validation build.
 - `tests/Run-Tests.ps1`: dependency-free assertion and persistence suite.
 
 Operational SQLite lives only at `%LOCALAPPDATA%\Waa\waa.db`. The schema covers canonical drivers and aliases, truck observations, PTA evidence, idle periods, Missing BOL history, driver work state, notes, reminders, timers, transitions, safety notes, source-preserving import batches, identity issues, settings, and audit history. It enables migrations, foreign keys on every connection, WAL, busy timeout, indexes, integrity checks, startup/manual/pre-restore backups, and recovery mode.
@@ -55,7 +61,13 @@ Operational SQLite lives only at `%LOCALAPPDATA%\Waa\waa.db`. The schema covers 
 
 Preview never writes. Commit reparses the supplied raw source, validates rows, records parser/source metadata and the exact source, and rejects exact duplicates by SHA-256. Ambiguous or unmatched identity evidence remains visible for explicit alias resolution.
 
-## Validation completed — 2026-08-09 startup and identity-performance revision
+## Validation completed — 2026-08-09 LMDB hybrid revision
+
+- `tests/Run-Tests.ps1`: **84/84 assertions passed** against the hybrid core.
+- All PowerShell source/test files passed the PowerShell parser; `web/app.js` passed `node --check`; `git diff --check` passed.
+- Loopback end-to-end checks returned HTTP 200 for health, dashboard, static assets, driver listing, live note creation, conversation mutation, and combined driver context. Empty-data dashboard response was about 0.03 seconds on the validation host.
+- Background intake/identity handoff completed with `maintenance_status=ready`; health reported `engine=LMDB`, `online=true`, and zero dirty entries.
+- Restart recovery verified SQLite had 0 rows before close, then 1 row after LMDB recovery, with revision 1 and dirty count 0.
 
 - `tests/Run-Tests.ps1`: **84/84 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. Coverage includes unchanged-repair skipping, background startup wiring, maintenance-completion cache refresh, identity-noise suppression, exact duplicate collapsing, preservation of distinct rapid card edits, bulk cleanup preservation, the review index/route, core-owned call schema, persistent cycle completion, automatic pending reset on a new PTA, legacy cycle-key migration, queue/card source wiring, and save-safe progression in addition to coached-share logic, weighted idle safeguards, historical backfill, compact mutations, reminders, timers, transitions, and on-time controls.
 - `tests/Identity.Tests.ps1`: **15/15 scenarios passed**, including Rolling-first, PTA-first, placeholder reconciliation, extended PTA-code reconciliation, shared-unit refusal, assignment history, ambiguous derived-code isolation, and suppression of manufactured identity activity.

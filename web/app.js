@@ -241,8 +241,10 @@ function bindCharts(root = document) {
   });
 }
 
-function metricCard(label, value, detail, tone = 'green') {
-  return `<div class="metric-card ${tone}"><span>${esc(label)}</span><b>${esc(value)}</b><small>${esc(detail)}</small><i aria-hidden="true"></i></div>`;
+function metricCard(label, value, detail, tone = 'green', driverId = null) {
+  const tag = driverId ? 'button' : 'div';
+  const open = driverId ? ` open" data-id="${Number(driverId)}" type="button` : '';
+  return `<${tag} class="metric-card ${tone}${open}"><span>${esc(label)}</span><b>${esc(value)}</b><small>${esc(detail)}</small><i aria-hidden="true"></i></${tag}>`;
 }
 
 async function dashboard() {
@@ -265,7 +267,7 @@ async function dashboard() {
       ${metricCard('Over 50% idle', String(data.over50), 'Latest valid rolling 7-day', data.over50 ? 'red' : 'green')}
       ${metricCard('Tracked drivers', String(data.drivers.length), 'Drivers with current idle data', 'blue')}
       ${metricCard('28-day ready', `${data.coverage28?.complete_drivers || 0}/${data.coverage28?.tracked_drivers || 0}`, `Fleet history ${data.coverage28?.fleet_weeks || 0}/4 weeks`, data.coverage28?.fleet_ready ? 'green' : 'purple')}
-      ${metricCard('Best current idle', data.heroes?.[0] ? fmtPercent(data.heroes[0].p7) : '—', data.heroes?.[0]?.full_name || 'Awaiting data', 'green')}
+      ${metricCard('Best current idle', data.heroes?.[0] ? fmtPercent(data.heroes[0].p7) : '—', data.heroes?.[0]?.full_name || 'Awaiting data', 'green', data.heroes?.[0]?.id)}
       ${metricCard('Above 50% coached', data.coaching?.percent == null ? '—' : fmtPercent(data.coaching.percent), `${data.coaching?.coached || 0} of ${data.coaching?.eligible || 0} drivers coached`, data.coaching?.eligible && data.coaching.coached === data.coaching.eligible ? 'green' : 'purple')}
     </section>
     <section class="dashboard-grid">
@@ -400,7 +402,7 @@ function reminderRow(item) {
   const overdue = !item.completed_at && item.due_at && new Date(item.due_at) < new Date();
   return `<div class="organizer-item reminder ${overdue ? 'late' : ''} ${item.completed_at ? 'complete' : ''}">
     <input data-organizer-complete="${item.id}" data-driver-id="${item.driver_id}" type="checkbox" ${item.completed_at ? 'checked' : ''}>
-    <span class="organizer-driver"><b>${esc(item.truck)} · ${esc(item.full_name)}</b><small>${esc(displayDate(item.due_at))}</small></span>
+    <button class="organizer-driver open" data-id="${item.driver_id}" type="button"><b>${esc(item.truck)} · ${esc(item.full_name)}</b><small>${esc(displayDate(item.due_at))}</small></button>
     <span class="organizer-copy">${esc(item.text)}</span>
     <button class="danger compact" data-organizer-delete="reminder" data-item="${item.id}" data-driver-id="${item.driver_id}" type="button">Delete</button>
   </div>`;
@@ -416,7 +418,7 @@ async function organizer() {
     const matches = item => (!driverId || String(item.driver_id) === driverId) &&
       (!query || `${item.full_name} ${item.truck} ${item.text}`.toLowerCase().includes(query));
     $('#notesList').innerHTML = notes.filter(matches).map(item => `<article class="organizer-item note">
-      <span class="organizer-driver"><b>${esc(item.truck)} · ${esc(item.full_name)}</b><small>${esc(displayDate(item.created_at))}</small></span>
+      <button class="organizer-driver open" data-id="${item.driver_id}" type="button"><b>${esc(item.truck)} · ${esc(item.full_name)}</b><small>${esc(displayDate(item.created_at))}</small></button>
       <p class="organizer-copy">${esc(item.text)}</p>
       <button class="danger compact" data-organizer-delete="note" data-item="${item.id}" data-driver-id="${item.driver_id}" type="button">Delete</button>
     </article>`).join('') || '<p class="empty-copy">No matching notes.</p>';
@@ -872,7 +874,8 @@ function bindCardEvents(card) {
   };
   const moveStep = async delta => {
     document.activeElement?.blur();
-    if (!await awaitPendingSaves()) return;
+    // Changing focus already queues the autosave. Step navigation must remain
+    // available while that fast LMDB write finishes in the background.
     showCardStep(state.cardStep + delta);
   };
   const moveDriver = async delta => {
@@ -1102,7 +1105,8 @@ document.addEventListener('click', async event => {
     return;
   }
   const opener = event.target.closest('.open[data-id]');
-  if (opener && !event.target.closest('button,input,select,textarea,a')) openCard(Number(opener.dataset.id));
+  const interactive = event.target.closest('button,input,select,textarea,a');
+  if (opener && (!interactive || interactive === opener)) openCard(Number(opener.dataset.id));
 });
 document.addEventListener('submit', async event => {
   const form = event.target.closest('.quick-truck-form');

@@ -156,6 +156,8 @@ CREATE TABLE IF NOT EXISTS transition_drafts(id INTEGER PRIMARY KEY CHECK(id=1),
 CREATE TABLE IF NOT EXISTS safety_notes(id INTEGER PRIMARY KEY, note TEXT NOT NULL UNIQUE, active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS audit_history(id INTEGER PRIMARY KEY, occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, detail_json TEXT);
+CREATE TABLE IF NOT EXISTS live_checkpoint_state(entity_key TEXT PRIMARY KEY,revision INTEGER NOT NULL,checkpointed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS live_audit_events(revision INTEGER PRIMARY KEY,audit_history_id INTEGER REFERENCES audit_history(id),checkpointed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_alias ON driver_aliases(alias_value);
 CREATE INDEX IF NOT EXISTS idx_pta_driver_time ON pta_observations(driver_id,observed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_truck_time ON truck_history(truck,observed_at DESC);
@@ -196,6 +198,7 @@ SET cycle_key=substr(cycle_key,1,length(cycle_key)-10)||substr(cycle_key,-4,4)||
 WHERE substr(cycle_key,-10) GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]';
 '@ -AllowWrite | Out-Null
     Invoke-Sql 'INSERT OR IGNORE INTO schema_version(version) VALUES(2);' -AllowWrite | Out-Null
+    Invoke-Sql 'INSERT OR IGNORE INTO schema_version(version) VALUES(3);' -AllowWrite | Out-Null
     $integrity = (Invoke-Sql 'PRAGMA integrity_check;').Trim()
     if ($integrity -ne 'ok') { $script:ReadOnly = $true }
     return @{ db = $script:Db; integrity = $integrity; read_only = $script:ReadOnly }
@@ -601,7 +604,17 @@ SELECT d.id,d.full_name,d.pta_code,coalesce(nullif(trim(p.truck),''),t.truck) tr
        ) THEN 1 ELSE 0 END call_completed
 FROM drivers d LEFT JOIN p ON p.driver_id=d.id AND p.rn=1 LEFT JOIN t ON t.driver_id=d.id AND t.rn=1;
 '@
-    return Invoke-Sql $sql -Json
+    $rows=@(Invoke-Sql $sql -Json)
+    if(Test-WaaLiveStoreOnline){
+        foreach($row in $rows){
+            $truck=if([string]::IsNullOrWhiteSpace([string]$row.truck)){'NO-TRUCK'}else{[string]$row.truck}
+            $anchor=if($null-eq$row.pta_at-or[string]::IsNullOrWhiteSpace([string]$row.pta_at)){'UNANCHORED'}elseif($row.pta_at-is[datetime]){$row.pta_at.ToString('yyyy-MM-dd',[Globalization.CultureInfo]::InvariantCulture)}else{([string]$row.pta_at).Substring(0,[Math]::Min(10,([string]$row.pta_at).Length))}
+            $call=Get-WaaLiveCall -DriverId ([int]$row.id) -CycleKey "$truck|$anchor"
+            $completed = $null -ne $call -and -not [string]::IsNullOrWhiteSpace([string]$call.completed_at)
+            $row.call_completed = [int]$completed
+        }
+    }
+    return $rows
 }
 
 function Get-CurrentDriver {
@@ -666,11 +679,19 @@ SELECT json_object(
     if([string]::IsNullOrWhiteSpace($json)){throw 'Driver not found'}
     $card=ConvertFrom-Json -InputObject $json
     if($null -eq $card.driver){throw 'Driver not found'}
+    if(Test-WaaLiveStoreOnline){
+        $card.work=Get-WaaLiveWork $Id
+        $followups=Get-WaaLiveFollowups $Id
+        $card.notes=@($followups.notes|Select-Object -First 8)
+        $card.reminders=@($followups.reminders)
+        $card.timers=@($followups.timers)
+    }
     return $card
 }
 
 function Get-DriverFollowups {
     param([int]$Id)
+    if(Test-WaaLiveStoreOnline){return Get-WaaLiveFollowups $Id}
     $sql=@"
 SELECT json_object(
   'notes',json(coalesce((SELECT json_group_array(json_object('id',id,'driver_id',driver_id,'note',note,'created_at',created_at)) FROM (SELECT * FROM driver_notes WHERE driver_id=$Id ORDER BY created_at DESC)),'[]')),
@@ -701,29 +722,29 @@ function Save-DriverAction {
             $values=@($Id,$current.truck,$current.division,$current.pta_code,$Body.value,$pta,$current.operational_status,$current.planning_status,$current.operational_note,$current.driver_type,$current.location)|ForEach-Object{ConvertTo-SqlLiteral $_}
             Invoke-Sql "INSERT INTO pta_observations(driver_id,truck,division,driver_code,pta_raw,pta_at,actionable,operational_status,planning_status,operational_note,driver_type,location,source) VALUES($($values[0..5]-join ','),1,$($values[6..10]-join ','),'manual');" -AllowWrite|Out-Null
         }
-        'note' {$text=([string]$Body.text).Trim();if(!$text){throw 'Note text is required'};$q=ConvertTo-SqlLiteral $text;Invoke-Sql "INSERT INTO driver_notes(driver_id,note) VALUES($Id,$q);" -AllowWrite|Out-Null}
-        'reminder' {$text=([string]$Body.text).Trim();$due=Parse-Date $Body.due_at;if (-not $text -or -not $due) {throw 'Reminder text and a valid due time are required'};$t=ConvertTo-SqlLiteral $text;$d=ConvertTo-SqlLiteral $due;Invoke-Sql "INSERT INTO reminders(driver_id,text,due_at) VALUES($Id,$t,$d);" -AllowWrite|Out-Null}
-        'delete_note' {$item=[int]$Body.item_id;$changed=[int](Invoke-Sql "DELETE FROM driver_notes WHERE id=$item AND driver_id=$Id;SELECT changes();" -AllowWrite);if($changed-ne1){throw 'Driver note not found'}}
-        'delete_reminder' {$item=[int]$Body.item_id;$changed=[int](Invoke-Sql "DELETE FROM reminders WHERE id=$item AND driver_id=$Id;SELECT changes();" -AllowWrite);if($changed-ne1){throw 'Driver reminder not found'}}
-        'delete_timer' {$item=[int]$Body.item_id;$changed=[int](Invoke-Sql "DELETE FROM timers WHERE id=$item AND driver_id=$Id;SELECT changes();" -AllowWrite);if($changed-ne1){throw 'Driver timer not found'}}
-        'timer' {$t=ConvertTo-SqlLiteral $Body.label;$d=ConvertTo-SqlLiteral(Parse-Date $Body.target_at);Invoke-Sql "INSERT INTO timers(driver_id,label,target_at) VALUES($Id,$t,$d);" -AllowWrite|Out-Null}
+        'note' {$text=([string]$Body.text).Trim();if(!$text){throw 'Note text is required'};Add-WaaLiveFollowup $Id note @{note=$text}|Out-Null}
+        'reminder' {$text=([string]$Body.text).Trim();$due=Parse-Date $Body.due_at;if (-not $text -or -not $due) {throw 'Reminder text and a valid due time are required'};Add-WaaLiveFollowup $Id reminder @{text=$text;due_at=$due;completed_at=$null}|Out-Null}
+        'delete_note' {Update-WaaLiveFollowup $Id note ([long]$Body.item_id) delete|Out-Null}
+        'delete_reminder' {Update-WaaLiveFollowup $Id reminder ([long]$Body.item_id) delete|Out-Null}
+        'delete_timer' {Update-WaaLiveFollowup $Id timer ([long]$Body.item_id) delete|Out-Null}
+        'timer' {$label=([string]$Body.label).Trim();$target=Parse-Date $Body.target_at;if(-not$label-or-not$target){throw 'Timer label and a valid target time are required'};Add-WaaLiveFollowup $Id timer @{label=$label;target_at=$target;completed_at=$null}|Out-Null}
         'bol_mentioned' {Invoke-Sql "UPDATE missing_bols SET mentioned_at=CASE WHEN mentioned_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
-        'complete_reminder' {Invoke-Sql "UPDATE reminders SET completed_at=CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
-        'snooze_reminder' {Invoke-Sql "UPDATE reminders SET due_at=datetime(due_at,'+1 day'),completed_at=NULL WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
-        'complete_timer' {Invoke-Sql "UPDATE timers SET completed_at=CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
+        'complete_reminder' {Update-WaaLiveFollowup $Id reminder ([long]$Body.item_id) toggle|Out-Null}
+        'snooze_reminder' {Update-WaaLiveFollowup $Id reminder ([long]$Body.item_id) snooze|Out-Null}
+        'complete_timer' {Update-WaaLiveFollowup $Id timer ([long]$Body.item_id) toggle|Out-Null}
         default {
             $allowed=@('home_checked','expected_work','home_status','home_reason','ontime_status','ontime_reason','preplan_reviewed','preplan_response','preplan_note','routing_checked','routing_status','routing_note','safety_note_id','safety_mentioned_at','include_transition','transition_note')
             if($allowed -notcontains $action){throw 'Unknown action'}
             $value=$Body.value
             if($action -eq 'safety_mentioned_at' -and $value){$value=(Get-Date).ToUniversalTime().ToString('s')}
-            $q=ConvertTo-SqlLiteral $value
-            if($action-eq'ontime_status'){Invoke-Sql "INSERT INTO driver_work_items(driver_id,$action,ontime_checked_at) VALUES($Id,$q,CURRENT_TIMESTAMP) ON CONFLICT(driver_id) DO UPDATE SET $action=excluded.$action,ontime_checked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP;" -AllowWrite|Out-Null}
-            else{Invoke-Sql "INSERT INTO driver_work_items(driver_id,$action) VALUES($Id,$q) ON CONFLICT(driver_id) DO UPDATE SET $action=excluded.$action,updated_at=CURRENT_TIMESTAMP;" -AllowWrite|Out-Null}
+            Set-WaaLiveWorkField $Id $action $value|Out-Null
         }
     }
-    $auditBody=@{}
-    foreach($key in $Body.Keys){if($key-ne'return_followups'){$auditBody[$key]=$Body[$key]}}
-    Add-Audit $action 'driver' $Id $auditBody
+    if($action-in@('assign_truck','pta','bol_mentioned')){
+        $auditBody=@{}
+        foreach($key in $Body.Keys){if($key-ne'return_followups'){$auditBody[$key]=$Body[$key]}}
+        Add-Audit $action 'driver' $Id $auditBody
+    }
     if($action-in@('include_transition','transition_note')){Update-TransitionDraft -DriverId $Id|Out-Null}
     if($Body.ContainsKey('return_followups')-and[bool]$Body.return_followups){return Get-DriverFollowups $Id}
     return @{ok=$true}
@@ -739,25 +760,21 @@ SELECT d.id,d.full_name,coalesce(t.truck,'') truck
 FROM drivers d LEFT JOIN latest_truck t ON t.driver_id=d.id AND t.rn=1
 ORDER BY d.full_name;
 '@
-    $sql=@'
-WITH latest_truck AS (
-  SELECT driver_id,truck,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
-  FROM truck_history
-)
-SELECT n.id,'note' item_type,n.driver_id,d.full_name,t.truck,n.note text,NULL due_at,NULL completed_at,n.created_at created_at
-FROM driver_notes n JOIN drivers d ON d.id=n.driver_id
-LEFT JOIN latest_truck t ON t.driver_id=n.driver_id AND t.rn=1
-UNION ALL
-SELECT r.id,'reminder',r.driver_id,d.full_name,t.truck,r.text,r.due_at,r.completed_at,r.created_at
-FROM reminders r JOIN drivers d ON d.id=r.driver_id
-LEFT JOIN latest_truck t ON t.driver_id=r.driver_id AND t.rn=1
-ORDER BY 9 DESC;
-'@
-    return @{drivers=@(Invoke-Sql $driverSql -Json);items=@(Invoke-Sql $sql -Json)}
+    $drivers=@(Invoke-Sql $driverSql -Json)
+    $items=[Collections.Generic.List[object]]::new()
+    foreach($driver in $drivers){
+        $followups=Get-WaaLiveFollowups ([int]$driver.id)
+        foreach($note in $followups.notes){[void]$items.Add([pscustomobject]@{id=$note.id;item_type='note';driver_id=$driver.id;full_name=$driver.full_name;truck=$driver.truck;text=$note.note;due_at=$null;completed_at=$null;created_at=$note.created_at})}
+        foreach($reminder in $followups.reminders){[void]$items.Add([pscustomobject]@{id=$reminder.id;item_type='reminder';driver_id=$driver.id;full_name=$driver.full_name;truck=$driver.truck;text=$reminder.text;due_at=$reminder.due_at;completed_at=$reminder.completed_at;created_at=$reminder.created_at})}
+    }
+    return @{drivers=$drivers;items=@($items|Sort-Object created_at -Descending)}
 }
 
 function Get-DailyActivity {
     param([string]$StartUtc,[string]$EndUtc)
+    # The review is a durable history view, so flush the tiny pending LMDB batch
+    # before querying SQLite and never show a just-completed action as missing.
+    if(Test-WaaLiveStoreOnline){Invoke-WaaLiveCheckpoint -Force|Out-Null}
     $start=ConvertTo-SqlLiteral $StartUtc
     $end=ConvertTo-SqlLiteral $EndUtc
     $sql=@"
@@ -822,7 +839,7 @@ function Remove-DailyActivity {
     if($ActivityId-le0){throw 'Invalid activity record'}
     $rows=@(Invoke-Sql "SELECT id,entity_type,entity_id FROM audit_history WHERE id=$ActivityId;" -Json)
     if(!$rows.Count){throw 'Activity record not found'}
-    $changed=[int](Invoke-Sql "DELETE FROM audit_history WHERE id=$ActivityId;SELECT changes();" -AllowWrite)
+    $changed=[int](Invoke-Sql "BEGIN;DELETE FROM live_audit_events WHERE audit_history_id=$ActivityId;DELETE FROM audit_history WHERE id=$ActivityId;SELECT changes();COMMIT;" -AllowWrite)
     if($changed-ne1){throw 'Activity record could not be deleted'}
     $driverId=$null
     if($rows[0].entity_type-eq'driver'){$driverId=[int]$rows[0].entity_id}
@@ -831,36 +848,28 @@ function Remove-DailyActivity {
 
 function Update-TransitionDraft {
     param([switch]$Force,[int]$DriverId=0)
-    $manual=[int](Invoke-Sql 'SELECT is_manual FROM transition_drafts WHERE id=1;')
+    $current=Get-WaaLiveTransition
+    $manual=[int]$current.is_manual
     if($manual-and-not$Force){
         if($DriverId-le0){return -1}
         $driver=Get-CurrentDriver $DriverId
-        $work=@(Invoke-Sql "SELECT include_transition,coalesce(transition_note,'') transition_note FROM driver_work_items WHERE driver_id=$DriverId;" -Json)
-        if($null-eq$driver-or-not$work.Count){return -1}
-        $draft=@(Invoke-Sql 'SELECT body FROM transition_drafts WHERE id=1;' -Json)[0]
-        $body=[string]$draft.body
+        $work=Get-WaaLiveWork $DriverId
+        if($null-eq$driver){return -1}
+        $body=[string]$current.body
         $namePattern=[regex]::Escape([string]$driver.full_name)
         $body=[regex]::Replace($body,"(?m)^[^`r`n]* - $namePattern :[^`r`n]*(?:`r?`n)?",'').TrimEnd("`r","`n")
-        if([int]$work[0].include_transition-eq1){
+        if([int]$work.include_transition-eq1){
             $truck=if([string]::IsNullOrWhiteSpace([string]$driver.truck)){'Unknown'}else{[string]$driver.truck}
-            $line="$truck - $($driver.full_name) : $($work[0].transition_note)"
+            $line="$truck - $($driver.full_name) : $($work.transition_note)"
             $body=if([string]::IsNullOrWhiteSpace($body)){$line}else{$body+"`r`n"+$line}
         }
-        $q=ConvertTo-SqlLiteral $body
-        Invoke-Sql "UPDATE transition_drafts SET body=$q,updated_at=CURRENT_TIMESTAMP WHERE id=1;" -AllowWrite|Out-Null
+        Set-WaaLiveTransition $body $true 'transition_driver_updated'|Out-Null
         return 1
     }
-    $rows=@(Invoke-Sql @'
-WITH p AS (SELECT driver_id,truck,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM pta_observations WHERE driver_id IS NOT NULL),
-t AS (SELECT driver_id,truck,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM truck_history)
-SELECT coalesce(nullif(trim(p.truck),''),t.truck,'Unknown') truck,d.full_name,coalesce(w.transition_note,'') transition_note
-FROM driver_work_items w JOIN drivers d ON d.id=w.driver_id
-LEFT JOIN p ON p.driver_id=d.id AND p.rn=1 LEFT JOIN t ON t.driver_id=d.id AND t.rn=1
-WHERE w.include_transition=1 ORDER BY CAST(coalesce(nullif(trim(p.truck),''),t.truck) AS INTEGER),coalesce(nullif(trim(p.truck),''),t.truck),d.full_name;
-'@ -Json)
+    $rows=@(Get-CurrentDrivers|ForEach-Object{$work=Get-WaaLiveWork ([int]$_.id);if([int]$work.include_transition-eq1){[pscustomobject]@{truck=$(if([string]::IsNullOrWhiteSpace([string]$_.truck)){'Unknown'}else{$_.truck});full_name=$_.full_name;transition_note=$work.transition_note}}}|Sort-Object truck,full_name)
         $lines=@("No Open ACE/ACI's")+@($rows|ForEach-Object{"$($_.truck) - $($_.full_name) : $($_.transition_note)"})
-        $body=$lines-join"`r`n";$q=ConvertTo-SqlLiteral $body
-        Invoke-Sql "UPDATE transition_drafts SET body=$q,is_manual=0,updated_at=CURRENT_TIMESTAMP WHERE id=1;" -AllowWrite|Out-Null
+        $body=$lines-join"`r`n"
+        Set-WaaLiveTransition $body $false 'transition_regenerated'|Out-Null
     return $rows.Count
 }
 
@@ -868,16 +877,13 @@ function Get-Transition {
     param([switch]$Regenerate)
     if($Regenerate){
         $count=Update-TransitionDraft -Force
-        Add-Audit 'transition_regenerated' 'transition' 1 @{count=$count}
     }
-    return (Invoke-Sql 'SELECT * FROM transition_drafts WHERE id=1;' -Json)[0]
+    return Get-WaaLiveTransition
 }
 
 function Save-Transition {
     param([string]$Body)
-    $q=ConvertTo-SqlLiteral $Body
-    Invoke-Sql "UPDATE transition_drafts SET body=$q,is_manual=1,updated_at=CURRENT_TIMESTAMP WHERE id=1;" -AllowWrite|Out-Null
-    Add-Audit 'transition_saved' 'transition' 1 @{}
+    Set-WaaLiveTransition $Body $true 'transition_saved'|Out-Null
     return Get-Transition
 }
 
@@ -918,4 +924,6 @@ function Restore-Waa {
     return @{ok=$true}
 }
 
-Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,ConvertTo-SqlLiteral,Parse-Date,Split-ImportRows,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-CurrentDriver,Get-DriverCard,Save-DriverAction,Get-Organizer,Get-DailyActivity,Clear-DailyActivityNoise,Remove-DailyActivity,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa
+. (Join-Path $PSScriptRoot 'LiveStore.ps1')
+
+Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,ConvertTo-SqlLiteral,Parse-Date,Split-ImportRows,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-CurrentDriver,Get-DriverCard,Save-DriverAction,Get-Organizer,Get-DailyActivity,Clear-DailyActivityNoise,Remove-DailyActivity,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa,Initialize-WaaLiveStore,Initialize-WaaLiveDomain,Invoke-WaaLiveCheckpoint,Invoke-WaaLiveCheckpointIfDue,Reset-WaaLiveDomainFromSqlite,Close-WaaLiveStore,Get-WaaLiveHealth,Get-WaaLiveCall,Get-WaaLivePrefix,Set-WaaLiveCallField

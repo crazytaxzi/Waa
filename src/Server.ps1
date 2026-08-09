@@ -16,6 +16,8 @@ $startupDatabase = Join-Path $DataRoot 'waa.db'
 $script:StartupBackupPending = Test-Path -LiteralPath $startupDatabase
 $state = Initialize-Waa $Root $DataRoot -SkipStartupBackup
 Initialize-WaaReportIntake $DataRoot
+Initialize-WaaLiveStore -Root $Root -DataRoot $DataRoot
+Initialize-WaaLiveDomain | Out-Null
 $script:LastIntakeScan = [datetime]::MinValue
 $script:IntakeRunner = $null
 $script:IntakeAsync = $null
@@ -35,8 +37,14 @@ function Update-WaaBackgroundScan {
         try {
             $output = @($script:IntakeRunner.EndInvoke($script:IntakeAsync))
             $summary = @($output | Where-Object { $_ -is [hashtable] -and $_.ContainsKey('maintenance_summary') } | Select-Object -Last 1)
+            $changed = $summary.Count -and [bool]$summary[0].changed
+            $repairVersion = [string](Invoke-Sql "SELECT value FROM settings WHERE key='identity_repair_version';")
+            $repairNeeded = $changed -or $repairVersion -ne '3'
+            if($repairNeeded){Invoke-WaaLiveCheckpoint -Force | Out-Null}
+            $identity = Invoke-WaaIdentityRepairIfNeeded -DataChanged:$changed
+            if($repairNeeded){Reset-WaaLiveDomainFromSqlite | Out-Null}
             $script:MaintenanceStatus = 'ready'
-            $script:MaintenanceDetail = if ($summary.Count) { [string]$summary[0].maintenance_summary } else { 'Background maintenance completed.' }
+            $script:MaintenanceDetail = if ($changed) { 'New reports imported and identity links refreshed.' } elseif ($identity.skipped) { 'Reports and identity links are current.' } else { 'One-time identity migration completed.' }
             $script:MaintenanceGeneration++
         }
         catch {
@@ -64,9 +72,7 @@ Initialize-WaaReportIntake $ScanDataRoot
 if($CreateStartupBackup){Backup-Waa 'startup'|Out-Null}
 $scan=Invoke-WaaDownloadsScan -DeferIdentityRepair
 $changed=@($scan.results.Values | Where-Object { $_.ContainsKey('imported') -and [bool]($_['imported']) }).Count -gt 0
-$identity=Invoke-WaaIdentityRepairIfNeeded -DataChanged:$changed
-$detail=if($changed){'New reports imported and identity links refreshed.'}elseif($identity.skipped){'Reports and identity links are current.'}else{'One-time identity migration completed.'}
-@{maintenance_summary=$detail;scan=$scan;identity=$identity}
+@{maintenance_summary='Report scan completed.';scan=$scan;changed=$changed}
 '@
     $script:MaintenanceStatus = 'running'
     $script:MaintenanceDetail = 'Checking Downloads and identity links in the background.'
@@ -230,7 +236,7 @@ try {
                     }
 
                     if ($method -eq 'GET' -and $path -eq '/api/health') {
-                        Send-Json $request.stream 200 @{ok=$true;integrity=$state.integrity;read_only=$state.read_only;maintenance_status=$script:MaintenanceStatus;maintenance_detail=$script:MaintenanceDetail;maintenance_generation=$script:MaintenanceGeneration} | Out-Null
+                        Send-Json $request.stream 200 @{ok=$true;integrity=$state.integrity;read_only=$state.read_only;live_store=(Get-WaaLiveHealth);maintenance_status=$script:MaintenanceStatus;maintenance_detail=$script:MaintenanceDetail;maintenance_generation=$script:MaintenanceGeneration} | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/dashboard') {
                         Send-Json $request.stream 200 (Get-Dashboard) | Out-Null
@@ -255,7 +261,9 @@ try {
                     elseif ($method -eq 'POST' -and $path -eq '/api/import/commit') {
                         if ($body.type -and $body.type -ne 'pta') { throw 'Rolling 7-Day and Missing BOL reports are managed automatically from Downloads. PTA is paste-only.' }
                         $result = Import-WaaData ([string]$body.raw) 'PTA paste' 'pta'
+                        Invoke-WaaLiveCheckpoint -Force | Out-Null
                         Invoke-WaaIdentityRepairIfNeeded -DataChanged | Out-Null
+                        Reset-WaaLiveDomainFromSqlite | Out-Null
                         Send-Json $request.stream 201 $result | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/report-intake') {
@@ -265,7 +273,11 @@ try {
                         if ($null -ne $script:IntakeAsync -and -not $script:IntakeAsync.IsCompleted) { throw 'A report scan is already running.' }
                         $scan = Invoke-WaaDownloadsScan -DeferIdentityRepair
                         $changed = @($scan.results.Values | Where-Object { $_.ContainsKey('imported') -and [bool]($_['imported']) }).Count -gt 0
+                        $repairVersion = [string](Invoke-Sql "SELECT value FROM settings WHERE key='identity_repair_version';")
+                        $repairNeeded = $changed -or $repairVersion -ne '3'
+                        if($repairNeeded){Invoke-WaaLiveCheckpoint -Force | Out-Null}
                         $identity = Invoke-WaaIdentityRepairIfNeeded -DataChanged:$changed
+                        if($repairNeeded){Reset-WaaLiveDomainFromSqlite | Out-Null}
                         $script:LastIntakeScan = Get-Date
                         $scan.identity = $identity
                         Send-Json $request.stream 200 $scan | Out-Null
@@ -300,7 +312,9 @@ try {
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/identity/resolve') {
                         $resolved = Resolve-Identity ([int]$body.issue_id) ([int]$body.driver_id)
+                        Invoke-WaaLiveCheckpoint -Force | Out-Null
                         Invoke-WaaIdentityRepairIfNeeded -DataChanged | Out-Null
+                        Reset-WaaLiveDomainFromSqlite | Out-Null
                         Send-Json $request.stream 200 $resolved | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/transition') {
@@ -318,10 +332,14 @@ try {
                         Send-Json $request.stream 200 (Get-SafetyNote $except) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/backup') {
+                        Invoke-WaaLiveCheckpoint -Force | Out-Null
                         Send-Json $request.stream 201 (Backup-Waa) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/restore') {
-                        Send-Json $request.stream 200 (Restore-Waa $body.name) | Out-Null
+                        Invoke-WaaLiveCheckpoint -Force | Out-Null
+                        $restored=Restore-Waa $body.name
+                        Reset-WaaLiveDomainFromSqlite | Out-Null
+                        Send-Json $request.stream 200 $restored | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/bols') {
                         $bolSql = "WITH t AS(SELECT *,row_number()OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC)rn FROM truck_history) SELECT b.*,d.full_name,t.truck FROM missing_bols b LEFT JOIN drivers d ON d.id=b.driver_id LEFT JOIN t ON t.driver_id=b.driver_id AND t.rn=1 ORDER BY b.mentioned_at,b.empty_call_date;"
@@ -353,6 +371,7 @@ try {
                 $code = if ($_.Exception.Message -like 'Duplicate*') { 409 } else { 400 }
                 Send-Json $request.stream $code @{error=$_.Exception.Message} | Out-Null
             }
+            finally { Invoke-WaaLiveCheckpointIfDue }
         }
         catch {
             if (-not (Test-WaaClientDisconnect $_)) { Write-Warning ("Request failed without stopping WAA: " + $_.Exception.Message) }
@@ -361,6 +380,7 @@ try {
     }
 }
 finally {
+    try { Invoke-WaaLiveCheckpoint -Force | Out-Null; Close-WaaLiveStore } catch { Write-Warning ("Live-store shutdown checkpoint failed: " + $_.Exception.Message) }
     if ($null -ne $script:IntakeRunner) { try { $script:IntakeRunner.Stop();$script:IntakeRunner.Dispose() } catch { } }
     if ($null -ne $listener) { $listener.Stop() }
 }
