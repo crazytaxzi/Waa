@@ -1,13 +1,29 @@
 [CmdletBinding()]param([string]$SqlitePath)
 $ErrorActionPreference='Stop';$root=Split-Path -Parent $PSScriptRoot;if($SqlitePath){$env:WAA_SQLITE_TEST=$SqlitePath}
-Import-Module (Join-Path $root 'src/Waa.psm1') -Force
+Import-Module (Join-Path $root 'src/Waa.psm1') -Force;. (Join-Path $root 'src/ReportParsing.ps1');. (Join-Path $root 'src/ReportIntake.ps1')
 $script:Passed=0
 function Assert($Condition,[string]$Message){if(!$Condition){throw "ASSERTION FAILED: $Message"};$script:Passed++;Write-Host "PASS $Message" -ForegroundColor Green}
+function Get-Col([int]$Index){$n=$Index+1;$s='';while($n-gt0){$n--; $s=[char](65+($n%26))+$s;$n=[math]::Floor($n/26)};return $s}
+function Xml-Escape([string]$s){return [Security.SecurityElement]::Escape($s)}
+function New-TestXlsx([string]$Path,[object[]]$Headers,[object[]]$Values){
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+  $fs=[IO.File]::Open($Path,[IO.FileMode]::Create);$zip=[IO.Compression.ZipArchive]::new($fs,[IO.Compression.ZipArchiveMode]::Create,$false)
+  try{
+    function Add-ZipText($z,[string]$name,[string]$text){$e=$z.CreateEntry($name);$sw=[IO.StreamWriter]::new($e.Open(),[Text.Encoding]::UTF8);try{$sw.Write($text)}finally{$sw.Dispose()}}
+    $cells1='';for($i=0;$i-lt$Headers.Count;$i++){$r=(Get-Col $i)+'1';$cells1+="<c r=`"$r`" t=`"inlineStr`"><is><t>$(Xml-Escape ([string]$Headers[$i]))</t></is></c>"}
+    $cells2='';for($i=0;$i-lt$Values.Count;$i++){$r=(Get-Col $i)+'2';$cells2+="<c r=`"$r`" t=`"inlineStr`"><is><t>$(Xml-Escape ([string]$Values[$i]))</t></is></c>"}
+    Add-ZipText $zip 'xl/workbook.xml' '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Report" sheetId="1" r:id="rId1"/></sheets></workbook>'
+    Add-ZipText $zip 'xl/_rels/workbook.xml.rels' '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'
+    Add-ZipText $zip 'xl/worksheets/sheet1.xml' ("<?xml version=`"1.0`" encoding=`"UTF-8`"?><worksheet xmlns=`"http://schemas.openxmlformats.org/spreadsheetml/2006/main`"><sheetData><row r=`"1`">$cells1</row><row r=`"2`">$cells2</row></sheetData></worksheet>")
+  }finally{$zip.Dispose();$fs.Dispose()}
+}
 $data=Join-Path ([IO.Path]::GetTempPath()) ("waa-tests-"+[guid]::NewGuid());[IO.Directory]::CreateDirectory($data)|Out-Null
 try{
-  $init=Initialize-Waa $root $data;Assert ($init.integrity-eq'ok') 'database creation, migration, and integrity';Assert ((Invoke-Sql "PRAGMA journal_mode;").Trim()-eq'wal') 'WAL enabled';Assert ((Invoke-Sql "PRAGMA foreign_keys;").Trim()-eq'1') 'foreign keys enabled on every database connection'
+  $init=Initialize-Waa $root $data;Initialize-WaaReportIntake;Assert ($init.integrity-eq'ok') 'database creation, migration, and integrity';Assert ((Invoke-Sql "PRAGMA journal_mode;").Trim()-eq'wal') 'WAL enabled';Assert ((Invoke-Sql "PRAGMA foreign_keys;").Trim()-eq'1') 'foreign keys enabled on every database connection'
   $jsonRows=@(Invoke-Sql "SELECT 10.0 p UNION ALL SELECT 20.0 p;" -Json);Assert ($jsonRows.Count-eq2-and-($jsonRows[0]-isnot[System.Array])-and[double]$jsonRows[1].p-eq20) 'SQLite JSON rows flatten across PowerShell versions'
   $examples=@{'Orlando Carmona'='CARMONAO';'Bruce D Ratcliff'='RATCLIFB';'Patrick Lachica Encinas'='LACHICAP';'Joan M Hernandez Lopez'='HERNANDJ';'Guadalupe Ochoa Felix'='OCHOAFEG';'Clarence Broadbrooks'='BROADBRC'};foreach($x in $examples.GetEnumerator()){Assert ((Convert-DriverCode $x.Key)-eq$x.Value) "identity code $($x.Key)"}
+  $xlsx=Join-Path $data 'Missing BOL.xlsx';$xh=@('Order #','TMEX Order #','Empty Call Date','Origin City St','Destination City St','Rev Type','Last Dispatch Driver cd','Last Dispatch Driver nm','Loaded Miles');$xv=@('ORD-X','TMEX-X','46161','Dallas TX','Tulsa OK','REG','D900','Bruce D Ratcliff','1370');New-TestXlsx $xlsx $xh $xv;$xc=Get-WaaCanonicalReportText $xlsx bol;Assert ($xc.Contains("Last Dispatch Driver cd")-and$xc.Contains('Bruce D Ratcliff')-and$xc.Contains('Dallas TX')) 'native XLSX/OpenXML Missing BOL extraction';Assert ($xc-notmatch "`t46161`t") 'Excel serial date normalized during XLSX intake'
+  $dl=Join-Path $data 'Downloads';[IO.Directory]::CreateDirectory($dl)|Out-Null;$older=Join-Path $dl 'Rolling 7 Day.csv';$newer=Join-Path $dl 'Rolling 7 Day (1).csv';Set-Content $older 'old';Start-Sleep -Milliseconds 20;Set-Content $newer 'new';(Get-Item $older).LastWriteTimeUtc=(Get-Date).ToUniversalTime().AddMinutes(-10);Assert ((Get-WaaNewestDownload $dl idle).Name-eq'Rolling 7 Day (1).csv') 'Downloads intake chooses newest matching report only'
   $pta=@'
 | Truck | Division | Driver Code | PTA | Operational Status | Planning Status | Operational Note | Driver Type | Location | N1 | N2 |
 |---|---|---|---|---|---|---|---|---|---|---|
