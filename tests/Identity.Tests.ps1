@@ -77,6 +77,7 @@ A200 Amy Anderson	300002	08/09/2026	08/03/2026	20	2	Idle %
     Repair-WaaDriverIdentity | Out-Null
     Assert-Identity ((Invoke-Sql "SELECT count(*) c FROM drivers WHERE full_name IN('Alice Anderson','Amy Anderson');" -Json)[0].c -eq 2) 'derived PTA collision does not merge different real names'
     Assert-Identity ((Invoke-Sql "SELECT count(*) c FROM identity_issues WHERE status='open' AND alias_type='pta_code' AND alias_value='ANDERSOA' AND issue_type='ambiguous';" -Json)[0].c -eq 1) 'derived PTA collision is surfaced for manual resolution'
+    Assert-Identity ((Invoke-Sql "SELECT count(*) c FROM audit_history WHERE action='identity_evidence';" -Json)[0].c -eq 0) 'automatic identity reconciliation does not manufacture driver activity'
 
     Write-Host 'IDENTITY TESTS PASSED' -ForegroundColor Cyan
 }

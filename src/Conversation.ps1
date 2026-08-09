@@ -70,6 +70,7 @@ function Save-WaaConversation {
         field = $field
         session_id = $sessionId
         cycle_key = [string]$session.cycle_key
+        value = $Body.value
     } | ConvertTo-Json -Compress
     $detailSql = ConvertTo-SqlLiteral $detail
     $rows = @(Invoke-Sql "BEGIN;UPDATE driver_call_sessions SET $field=$valueSql,updated_at=CURRENT_TIMESTAMP WHERE id=$sessionId;INSERT INTO audit_history(action,entity_type,entity_id,detail_json) VALUES('call_flow_update','driver','$DriverId',$detailSql);COMMIT;SELECT * FROM driver_call_sessions WHERE id=$sessionId;" -Json -AllowWrite)

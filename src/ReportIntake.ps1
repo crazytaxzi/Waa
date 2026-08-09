@@ -372,7 +372,7 @@ function Import-WaaManagedReport {
 
             $driverCode = [string]$identity.code
             $driverName = [string]$identity.name
-            [void]$sql.AppendLine((Get-WaaDriverIdentitySql -DispatchCode $driverCode -FullName $driverName -Source 'rolling-7-day' -SkipPtaLink))
+            [void]$sql.AppendLine((Get-WaaDriverIdentitySql -DispatchCode $driverCode -FullName $driverName -SkipPtaLink))
 
             $driverCodeSql = ConvertTo-WaaSqlLiteral $driverCode
             $truckSql = ConvertTo-WaaSqlLiteral $row[1]
@@ -422,7 +422,7 @@ function Import-WaaManagedReport {
             $driverName = [string]$row[7]
             if ([string]::IsNullOrWhiteSpace($order) -and [string]::IsNullOrWhiteSpace($driverCode)) { continue }
 
-            [void]$sql.AppendLine((Get-WaaDriverIdentitySql -DispatchCode $driverCode -FullName $driverName -Source 'missing-bol' -SkipPtaLink))
+            [void]$sql.AppendLine((Get-WaaDriverIdentitySql -DispatchCode $driverCode -FullName $driverName -SkipPtaLink))
 
             $orderSql = ConvertTo-WaaSqlLiteral $order
             $driverCodeSql = ConvertTo-WaaSqlLiteral $driverCode

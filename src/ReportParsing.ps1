@@ -29,7 +29,6 @@ function Get-WaaDriverIdentitySql {
     param(
         [AllowNull()][string]$DispatchCode,
         [AllowNull()][string]$FullName,
-        [string]$Source = 'report',
         [switch]$SkipPtaLink
     )
 
@@ -70,8 +69,6 @@ function Get-WaaDriverIdentitySql {
         [void]$sql.AppendLine("INSERT INTO identity_issues(alias_type,alias_value,issue_type,detail) SELECT 'pta_code',$ptaSql,'ambiguous','Derived PTA code is already owned by conflicting real-name evidence; automatic merge refused.' WHERE EXISTS(SELECT 1 FROM driver_aliases p JOIN drivers d ON d.id=p.driver_id WHERE p.alias_type='pta_code' AND p.alias_value=$ptaSql COLLATE NOCASE AND p.driver_id<>(SELECT driver_id FROM driver_aliases WHERE alias_type='dispatch_code' AND alias_value=$dispatchSql COLLATE NOCASE LIMIT 1) AND d.full_name<>'Unknown' AND d.full_name<>$ptaSql COLLATE NOCASE AND d.full_name<>$nameSql COLLATE NOCASE) AND NOT EXISTS(SELECT 1 FROM identity_issues WHERE status='open' AND alias_type='pta_code' AND alias_value=$ptaSql COLLATE NOCASE AND issue_type='ambiguous');")
     }
 
-    $detailSql = ConvertTo-WaaIdentitySqlLiteral (@{dispatch_code=$dispatch;full_name=$name;pta_code=$pta;source=$Source} | ConvertTo-Json -Compress)
-    [void]$sql.AppendLine("INSERT INTO audit_history(action,entity_type,entity_id,detail_json) SELECT 'identity_evidence','driver',(SELECT driver_id FROM driver_aliases WHERE alias_type='dispatch_code' AND alias_value=$dispatchSql COLLATE NOCASE LIMIT 1),$detailSql WHERE (SELECT driver_id FROM driver_aliases WHERE alias_type='dispatch_code' AND alias_value=$dispatchSql COLLATE NOCASE LIMIT 1) IS NOT NULL;")
     return $sql.ToString()
 }
 
@@ -237,7 +234,7 @@ UPDATE driver_call_sessions SET driver_id=$WinnerId WHERE driver_id=$LoserId;
     [void]$sql.AppendLine("INSERT INTO driver_aliases(driver_id,alias_type,alias_value,confirmed) VALUES($WinnerId,'pta_code',$ptaSql,0) ON CONFLICT(alias_type,alias_value) DO UPDATE SET driver_id=$WinnerId;")
     [void]$sql.AppendLine("UPDATE identity_issues SET status='resolved' WHERE status='open' AND alias_type='pta_code' AND alias_value=$ptaSql COLLATE NOCASE;")
     [void]$sql.AppendLine("DELETE FROM drivers WHERE id=$LoserId;")
-    [void]$sql.AppendLine("INSERT INTO audit_history(action,entity_type,entity_id,detail_json) VALUES('identity_merged','driver','$WinnerId',$detailSql);")
+    [void]$sql.AppendLine("INSERT INTO audit_history(action,entity_type,entity_id,detail_json) VALUES('identity_merged','identity','$WinnerId',$detailSql);")
     [void]$sql.AppendLine('COMMIT;')
     Invoke-Sql $sql.ToString() -AllowWrite | Out-Null
 }
@@ -293,14 +290,14 @@ function Repair-WaaDriverIdentity {
         $ptaCollision = $ptaNames.ContainsKey($ptaKey) -and $ptaNames[$ptaKey].Count -gt 1
 
         if ($ptaCollision) {
-            [void]$sql.AppendLine((Get-WaaDriverIdentitySql -DispatchCode $dispatch -FullName $name -Source ([string]$selected.source) -SkipPtaLink))
+            [void]$sql.AppendLine((Get-WaaDriverIdentitySql -DispatchCode $dispatch -FullName $name -SkipPtaLink))
             $ptaSql = ConvertTo-WaaIdentitySqlLiteral $pta
             $candidateSql = ConvertTo-WaaIdentitySqlLiteral (($ptaNames[$ptaKey] | ConvertTo-Json -Compress))
             [void]$sql.AppendLine("INSERT INTO identity_issues(alias_type,alias_value,issue_type,candidates_json,detail) SELECT 'pta_code',$ptaSql,'ambiguous',$candidateSql,'Multiple real driver names derive to the same PTA code; automatic merge refused.' WHERE NOT EXISTS(SELECT 1 FROM identity_issues WHERE status='open' AND alias_type='pta_code' AND alias_value=$ptaSql COLLATE NOCASE AND issue_type='ambiguous');")
             $ambiguous++
         }
         else {
-            [void]$sql.AppendLine((Get-WaaDriverIdentitySql -DispatchCode $dispatch -FullName $name -Source ([string]$selected.source)))
+            [void]$sql.AppendLine((Get-WaaDriverIdentitySql -DispatchCode $dispatch -FullName $name))
         }
         $evidenceCount++
     }

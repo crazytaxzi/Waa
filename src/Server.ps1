@@ -275,6 +275,9 @@ try {
                     elseif ($method -eq 'DELETE' -and $path -match '^/api/activity/(\d+)$') {
                         Send-Json $request.stream 200 (Remove-DailyActivity ([int]$Matches[1])) | Out-Null
                     }
+                    elseif ($method -eq 'POST' -and $path -eq '/api/activity/cleanup') {
+                        Send-Json $request.stream 200 (Clear-DailyActivityNoise) | Out-Null
+                    }
                     elseif ($method -eq 'POST' -and $path -eq '/api/identity/resolve') {
                         $resolved = Resolve-Identity ([int]$body.issue_id) ([int]$body.driver_id)
                         Repair-WaaDriverIdentity | Out-Null

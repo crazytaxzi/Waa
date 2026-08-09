@@ -32,6 +32,8 @@ The dashboard includes **Above 50% Coached**: the percentage of drivers whose la
 
 Daily Review now returns only audit events attached to a valid canonical driver. System/import/backup and other non-driver audit messages remain persisted but no longer clutter the driver activity review.
 
+Daily Review cleanup now addresses historical audit inflation at its source. Repeated identity reconciliation previously inserted a fresh `identity_evidence` driver event on every pass, which could create thousands of entries despite no user action; that producer was removed, and automatic identity merges are now classified as identity-system events. The review query excludes known identity noise and collapses exact same-second card duplicates before transport. **Clean Up Review** permanently removes existing identity noise and redundant audit copies across all dates after confirmation, preserves one canonical copy of a meaningful action, leaves all operational tables untouched, and runs SQLite planner optimization afterward.
+
 Rendering was simplified for low-end PCs: continuous ambient/signal/pulse animation, full-window backdrop blur, SVG point drop shadows, and large live blur layers were removed while retaining the dark neon visual hierarchy. Copy such as “Heroes in Training,” “Steal the good habits,” and the invented organization expansion was replaced with direct operational language.
 
 ## Architecture and major files
@@ -55,10 +57,10 @@ Preview never writes. Commit reparses the supplied raw source, validates rows, r
 
 ## Validation completed — 2026-08-09 full audit and 28-day idle revision
 
-- `tests/Run-Tests.ps1`: **76/76 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. Coverage now includes core-owned call schema, persistent cycle completion, automatic pending reset on a new PTA, legacy cycle-key migration, queue/card source wiring, and save-safe progression in addition to Daily Review filtering, coached-share logic, weighted idle safeguards, historical backfill, compact mutations, reminders, timers, transitions, and on-time controls.
-- `tests/Identity.Tests.ps1`: **7/7 scenarios passed**, including Rolling-first, PTA-first, placeholder reconciliation, assignment history, and ambiguous derived-code isolation.
+- `tests/Run-Tests.ps1`: **81/81 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. Coverage now includes identity-noise suppression, exact duplicate collapsing, preservation of distinct rapid card edits, bulk cleanup preservation, the review index/route, core-owned call schema, persistent cycle completion, automatic pending reset on a new PTA, legacy cycle-key migration, queue/card source wiring, and save-safe progression in addition to coached-share logic, weighted idle safeguards, historical backfill, compact mutations, reminders, timers, transitions, and on-time controls.
+- `tests/Identity.Tests.ps1`: **8/8 scenarios passed**, including Rolling-first, PTA-first, placeholder reconciliation, assignment history, ambiguous derived-code isolation, and suppression of manufactured identity activity.
 - `tests/Measure-PtaPerformance.ps1`: **500 rows**, 104.2 ms parse, 21.3 ms database phase, 2278.8 ms complete preview/reparse/import/identity pipeline, result `responsive` in the final validation environment.
-- End-to-end real TCP server exercises passed health, PTA commit, pending driver read, canonical driver-context cycle, compact conversation update, call completion, and completed queue state, in addition to the prior static delivery, Unicode PTA, organizer, deletion, activity, assignment, and ownership exercises.
+- End-to-end real TCP server exercises passed health, PTA commit, pending driver read, canonical driver-context cycle, compact conversation update, call completion, completed queue state, live duplicate collapse, and bulk Daily Review cleanup, in addition to the prior static delivery, Unicode PTA, organizer, deletion, activity, assignment, and ownership exercises.
 - JavaScript syntax, whitespace validation, SQLite schema execution, single-query Driver Card JSON, organizer SQL, daily activity SQL, latest-row tie handling, and contiguous weighted 28-day SQL all passed. The official SQLite Windows archive hash was verified as `88b4659fe747896b853af10157316b4ade143553efb89c1c8ca7423a278dcc8b`.
 
 ## Intentionally unresolved business rules
@@ -71,5 +73,5 @@ On the target Windows machine, double-click `Start-Waa.cmd` (or run `Start-Waa.p
 
 ## Codex Run Metadata
 
-- Integrated revision completed: 2026-08-09T19:15:00Z
+- Integrated revision completed: 2026-08-09T19:30:00Z
 - Validation status: complete

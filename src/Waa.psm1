@@ -168,6 +168,7 @@ CREATE INDEX IF NOT EXISTS idx_reminder_due ON reminders(completed_at,due_at);
 CREATE INDEX IF NOT EXISTS idx_reminder_driver_due ON reminders(driver_id,completed_at,due_at);
 CREATE INDEX IF NOT EXISTS idx_audit_driver_time ON audit_history(entity_type,entity_id,occurred_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_history(occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_review ON audit_history(entity_type,occurred_at DESC,action,entity_id);
 INSERT OR IGNORE INTO schema_version(version) VALUES(1);
 INSERT OR IGNORE INTO transition_drafts(id,body) VALUES(1,'No Open ACE/ACI''s');
 INSERT OR IGNORE INTO safety_notes(note) VALUES
@@ -763,17 +764,57 @@ function Get-DailyActivity {
 WITH latest_truck AS (
   SELECT driver_id,truck,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
   FROM truck_history
+), ranked_activity AS (
+  SELECT a.*,
+         row_number() OVER(
+           PARTITION BY a.occurred_at,a.action,a.entity_type,coalesce(a.entity_id,''),coalesce(a.detail_json,'')
+           ORDER BY a.id
+         ) duplicate_rank
+  FROM audit_history a
+  WHERE a.occurred_at >= $start AND a.occurred_at < $end
+    AND a.entity_type='driver'
+    AND a.action NOT IN ('identity_evidence','identity_merged')
 )
 SELECT a.id,a.occurred_at,a.action,a.entity_type,a.entity_id,a.detail_json,
        d.id driver_id,d.full_name,t.truck
-FROM audit_history a
-LEFT JOIN drivers d ON a.entity_type='driver' AND d.id=CAST(a.entity_id AS INTEGER)
+FROM ranked_activity a
+LEFT JOIN drivers d ON d.id=CAST(a.entity_id AS INTEGER)
 LEFT JOIN latest_truck t ON t.driver_id=d.id AND t.rn=1
-WHERE a.occurred_at >= $start AND a.occurred_at < $end
-  AND a.entity_type='driver' AND d.id IS NOT NULL
+WHERE a.duplicate_rank=1 AND d.id IS NOT NULL
 ORDER BY a.occurred_at DESC,a.id DESC;
 "@
     return Invoke-Sql $sql -Json
+}
+
+function Clear-DailyActivityNoise {
+    $noiseCount=[int](Invoke-Sql "SELECT count(*) FROM audit_history WHERE action IN ('identity_evidence','identity_merged');")
+    $duplicateCount=[int](Invoke-Sql @'
+WITH ranked AS (
+  SELECT id,row_number() OVER(
+    PARTITION BY occurred_at,action,entity_type,coalesce(entity_id,''),coalesce(detail_json,'')
+    ORDER BY id
+  ) duplicate_rank
+  FROM audit_history
+  WHERE entity_type='driver' AND action NOT IN ('identity_evidence','identity_merged')
+)
+SELECT count(*) FROM ranked WHERE duplicate_rank>1;
+'@)
+    Invoke-Sql @'
+BEGIN;
+DELETE FROM audit_history WHERE action IN ('identity_evidence','identity_merged');
+WITH ranked AS (
+  SELECT id,row_number() OVER(
+    PARTITION BY occurred_at,action,entity_type,coalesce(entity_id,''),coalesce(detail_json,'')
+    ORDER BY id
+  ) duplicate_rank
+  FROM audit_history
+  WHERE entity_type='driver'
+)
+DELETE FROM audit_history WHERE id IN (SELECT id FROM ranked WHERE duplicate_rank>1);
+COMMIT;
+PRAGMA optimize;
+'@ -AllowWrite | Out-Null
+    return @{ok=$true;noise_removed=$noiseCount;duplicates_removed=$duplicateCount;removed=($noiseCount+$duplicateCount)}
 }
 
 function Remove-DailyActivity {
@@ -877,4 +918,4 @@ function Restore-Waa {
     return @{ok=$true}
 }
 
-Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,ConvertTo-SqlLiteral,Parse-Date,Split-ImportRows,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-CurrentDriver,Get-DriverCard,Save-DriverAction,Get-Organizer,Get-DailyActivity,Remove-DailyActivity,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa
+Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,ConvertTo-SqlLiteral,Parse-Date,Split-ImportRows,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-CurrentDriver,Get-DriverCard,Save-DriverAction,Get-Organizer,Get-DailyActivity,Clear-DailyActivityNoise,Remove-DailyActivity,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa

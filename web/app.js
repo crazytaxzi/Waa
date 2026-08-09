@@ -520,11 +520,25 @@ async function activity() {
     <section class="glass-panel activity-toolbar">
       <label class="field"><span>Review date</span><input id="activityDate" type="date" value="${selected}"></label>
       <label class="field"><span>Driver</span><select id="activityDriver"><option value="">All activity</option>${uniqueDrivers.map(row => `<option value="${row.driver_id}">${esc(row.truck)} · ${esc(row.full_name)}</option>`).join('')}</select></label>
-      <div class="activity-summary"><span id="activityCount"></span><b>${uniqueDrivers.length} drivers with activity</b></div>
+      <div class="activity-summary"><span id="activityCount"></span><b>${uniqueDrivers.length} drivers with activity</b><button id="cleanupActivity" class="danger compact" type="button">Clean Up Review</button><small>Removes automated identity noise and exact duplicate records only.</small></div>
     </section>
     <section class="glass-panel"><div class="panel-title"><div><p class="eyebrow">Chronological record</p><h3>${esc(new Date(`${selected}T12:00:00`).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }))}</h3></div></div><div id="activityList" class="activity-list"></div></section>`;
   $('#activityDate').addEventListener('change', event => { activity.selectedDay = event.target.value; invalidate('/api/activity'); activity(); });
   $('#activityDriver').addEventListener('change', render);
+  $('#cleanupActivity').addEventListener('click', async event => {
+    if (!confirm('Clean every Daily Review date? This permanently removes automated identity evidence and exact duplicate audit records. Notes, reminders, driver work, imports, and unique actions are not changed.')) return;
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const result = await api('/api/activity/cleanup', { method: 'POST', body: '{}' });
+      invalidate('/api/activity');
+      toast(result.removed ? `Removed ${result.removed} noisy or duplicate records` : 'Daily Review is already clean');
+      await activity();
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message);
+    }
+  });
   render();
 }
 

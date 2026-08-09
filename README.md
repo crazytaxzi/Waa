@@ -2,7 +2,7 @@
 
 WAA is a fully local, driver-centered operations console for PTA, workflow, rolling idle, Missing BOL, transition, reminders, notes, safety coaching, audit history, imports, data quality, and backups.
 
-The **Notes & Reminders** tab is a separate driver-specific organizer: choose the canonical driver, capture or delete a note or dated reminder, search across the fleet, and complete reminders without opening the call flow. The same items can be deleted from the Driver Work Card. The **Daily Review** tab turns WAA's audit trail into a readable day-by-day record with local-date and driver filters, direct links back to each Driver Work Card, and explicit deletion of unwanted review records. Deleting a review record removes the history entry; it does not reverse the underlying operational action.
+The **Notes & Reminders** tab is a separate driver-specific organizer: choose the canonical driver, capture or delete a note or dated reminder, search across the fleet, and complete reminders without opening the call flow. The same items can be deleted from the Driver Work Card. The **Daily Review** tab turns WAA's audit trail into a readable day-by-day record with local-date and driver filters, direct links back to each Driver Work Card, and explicit deletion of unwanted review records. Automatic identity reconciliation never appears as driver work, and exact duplicate card events are collapsed. **Clean Up Review** removes old identity-system noise and duplicate audit copies across all dates without deleting notes, reminders, imports, driver work, or unique actions. Deleting an individual review record removes only that history entry; it does not reverse the underlying operational action.
 
 ## Launch on the company Windows PC
 
@@ -62,7 +62,7 @@ The two 7-day Top 5 lists exclude exact 0% and 100% readings as likely telemetry
 
 The **Above 50% Coached** dashboard card measures drivers whose latest Rolling 7-Day idle is above 50% and who have a non-empty Idle Coaching plan saved in any Driver Card call session. It shows the coached percentage plus the exact coached/eligible driver counts. This coaching metric does not change idle measurements or Top 5 membership.
 
-Daily Review is intentionally driver-specific. System-level audit events such as imports, backups, transition regeneration, and other non-driver messages remain stored for operational evidence but are excluded from the review list.
+Daily Review is intentionally driver-specific. System-level audit events such as imports, backups, transition regeneration, automatic identity evidence/merges, and other non-driver messages remain outside the review list. Repeated identity scans no longer create driver audit events.
 
 ## Architecture and security
 
