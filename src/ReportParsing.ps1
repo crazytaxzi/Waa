@@ -25,6 +25,74 @@ function Test-WaaDriverPlaceholder {
     return $false
 }
 
+function Get-WaaPtaNameSignature {
+    param([AllowNull()][string]$FullName)
+
+    $parts = @(([string]$FullName).Trim() -split '\s+' | Where-Object { $_ })
+    if ($parts.Count -lt 2) { return $null }
+
+    $first = [Text.RegularExpressions.Regex]::Replace(
+        $parts[0].Normalize([Text.NormalizationForm]::FormD),
+        '\p{Mn}',
+        ''
+    )
+    $first = [Text.RegularExpressions.Regex]::Replace($first.ToUpperInvariant(), '[^A-Z0-9]', '')
+
+    $surnameParts = @($parts[1..($parts.Count - 1)] | Where-Object { $_.Length -gt 1 })
+    if ($surnameParts.Count -eq 0) { return $null }
+
+    $surname = ($surnameParts -join '')
+    $surname = [Text.RegularExpressions.Regex]::Replace(
+        $surname.Normalize([Text.NormalizationForm]::FormD),
+        '\p{Mn}',
+        ''
+    )
+    $surname = [Text.RegularExpressions.Regex]::Replace($surname.ToUpperInvariant(), '[^A-Z0-9]', '')
+    if ([string]::IsNullOrWhiteSpace($first) -or [string]::IsNullOrWhiteSpace($surname)) { return $null }
+
+    $surnamePrefix = $surname.Substring(0, [Math]::Min(7, $surname.Length))
+    return @{
+        surname_prefix = $surnamePrefix
+        first_name = $first
+        short_code = $surnamePrefix + $first.Substring(0, 1)
+    }
+}
+
+function Normalize-WaaPtaCode {
+    param([AllowNull()][string]$PtaCode)
+    if ([string]::IsNullOrWhiteSpace($PtaCode)) { return '' }
+
+    $normalized = [Text.RegularExpressions.Regex]::Replace(
+        $PtaCode.Trim().Normalize([Text.NormalizationForm]::FormD),
+        '\p{Mn}',
+        ''
+    )
+    return [Text.RegularExpressions.Regex]::Replace($normalized.ToUpperInvariant(), '[^A-Z0-9]', '')
+}
+
+function Test-WaaPtaCodeMatchesName {
+    param(
+        [AllowNull()][string]$FullName,
+        [AllowNull()][string]$PtaCode
+    )
+
+    $signature = Get-WaaPtaNameSignature $FullName
+    if ($null -eq $signature) { return $false }
+
+    $code = Normalize-WaaPtaCode $PtaCode
+    if ([string]::IsNullOrWhiteSpace($code) -or $code.Length -gt 8) { return $false }
+
+    $surnamePrefix = [string]$signature.surname_prefix
+    if (-not $code.StartsWith($surnamePrefix, [StringComparison]::Ordinal)) { return $false }
+
+    $suffix = $code.Substring($surnamePrefix.Length)
+    if ([string]::IsNullOrWhiteSpace($suffix)) { return $false }
+
+    $first = [string]$signature.first_name
+    if ($suffix.Length -gt $first.Length) { return $false }
+    return $first.StartsWith($suffix, [StringComparison]::Ordinal)
+}
+
 function Get-WaaDriverIdentitySql {
     param(
         [AllowNull()][string]$DispatchCode,
@@ -219,6 +287,7 @@ SET fuel_status=CASE WHEN w.fuel_status='Unknown' THEN coalesce((SELECT l.fuel_s
     load_help_status=CASE WHEN w.load_help_status='Unknown' THEN coalesce((SELECT l.load_help_status FROM driver_call_sessions l WHERE l.driver_id=$LoserId AND l.cycle_key=w.cycle_key),'Unknown') ELSE w.load_help_status END,
     load_help_note=coalesce(nullif(w.load_help_note,''),(SELECT l.load_help_note FROM driver_call_sessions l WHERE l.driver_id=$LoserId AND l.cycle_key=w.cycle_key)),
     conversation_wrap=coalesce(nullif(w.conversation_wrap,''),(SELECT l.conversation_wrap FROM driver_call_sessions l WHERE l.driver_id=$LoserId AND l.cycle_key=w.cycle_key)),
+    completed_at=coalesce(w.completed_at,(SELECT l.completed_at FROM driver_call_sessions l WHERE l.driver_id=$LoserId AND l.cycle_key=w.cycle_key)),
     updated_at=CURRENT_TIMESTAMP
 WHERE w.driver_id=$WinnerId AND EXISTS(SELECT 1 FROM driver_call_sessions l WHERE l.driver_id=$LoserId AND l.cycle_key=w.cycle_key);
 DELETE FROM driver_call_sessions WHERE driver_id=$LoserId AND cycle_key IN (SELECT cycle_key FROM driver_call_sessions WHERE driver_id=$WinnerId);
@@ -237,6 +306,61 @@ UPDATE driver_call_sessions SET driver_id=$WinnerId WHERE driver_id=$LoserId;
     [void]$sql.AppendLine("INSERT INTO audit_history(action,entity_type,entity_id,detail_json) VALUES('identity_merged','identity','$WinnerId',$detailSql);")
     [void]$sql.AppendLine('COMMIT;')
     Invoke-Sql $sql.ToString() -AllowWrite | Out-Null
+}
+
+function Set-WaaObservedPtaCode {
+    param(
+        [Parameter(Mandatory=$true)][int]$DriverId,
+        [Parameter(Mandatory=$true)][string]$PtaCode
+    )
+
+    if ($DriverId -le 0) { return $false }
+    $driverRows = @(Invoke-Sql "SELECT id,full_name,pta_code FROM drivers WHERE id=$DriverId;" -Json)
+    if ($driverRows.Count -eq 0) { return $false }
+
+    $driver = $driverRows[0]
+    $actual = Normalize-WaaPtaCode $PtaCode
+    if (-not (Test-WaaPtaCodeMatchesName ([string]$driver.full_name) $actual)) { return $false }
+
+    $actualSql = ConvertTo-WaaIdentitySqlLiteral $actual
+    $conflicts = [int](Invoke-Sql @"
+SELECT count(*) FROM (
+  SELECT id FROM drivers WHERE id<>$DriverId AND pta_code=$actualSql COLLATE NOCASE
+  UNION
+  SELECT driver_id id FROM driver_aliases
+  WHERE driver_id<>$DriverId AND alias_type='pta_code' AND alias_value=$actualSql COLLATE NOCASE
+);
+"@)
+    if ($conflicts -gt 0) { return $false }
+
+    $signature = Get-WaaPtaNameSignature ([string]$driver.full_name)
+    $shortCode = if ($null -ne $signature) { [string]$signature.short_code } else { '' }
+    $cleanupSql = ''
+    if (-not [string]::IsNullOrWhiteSpace($shortCode) -and $shortCode -ne $actual) {
+        $shortSql = ConvertTo-WaaIdentitySqlLiteral $shortCode
+        $cleanupSql = @"
+DELETE FROM driver_aliases
+WHERE driver_id=$DriverId AND alias_type='pta_code' AND confirmed=0
+  AND alias_value=$shortSql COLLATE NOCASE
+  AND NOT EXISTS(
+    SELECT 1 FROM pta_observations p
+    WHERE p.driver_code=driver_aliases.alias_value COLLATE NOCASE
+  );
+"@
+    }
+
+    Invoke-Sql @"
+BEGIN IMMEDIATE;
+UPDATE drivers SET pta_code=$actualSql WHERE id=$DriverId;
+INSERT INTO driver_aliases(driver_id,alias_type,alias_value,confirmed)
+VALUES($DriverId,'pta_code',$actualSql,0)
+ON CONFLICT(alias_type,alias_value) DO UPDATE SET driver_id=excluded.driver_id;
+$cleanupSql
+UPDATE identity_issues SET status='resolved'
+WHERE status='open' AND alias_type='pta_code' AND alias_value=$actualSql COLLATE NOCASE;
+COMMIT;
+"@ -AllowWrite | Out-Null
+    return $true
 }
 
 function Repair-WaaDriverIdentity {
@@ -268,6 +392,7 @@ function Repair-WaaDriverIdentity {
     [void]$sql.AppendLine('BEGIN IMMEDIATE;')
     $ambiguous = 0
     $evidenceCount = 0
+    $assignmentLinks = 0
 
     foreach ($entry in $byDispatch.GetEnumerator()) {
         $items = @($entry.Value)
@@ -364,6 +489,98 @@ function Repair-WaaDriverIdentity {
         }
     }
 
+    # Current unit is corroborating snapshot evidence, never permanent driver identity.
+    # It may bridge a real Rolling/BOL identity to a PTA-only identity only when both
+    # latest report snapshots are one-to-one on the same unit and the observed PTA code
+    # is structurally compatible with the driver's full name. Any ambiguity refuses merge.
+    $latestIdleAssignments = @(Invoke-Sql @'
+WITH latest_batch AS (
+  SELECT max(id) id FROM import_batches WHERE import_type='idle'
+), ranked AS (
+  SELECT i.driver_id,i.truck,i.period_end,i.id,
+         row_number() OVER(PARTITION BY i.driver_id ORDER BY i.period_end DESC,i.id DESC) rn
+  FROM idle_periods i
+  WHERE i.import_batch_id=(SELECT id FROM latest_batch)
+    AND i.driver_id IS NOT NULL AND trim(coalesce(i.truck,''))<>''
+)
+SELECT r.driver_id,r.truck,d.full_name,d.pta_code
+FROM ranked r
+JOIN drivers d ON d.id=r.driver_id
+WHERE r.rn=1;
+'@ -Json)
+
+    $latestPtaAssignments = @(Invoke-Sql @'
+WITH latest_batch AS (
+  SELECT max(id) id FROM import_batches WHERE import_type='pta'
+)
+SELECT DISTINCT p.driver_id,p.truck,p.driver_code,d.full_name,d.pta_code,
+       (SELECT count(*) FROM driver_aliases a
+        WHERE a.driver_id=p.driver_id AND a.alias_type='dispatch_code') dispatch_count
+FROM pta_observations p
+JOIN drivers d ON d.id=p.driver_id
+WHERE p.import_batch_id=(SELECT id FROM latest_batch)
+  AND p.driver_id IS NOT NULL
+  AND trim(coalesce(p.truck,''))<>''
+  AND trim(coalesce(p.driver_code,''))<>'';
+'@ -Json)
+
+    $idleByTruck = @{}
+    foreach ($row in $latestIdleAssignments) {
+        $truck = ([string]$row.truck).Trim().ToUpperInvariant()
+        if ([string]::IsNullOrWhiteSpace($truck)) { continue }
+        if (-not $idleByTruck.ContainsKey($truck)) { $idleByTruck[$truck] = [Collections.Generic.List[object]]::new() }
+        if (@($idleByTruck[$truck] | Where-Object { [int]$_.driver_id -eq [int]$row.driver_id }).Count -eq 0) {
+            [void]$idleByTruck[$truck].Add($row)
+        }
+    }
+
+    $ptaByTruck = @{}
+    $ptaCodeTrucks = @{}
+    foreach ($row in $latestPtaAssignments) {
+        $truck = ([string]$row.truck).Trim().ToUpperInvariant()
+        $code = Normalize-WaaPtaCode ([string]$row.driver_code)
+        if ([string]::IsNullOrWhiteSpace($truck) -or [string]::IsNullOrWhiteSpace($code)) { continue }
+
+        if (-not $ptaByTruck.ContainsKey($truck)) { $ptaByTruck[$truck] = [Collections.Generic.List[object]]::new() }
+        if (@($ptaByTruck[$truck] | Where-Object { [int]$_.driver_id -eq [int]$row.driver_id -and (Normalize-WaaPtaCode ([string]$_.driver_code)) -eq $code }).Count -eq 0) {
+            [void]$ptaByTruck[$truck].Add($row)
+        }
+
+        if (-not $ptaCodeTrucks.ContainsKey($code)) { $ptaCodeTrucks[$code] = [Collections.Generic.List[string]]::new() }
+        if (-not $ptaCodeTrucks[$code].Contains($truck)) { [void]$ptaCodeTrucks[$code].Add($truck) }
+    }
+
+    foreach ($truck in @($idleByTruck.Keys)) {
+        if (-not $ptaByTruck.ContainsKey($truck)) { continue }
+
+        $idleCandidates = @($idleByTruck[$truck])
+        $ptaCandidates = @($ptaByTruck[$truck])
+        $ptaCodes = @($ptaCandidates | ForEach-Object { Normalize-WaaPtaCode ([string]$_.driver_code) } | Where-Object { $_ } | Select-Object -Unique)
+        if ($idleCandidates.Count -ne 1 -or $ptaCandidates.Count -ne 1 -or $ptaCodes.Count -ne 1) { continue }
+
+        $named = $idleCandidates[0]
+        $ptaRow = $ptaCandidates[0]
+        $actualCode = [string]$ptaCodes[0]
+        if (-not $ptaCodeTrucks.ContainsKey($actualCode) -or $ptaCodeTrucks[$actualCode].Count -ne 1) { continue }
+        if (Test-WaaDriverPlaceholder ([string]$named.full_name) ([string]$named.pta_code)) { continue }
+        if (-not (Test-WaaPtaCodeMatchesName ([string]$named.full_name) $actualCode)) { continue }
+
+        $winnerId = [int]$named.driver_id
+        $loserId = [int]$ptaRow.driver_id
+        if ($winnerId -eq $loserId) {
+            if (Set-WaaObservedPtaCode -DriverId $winnerId -PtaCode $actualCode) { $assignmentLinks++ }
+            continue
+        }
+
+        $sameName = (Normalize-WaaDriverName ([string]$named.full_name)) -eq (Normalize-WaaDriverName ([string]$ptaRow.full_name))
+        $placeholder = Test-WaaDriverPlaceholder ([string]$ptaRow.full_name) $actualCode
+        $safeLoser = $sameName -or ($placeholder -and [int]$ptaRow.dispatch_count -eq 0)
+        if (-not $safeLoser) { continue }
+
+        Merge-WaaDriverRecords $winnerId $loserId $actualCode
+        if (Set-WaaObservedPtaCode -DriverId $winnerId -PtaCode $actualCode) { $assignmentLinks++ }
+    }
+
     # Unit Code is assignment evidence. Backfill the standard assignment history from idle
     # measurements so the Driver/Workflow view does not display Unknown when Rolling already
     # supplied the unit. Truck is never used to decide who a driver is.
@@ -381,5 +598,5 @@ AND NOT EXISTS(
 '@ -AllowWrite | Out-Null
 
     $watch.Stop()
-    return @{ evidence=$evidenceCount; merged=$merged; ambiguous=$ambiguous; elapsed_ms=[math]::Round($watch.Elapsed.TotalMilliseconds,1) }
+    return @{ evidence=$evidenceCount; merged=$merged; assignment_links=$assignmentLinks; ambiguous=$ambiguous; elapsed_ms=[math]::Round($watch.Elapsed.TotalMilliseconds,1) }
 }
