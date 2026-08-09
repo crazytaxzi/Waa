@@ -19,6 +19,28 @@ $startupIntake = Invoke-WaaDownloadsScan
 $script:LastIntakeScan = Get-Date
 $web = [IO.Path]::GetFullPath((Join-Path $Root 'web'))
 
+function Test-WaaClientDisconnect {
+    param([Parameter(Mandatory = $true)]$ErrorRecord)
+
+    $exception = $ErrorRecord.Exception
+    while ($null -ne $exception) {
+        if ($exception -is [IO.IOException] -or
+            $exception -is [Net.Sockets.SocketException] -or
+            $exception -is [ObjectDisposedException]) {
+            return $true
+        }
+
+        $message = [string]$exception.Message
+        if ($message -match '(?i)(transport connection|connection.*aborted|forcibly closed|broken pipe|connection reset|disposed object)') {
+            return $true
+        }
+
+        $exception = $exception.InnerException
+    }
+
+    return $false
+}
+
 function Send-Response {
     param(
         $Stream,
@@ -47,23 +69,35 @@ function Send-Response {
         "Access-Control-Allow-Origin: http://127.0.0.1`r`n" +
         "Connection: close`r`n`r`n"
 
-    $headerBytes = [Text.Encoding]::ASCII.GetBytes($head)
-    $Stream.Write($headerBytes, 0, $headerBytes.Length)
-    if ($Bytes.Length -gt 0) {
-        $Stream.Write($Bytes, 0, $Bytes.Length)
+    try {
+        $headerBytes = [Text.Encoding]::ASCII.GetBytes($head)
+        $Stream.Write($headerBytes, 0, $headerBytes.Length)
+        if ($Bytes.Length -gt 0) {
+            $Stream.Write($Bytes, 0, $Bytes.Length)
+        }
+        $Stream.Flush()
+        return $true
+    }
+    catch {
+        if (Test-WaaClientDisconnect $_) {
+            # Browsers routinely cancel requests during navigation, refresh, or cache races.
+            # That client is gone; the WAA server itself should keep running.
+            return $false
+        }
+        throw
     }
 }
 
 function Send-Json {
     param($Stream, [int]$Code, $Data)
     $json = $Data | ConvertTo-Json -Depth 20 -Compress
-    Send-Response $Stream $Code 'application/json; charset=utf-8' ([Text.Encoding]::UTF8.GetBytes($json))
+    return Send-Response $Stream $Code 'application/json; charset=utf-8' ([Text.Encoding]::UTF8.GetBytes($json))
 }
 
 function Send-JsonArray {
     param($Stream, [int]$Code, $Data)
     $json = ConvertTo-Json -InputObject @($Data) -Depth 20 -Compress
-    Send-Response $Stream $Code 'application/json; charset=utf-8' ([Text.Encoding]::UTF8.GetBytes($json))
+    return Send-Response $Stream $Code 'application/json; charset=utf-8' ([Text.Encoding]::UTF8.GetBytes($json))
 }
 
 function Read-Request {
@@ -153,71 +187,71 @@ try {
                     }
 
                     if ($method -eq 'GET' -and $path -eq '/api/health') {
-                        Send-Json $request.stream 200 @{ ok = $true; integrity = $state.integrity; read_only = $state.read_only }
+                        Send-Json $request.stream 200 @{ ok = $true; integrity = $state.integrity; read_only = $state.read_only } | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/dashboard') {
-                        Send-Json $request.stream 200 (Get-Dashboard)
+                        Send-Json $request.stream 200 (Get-Dashboard) | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/drivers') {
-                        Send-JsonArray $request.stream 200 @(Get-CurrentDrivers)
+                        Send-JsonArray $request.stream 200 @(Get-CurrentDrivers) | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -match '^/api/drivers/(\d+)$') {
-                        Send-Json $request.stream 200 (Get-DriverCard ([int]$Matches[1]))
+                        Send-Json $request.stream 200 (Get-DriverCard ([int]$Matches[1])) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -match '^/api/drivers/(\d+)/action$') {
-                        Send-Json $request.stream 200 (Save-DriverAction ([int]$Matches[1]) $body)
+                        Send-Json $request.stream 200 (Save-DriverAction ([int]$Matches[1]) $body) | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -match '^/api/drivers/(\d+)/conversation$') {
-                        Send-Json $request.stream 200 (Get-WaaConversation -DriverId ([int]$Matches[1]))
+                        Send-Json $request.stream 200 (Get-WaaConversation -DriverId ([int]$Matches[1])) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -match '^/api/drivers/(\d+)/conversation$') {
-                        Send-Json $request.stream 200 (Save-WaaConversation -DriverId ([int]$Matches[1]) -Body $body)
+                        Send-Json $request.stream 200 (Save-WaaConversation -DriverId ([int]$Matches[1]) -Body $body) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/import/preview') {
                         if ($body.type -and $body.type -ne 'pta') {
                             throw 'Rolling 7-Day and Missing BOL reports are managed automatically from Downloads. PTA is paste-only.'
                         }
-                        Send-Json $request.stream 200 (Get-ImportPreview $body.raw 'PTA paste' 'pta')
+                        Send-Json $request.stream 200 (Get-ImportPreview $body.raw 'PTA paste' 'pta') | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/import/commit') {
                         if ($body.type -and $body.type -ne 'pta') {
                             throw 'Rolling 7-Day and Missing BOL reports are managed automatically from Downloads. PTA is paste-only.'
                         }
-                        Send-Json $request.stream 201 (Import-WaaData $body.raw 'PTA paste' 'pta')
+                        Send-Json $request.stream 201 (Import-WaaData $body.raw 'PTA paste' 'pta') | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/report-intake') {
-                        Send-Json $request.stream 200 (Get-WaaReportIntakeStatus)
+                        Send-Json $request.stream 200 (Get-WaaReportIntakeStatus) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/report-intake/scan') {
                         $scan = Invoke-WaaDownloadsScan
                         $script:LastIntakeScan = Get-Date
-                        Send-Json $request.stream 200 $scan
+                        Send-Json $request.stream 200 $scan | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/data-quality') {
-                        Send-Json $request.stream 200 (Get-DataQuality)
+                        Send-Json $request.stream 200 (Get-DataQuality) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/identity/resolve') {
-                        Send-Json $request.stream 200 (Resolve-Identity ([int]$body.issue_id) ([int]$body.driver_id))
+                        Send-Json $request.stream 200 (Resolve-Identity ([int]$body.issue_id) ([int]$body.driver_id)) | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/transition') {
-                        Send-Json $request.stream 200 (Get-Transition)
+                        Send-Json $request.stream 200 (Get-Transition) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/transition/regenerate') {
-                        Send-Json $request.stream 200 (Get-Transition -Regenerate)
+                        Send-Json $request.stream 200 (Get-Transition -Regenerate) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/transition') {
-                        Send-Json $request.stream 200 (Save-Transition $body.body)
+                        Send-Json $request.stream 200 (Save-Transition $body.body) | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/safety/random') {
                         $except = 0
                         if ($uri.Query -match 'except=(\d+)') { $except = [int]$Matches[1] }
-                        Send-Json $request.stream 200 (Get-SafetyNote $except)
+                        Send-Json $request.stream 200 (Get-SafetyNote $except) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/backup') {
-                        Send-Json $request.stream 201 (Backup-Waa)
+                        Send-Json $request.stream 201 (Backup-Waa) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/restore') {
-                        Send-Json $request.stream 200 (Restore-Waa $body.name)
+                        Send-Json $request.stream 200 (Restore-Waa $body.name) | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/bols') {
                         $bolSql = "WITH t AS(SELECT *,row_number()OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC)rn FROM truck_history)" +
@@ -225,10 +259,10 @@ try {
                             " LEFT JOIN drivers d ON d.id=b.driver_id" +
                             " LEFT JOIN t ON t.driver_id=b.driver_id AND t.rn=1" +
                             " ORDER BY b.mentioned_at,b.empty_call_date;"
-                        Send-JsonArray $request.stream 200 @(Invoke-Sql $bolSql -Json)
+                        Send-JsonArray $request.stream 200 @(Invoke-Sql $bolSql -Json) | Out-Null
                     }
                     else {
-                        Send-Json $request.stream 404 @{ error = 'API route not found' }
+                        Send-Json $request.stream 404 @{ error = 'API route not found' } | Out-Null
                     }
                 }
                 else {
@@ -238,7 +272,7 @@ try {
                     $file = [IO.Path]::GetFullPath((Join-Path $web $relative))
                     if (-not $file.StartsWith($web, [StringComparison]::OrdinalIgnoreCase) -or
                         -not (Test-Path $file -PathType Leaf)) {
-                        Send-Json $request.stream 404 @{ error = 'Not found' }
+                        Send-Json $request.stream 404 @{ error = 'Not found' } | Out-Null
                     }
                     else {
                         $extension = [IO.Path]::GetExtension($file)
@@ -249,17 +283,26 @@ try {
                             '.svg' = 'image/svg+xml'
                         }[$extension]
                         if ([string]::IsNullOrWhiteSpace($mime)) { $mime = 'application/octet-stream' }
-                        Send-Response $request.stream 200 $mime ([IO.File]::ReadAllBytes($file))
+                        Send-Response $request.stream 200 $mime ([IO.File]::ReadAllBytes($file)) | Out-Null
                     }
                 }
             }
             catch {
+                if (Test-WaaClientDisconnect $_) {
+                    continue
+                }
+
                 $code = if ($_.Exception.Message -like 'Duplicate*') { 409 } else { 400 }
-                Send-Json $request.stream $code @{ error = $_.Exception.Message }
+                Send-Json $request.stream $code @{ error = $_.Exception.Message } | Out-Null
+            }
+        }
+        catch {
+            if (-not (Test-WaaClientDisconnect $_)) {
+                Write-Warning ("Request failed without stopping WAA: " + $_.Exception.Message)
             }
         }
         finally {
-            $client.Dispose()
+            try { $client.Dispose() } catch { }
         }
     }
 }
