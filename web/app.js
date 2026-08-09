@@ -301,7 +301,7 @@ function driverRows(list, showPta) {
     <tr class="open" data-id="${driver.id}" data-search="${esc(driver._search)}" data-priority="${priority(driver)}" data-truck-state="${hasTruck(driver) ? 'assigned' : 'unassigned'}" data-call-state="${driver.call_completed ? 'completed' : 'pending'}">
       ${showPta ? `<td class="pta-cell ${priority(driver)}"><span class="priority-chip">${priority(driver).toUpperCase()}</span><b>${esc(driver.pta_raw || 'N/A')}</b><small>${esc(relative(driver.pta_at))}</small></td>` : ''}
       ${showPta ? '' : `<td>${driver.call_completed ? '<span class="status-pill good">Completed</span>' : '<span class="status-pill alert">Pending</span>'}</td>`}
-      <td>${hasTruck(driver) ? `<b class="truck-no">${esc(driver.truck)}</b>` : `<form class="quick-truck-form" data-driver-id="${driver.id}"><input name="truck" aria-label="Truck number for ${esc(driver.full_name)}" placeholder="Truck #" maxlength="24" required><button type="submit">Assign</button></form>`}</td>
+      <td>${hasTruck(driver) ? `<details class="truck-change"><summary><b class="truck-no">${esc(driver.truck)}</b><small>Change</small></summary><form class="quick-truck-form" data-driver-id="${driver.id}" data-current-truck="${esc(driver.truck)}"><input name="truck" aria-label="New truck number for ${esc(driver.full_name)}" placeholder="New truck #" maxlength="24" required><button type="submit">Assign</button></form></details>` : `<form class="quick-truck-form" data-driver-id="${driver.id}"><input name="truck" aria-label="Truck number for ${esc(driver.full_name)}" placeholder="Truck #" maxlength="24" required><button type="submit">Assign</button></form>`}</td>
       <td><b>${esc(driver.full_name)}</b><small class="subline">${esc(driver.pta_code)}</small></td>
       <td>${esc(driver.division)}</td>
       <td>${esc(driver.operational_status)}</td>
@@ -858,7 +858,7 @@ async function openCard(id) {
     <div class="call-layout">
       <main class="call-main">${flow}</main>
       <aside class="call-side">
-        <section class="side-card snapshot"><p class="eyebrow">Driver snapshot</p><dl><div><dt>Truck</dt><dd>${esc(driver.truck)}</dd></div><div><dt>Location</dt><dd>${esc(driver.location)}</dd></div><div><dt>Status</dt><dd>${esc(driver.operational_status)}</dd></div><div><dt>Planning</dt><dd>${esc(driver.planning_status)}</dd></div><div><dt>Freshness</dt><dd>${esc(displayDate(driver.observed_at))}</dd></div></dl>${hasTruck(driver) ? '' : `<div class="unassigned-truck"><p>No truck association is on record.</p><form class="quick-truck-form" data-driver-id="${driver.id}"><input name="truck" aria-label="Truck number" placeholder="Enter truck #" maxlength="24" required><button type="submit">Assign Truck</button></form></div>`}</section>
+        <section class="side-card snapshot"><p class="eyebrow">Driver snapshot</p><dl><div><dt>Truck</dt><dd>${esc(driver.truck)}</dd></div><div><dt>Location</dt><dd>${esc(driver.location)}</dd></div><div><dt>Status</dt><dd>${esc(driver.operational_status)}</dd></div><div><dt>Planning</dt><dd>${esc(driver.planning_status)}</dd></div><div><dt>Freshness</dt><dd>${esc(displayDate(driver.observed_at))}</dd></div></dl><div class="unassigned-truck"><p>${hasTruck(driver) ? `Assign a different truck. Current truck ${esc(driver.truck)} remains in history.` : 'No truck association is on record.'}</p><form class="quick-truck-form" data-driver-id="${driver.id}" data-current-truck="${esc(driver.truck || '')}"><input name="truck" aria-label="${hasTruck(driver) ? 'New truck number' : 'Truck number'}" placeholder="${hasTruck(driver) ? 'New truck #' : 'Enter truck #'}" maxlength="24" required><button type="submit">${hasTruck(driver) ? 'Change Truck' : 'Assign Truck'}</button></form></div></section>
         <section class="side-card notes-rail"><div class="side-title"><div><p class="eyebrow">Remember this</p><h3>Call Notes</h3></div><span>Alt+N</span></div><p class="rail-copy">Use this like a scratchpad, not a form. Save the sentence you would tell yourself later.</p><div class="quick-note"><textarea id="quickNote" placeholder="Driver mentioned…"></textarea><button id="saveNote" type="button">Save Note</button></div><div id="noteList">${noteList(card.notes || [])}</div></section>
         <section class="side-card followups"><p class="eyebrow">After the call</p><h3>Reminders</h3><div class="follow-add"><input id="remtext" placeholder="Reminder"><input id="remdue" type="datetime-local"><button id="addReminder" type="button">Add Reminder</button></div><div id="followupList">${followupList(card.reminders || [])}</div><h3 class="follow-heading">Timers</h3><div class="follow-add"><input id="timertext" placeholder="Timer label"><input id="timerdue" type="datetime-local"><button id="addTimer" type="button">Start Timer</button></div><div id="timerList">${timerList(card.timers || [])}</div></section>
       </aside>
@@ -1149,6 +1149,8 @@ document.addEventListener('submit', async event => {
   const driverId = Number(form.dataset.driverId);
   const truck = new FormData(form).get('truck')?.trim();
   if (!driverId || !truck) return;
+  const currentTruck = form.dataset.currentTruck?.trim();
+  if (currentTruck && !confirm(`Change this driver from truck ${currentTruck} to ${truck.toUpperCase()}? The prior assignment will remain in history.`)) return;
   const button = $('button', form);
   button.disabled = true;
   try {
@@ -1158,7 +1160,10 @@ document.addEventListener('submit', async event => {
     invalidate('/api/drivers', '/api/dashboard', '/api/organizer', '/api/activity', `/api/drivers/${driverId}`);
     toast(`Truck ${truck.toUpperCase()} assigned`);
     if (cardId === driverId) await openCard(driverId);
-    else if ((location.hash.slice(1) || 'dashboard') === 'workflow') await queue(false);
+    else {
+      const currentRoute = location.hash.slice(1) || 'dashboard';
+      if (currentRoute === 'workflow' || currentRoute === 'pta') await queue(currentRoute === 'pta');
+    }
   } catch (error) { toast(error.message); button.disabled = false; }
 });
 document.addEventListener('change', async event => {

@@ -48,7 +48,7 @@ Notes are intentionally separate from the structured call questions. The sticky 
 
 ## Manual truck assignment
 
-Drivers without a current truck association are surfaced by the **Needs Truck** filter on Workflow. Assign the truck directly in that row or from the shared Driver Work Card. WAA validates and normalizes the truck number, appends a `manual` observation to `truck_history`, and audits the action against the canonical driver. The assignment never becomes driver identity and cannot silently replace an existing current truck; later imported assignment evidence remains historical in the same unified model.
+Drivers without a current truck association are surfaced by the **Needs Truck** filter on Workflow. Any driver can be assigned or moved to a different truck directly in Workflow/PTA or from the shared Driver Work Card. WAA confirms reassignment in the browser, validates and normalizes the truck number, appends a `manual` observation to `truck_history`, and audits the action against the canonical driver. Previous and later imported assignments remain historical evidence; truck assignment never becomes driver identity.
 
 ## Transition synchronization
 

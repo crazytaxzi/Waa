@@ -709,12 +709,13 @@ function Save-DriverAction {
         'assign_truck' {
             $current=Get-CurrentDriver $Id
             if($null -eq $current){throw 'Driver not found'}
-            if(-not [string]::IsNullOrWhiteSpace([string]$current.truck)){throw "Driver is already associated with truck $($current.truck)."}
             $truck=([string]$Body.value).Trim().ToUpperInvariant()
             if($truck -notmatch '^[A-Z0-9][A-Z0-9 ._-]{0,23}$'){throw 'Truck number must be 1-24 letters, numbers, spaces, periods, underscores, or hyphens.'}
+            $previousTruck=([string]$current.truck).Trim().ToUpperInvariant()
+            if($previousTruck-eq$truck){throw "Truck $truck is already current for this driver."}
             $truckSql=ConvertTo-SqlLiteral $truck
             Invoke-Sql "INSERT INTO truck_history(driver_id,truck,observed_at,source) VALUES($Id,$truckSql,CURRENT_TIMESTAMP,'manual');" -AllowWrite|Out-Null
-            $Body.value=$truck
+            $Body.value=$truck;$Body.previous_truck=$previousTruck
         }
         'pta' {
             $pta=Parse-Date ([string]$Body.value); if(!$pta){throw 'Invalid PTA date'}
