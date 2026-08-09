@@ -505,21 +505,17 @@ function Repair-WaaDriverIdentity {
     $familyAliases = @(Invoke-Sql "SELECT driver_id,alias_value FROM driver_aliases WHERE alias_type='pta_code';" -Json)
     $familyDispatchCounts = @{}
     foreach($row in @(Invoke-Sql "SELECT driver_id,count(*) alias_count FROM driver_aliases WHERE alias_type='dispatch_code' GROUP BY driver_id;" -Json)){$familyDispatchCounts[[int]$row.driver_id]=[int]$row.alias_count}
-    $observedCodes = @(
-        @($familyDrivers|ForEach-Object{Normalize-WaaPtaCode ([string]$_.pta_code)})+
-        @($familyAliases|ForEach-Object{Normalize-WaaPtaCode ([string]$_.alias_value)})
-        |Where-Object{$_}|Sort-Object Length,@{Expression={$_}} -Unique
-    )
+    $observedCodeCandidates = @($familyDrivers | ForEach-Object { Normalize-WaaPtaCode ([string]$_.pta_code) }) +
+                              @($familyAliases | ForEach-Object { Normalize-WaaPtaCode ([string]$_.alias_value) })
+    $observedCodes = @($observedCodeCandidates | Where-Object { $_ } | Sort-Object Length,@{Expression={$_}} -Unique)
     foreach($actualCode in $observedCodes){
         $compatible=@($familyDrivers|Where-Object{-not(Test-WaaDriverPlaceholder ([string]$_.full_name) ([string]$_.pta_code))-and(Test-WaaPtaCodeMatchesName ([string]$_.full_name) $actualCode)})
         $compatibleIds=@($compatible|ForEach-Object{[int]$_.id}|Select-Object -Unique)
         if($compatibleIds.Count-ne1){continue}
         $winnerId=[int]$compatibleIds[0]
-        $owners=@(
-            @($familyDrivers|Where-Object{(Normalize-WaaPtaCode ([string]$_.pta_code))-eq$actualCode}|ForEach-Object{[int]$_.id})+
-            @($familyAliases|Where-Object{(Normalize-WaaPtaCode ([string]$_.alias_value))-eq$actualCode}|ForEach-Object{[int]$_.driver_id})
-            |Select-Object -Unique
-        )
+        $ownerCandidates = @($familyDrivers | Where-Object { (Normalize-WaaPtaCode ([string]$_.pta_code)) -eq $actualCode } | ForEach-Object { [int]$_.id }) +
+                           @($familyAliases | Where-Object { (Normalize-WaaPtaCode ([string]$_.alias_value)) -eq $actualCode } | ForEach-Object { [int]$_.driver_id })
+        $owners = @($ownerCandidates | Select-Object -Unique)
         foreach($ownerId in $owners){
             $loserId=[int]$ownerId
             if($loserId-eq$winnerId){continue}
