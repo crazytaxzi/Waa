@@ -15,7 +15,18 @@ function Invoke-Sql([string]$Sql, [switch]$Json, [switch]$AllowWrite) {
   $input = ".timeout 5000`nPRAGMA foreign_keys=ON;`n$Sql"
   $out = $input | & $script:Sqlite @args 2>&1
   if ($LASTEXITCODE -ne 0) { throw "SQLite error: $out" }
-  if ($Json) { $text = ($out -join "`n").Trim(); if (!$text) { return @() }; return @($text | ConvertFrom-Json) }
+  if ($Json) {
+    $text = ($out -join "`n").Trim()
+    if (!$text) { return @() }
+    $parsed = ConvertFrom-Json -InputObject $text
+    if ($parsed -is [System.Array]) {
+      foreach ($item in $parsed) {
+        if ($item -is [System.Array]) { foreach ($nested in $item) { Write-Output $nested } }
+        else { Write-Output $item }
+      }
+    } else { Write-Output $parsed }
+    return
+  }
   return ($out -join "`n")
 }
 function Add-Audit([string]$Action,[string]$Entity,[AllowNull()]$Id,[AllowNull()]$Detail) {
