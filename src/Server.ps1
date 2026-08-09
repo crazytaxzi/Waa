@@ -18,7 +18,43 @@ Initialize-WaaConversation
 $startupIntake = Invoke-WaaDownloadsScan
 $startupIdentity = Repair-WaaDriverIdentity
 $script:LastIntakeScan = Get-Date
+$script:IntakeRunner = $null
+$script:IntakeAsync = $null
 $web = [IO.Path]::GetFullPath((Join-Path $Root 'web'))
+$script:StaticCache = @{}
+foreach ($asset in @('index.html','styles.css','app.js')) {
+    $assetPath = Join-Path $web $asset
+    if (Test-Path -LiteralPath $assetPath) { $script:StaticCache[$assetPath] = [IO.File]::ReadAllBytes($assetPath) }
+}
+
+function Update-WaaBackgroundScan {
+    if ($null -ne $script:IntakeAsync) {
+        if (-not $script:IntakeAsync.IsCompleted) { return }
+        try { [void]$script:IntakeRunner.EndInvoke($script:IntakeAsync) }
+        catch { Write-Warning ("Background report scan failed: " + $_.Exception.Message) }
+        finally {
+            $script:IntakeRunner.Dispose()
+            $script:IntakeRunner = $null
+            $script:IntakeAsync = $null
+            $script:LastIntakeScan = Get-Date
+        }
+    }
+    if (((Get-Date)-$script:LastIntakeScan).TotalSeconds -lt 60) { return }
+    $scriptText = @'
+param($ScanRoot,$ScanDataRoot)
+$ErrorActionPreference='Stop'
+Import-Module (Join-Path $ScanRoot 'src/Waa.psm1') -Force
+. (Join-Path $ScanRoot 'src/ReportParsing.ps1')
+. (Join-Path $ScanRoot 'src/ReportIntake.ps1')
+Initialize-Waa $ScanRoot $ScanDataRoot -SkipStartupBackup | Out-Null
+Initialize-WaaReportIntake $ScanDataRoot
+$scan=Invoke-WaaDownloadsScan
+if($scan.results.idle.imported -or $scan.results.bol.imported){Repair-WaaDriverIdentity|Out-Null}
+'@
+    $script:IntakeRunner = [PowerShell]::Create()
+    [void]$script:IntakeRunner.AddScript($scriptText).AddArgument($Root).AddArgument($DataRoot)
+    $script:IntakeAsync = $script:IntakeRunner.BeginInvoke()
+}
 
 function Test-WaaClientDisconnect {
     param([Parameter(Mandatory = $true)]$ErrorRecord)
@@ -41,14 +77,14 @@ function Test-WaaClientDisconnect {
 }
 
 function Send-Response {
-    param($Stream,[int]$Status,[string]$Type,[byte[]]$Bytes)
+    param($Stream,[int]$Status,[string]$Type,[byte[]]$Bytes,[switch]$Static)
 
     $reasons = @{200='OK';201='Created';204='No Content';400='Bad Request';404='Not Found';409='Conflict';500='Internal Server Error'}
     $reason = $reasons[$Status]
     $head = "HTTP/1.1 $Status $reason`r`n" +
         "Content-Type: $Type`r`n" +
         "Content-Length: $($Bytes.Length)`r`n" +
-        "Cache-Control: no-store`r`n" +
+        $(if ($Static) { "Cache-Control: public, max-age=300`r`n" } else { "Cache-Control: no-store`r`n" }) +
         "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`r`n" +
         "X-Content-Type-Options: nosniff`r`n" +
         "Referrer-Policy: no-referrer`r`n" +
@@ -84,13 +120,27 @@ function Read-Request {
     param($Client)
 
     $stream = $Client.GetStream()
-    $reader = [IO.StreamReader]::new($stream,[Text.Encoding]::UTF8,$false,4096,$true)
-    $line = $reader.ReadLine()
-    if ([string]::IsNullOrWhiteSpace($line)) { return $null }
-
-    $parts = $line.Split(' ')
+    $stream.ReadTimeout = 15000
+    $stream.WriteTimeout = 15000
+    $headerBuffer = [Collections.Generic.List[byte]]::new(2048)
+    $matched = 0
+    [byte[]]$terminator = @(13,10,13,10)
+    while ($matched -lt 4) {
+        $next = $stream.ReadByte()
+        if ($next -lt 0) { return $null }
+        [void]$headerBuffer.Add([byte]$next)
+        if ($headerBuffer.Count -gt 32768) { throw 'HTTP headers are too large' }
+        if ($next -eq $terminator[$matched]) { $matched++ }
+        elseif ($next -eq 13) { $matched = 1 }
+        else { $matched = 0 }
+    }
+    $headerText = [Text.Encoding]::ASCII.GetString($headerBuffer.ToArray(),0,$headerBuffer.Count-4)
+    $lines = $headerText -split "`r`n"
+    if ($lines.Count -eq 0 -or [string]::IsNullOrWhiteSpace($lines[0])) { return $null }
+    $parts = $lines[0].Split(' ')
+    if ($parts.Count -lt 3) { throw 'Malformed HTTP request line' }
     $headers = @{}
-    while (($line = $reader.ReadLine()) -ne '') {
+    foreach ($line in $lines | Select-Object -Skip 1) {
         $index = $line.IndexOf(':')
         if ($index -gt 0) {
             $headers[$line.Substring(0,$index).ToLowerInvariant()] = $line.Substring($index+1).Trim()
@@ -99,23 +149,21 @@ function Read-Request {
 
     $body = ''
     if ($headers['content-length']) {
-        $buffer = New-Object char[] ([int]$headers['content-length'])
-        $count = $reader.ReadBlock($buffer,0,$buffer.Length)
-        if ($count -gt 0) { $body = -join $buffer[0..($count-1)] }
+        $length = 0
+        if (-not [int]::TryParse($headers['content-length'],[ref]$length) -or $length -lt 0 -or $length -gt 26214400) {
+            throw 'Invalid or oversized request body'
+        }
+        $buffer = New-Object byte[] $length
+        $offset = 0
+        while ($offset -lt $length) {
+            $count = $stream.Read($buffer,$offset,$length-$offset)
+            if ($count -le 0) { throw 'Incomplete request body' }
+            $offset += $count
+        }
+        if ($offset -gt 0) { $body = [Text.Encoding]::UTF8.GetString($buffer,0,$offset) }
     }
 
     return @{method=$parts[0];target=$parts[1];headers=$headers;body=$body;stream=$stream}
-}
-
-function Refresh-DownloadsIfDue {
-    if (((Get-Date)-$script:LastIntakeScan).TotalSeconds -ge 60) {
-        try {
-            Invoke-WaaDownloadsScan | Out-Null
-            Repair-WaaDriverIdentity | Out-Null
-        }
-        catch { }
-        $script:LastIntakeScan = Get-Date
-    }
 }
 
 $listener = $null
@@ -147,8 +195,8 @@ try {
         try {
             $request = Read-Request $client
             if ($null -eq $request) { continue }
+            Update-WaaBackgroundScan
 
-            Refresh-DownloadsIfDue
             $uri = [Uri]("http://127.0.0.1" + $request.target)
             $path = [Uri]::UnescapeDataString($uri.AbsolutePath)
             $method = $request.method
@@ -198,6 +246,7 @@ try {
                         Send-Json $request.stream 200 (Get-WaaReportIntakeStatus) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/report-intake/scan') {
+                        if ($null -ne $script:IntakeAsync -and -not $script:IntakeAsync.IsCompleted) { throw 'A report scan is already running.' }
                         $scan = Invoke-WaaDownloadsScan
                         $identity = Repair-WaaDriverIdentity
                         $script:LastIntakeScan = Get-Date
@@ -206,6 +255,25 @@ try {
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/data-quality') {
                         Send-Json $request.stream 200 (Get-DataQuality) | Out-Null
+                    }
+                    elseif ($method -eq 'GET' -and $path -eq '/api/organizer') {
+                        Send-Json $request.stream 200 (Get-Organizer) | Out-Null
+                    }
+                    elseif ($method -eq 'GET' -and $path -eq '/api/activity') {
+                        $query = @{}
+                        foreach ($pair in $uri.Query.TrimStart('?').Split('&',[StringSplitOptions]::RemoveEmptyEntries)) {
+                            $parts = $pair.Split('=',2)
+                            if ($parts.Count -eq 2) { $query[[Uri]::UnescapeDataString($parts[0])] = [Uri]::UnescapeDataString($parts[1].Replace('+',' ')) }
+                        }
+                        $startDate = [datetime]::MinValue
+                        $endDate = [datetime]::MinValue
+                        if (-not [datetime]::TryParse([string]$query.start,[ref]$startDate) -or
+                            -not [datetime]::TryParse([string]$query.end,[ref]$endDate) -or $endDate -le $startDate) {
+                            throw 'Valid activity start and end times are required'
+                        }
+                        $startUtc = $startDate.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss')
+                        $endUtc = $endDate.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss')
+                        Send-JsonArray $request.stream 200 @(Get-DailyActivity $startUtc $endUtc) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -eq '/api/identity/resolve') {
                         $resolved = Resolve-Identity ([int]$body.issue_id) ([int]$body.driver_id)
@@ -251,7 +319,8 @@ try {
                         $extension = [IO.Path]::GetExtension($file)
                         $mime = @{'.html'='text/html; charset=utf-8';'.css'='text/css; charset=utf-8';'.js'='text/javascript; charset=utf-8';'.svg'='image/svg+xml'}[$extension]
                         if ([string]::IsNullOrWhiteSpace($mime)) { $mime='application/octet-stream' }
-                        Send-Response $request.stream 200 $mime ([IO.File]::ReadAllBytes($file)) | Out-Null
+                        $bytes = if ($script:StaticCache.ContainsKey($file)) { $script:StaticCache[$file] } else { [IO.File]::ReadAllBytes($file) }
+                        Send-Response $request.stream 200 $mime $bytes -Static | Out-Null
                     }
                 }
             }
@@ -268,5 +337,6 @@ try {
     }
 }
 finally {
+    if ($null -ne $script:IntakeRunner) { try { $script:IntakeRunner.Stop();$script:IntakeRunner.Dispose() } catch { } }
     if ($null -ne $listener) { $listener.Stop() }
 }

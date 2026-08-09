@@ -11,6 +11,22 @@ const api = async (path, options = {}) => {
   return body ?? [];
 };
 
+const state = { cache: new Map(), routeController: null };
+const cachedApi = async (path, maxAge = 20000) => {
+  const hit = state.cache.get(path);
+  if (hit && Date.now() - hit.time < maxAge) return hit.value;
+  const value = await api(path, { signal: state.routeController?.signal });
+  state.cache.set(path, { time: Date.now(), value });
+  return value;
+};
+const invalidate = (...prefixes) => {
+  for (const key of state.cache.keys()) if (prefixes.some(prefix => key.startsWith(prefix))) state.cache.delete(key);
+};
+const debounce = (fn, delay = 120) => {
+  let timer;
+  return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), delay); };
+};
+
 const esc = value => String(value ?? 'Unknown').replace(/[&<>"]/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'
 }[char]));
@@ -180,12 +196,10 @@ function bindCharts(root = document) {
       crosshair.hidden = true;
       $$('.chart-point', shell).forEach(point => point.classList.remove('active'));
     };
-    $$('.chart-hit', shell).forEach(hit => {
-      hit.addEventListener('mouseenter', () => show(hit));
-      hit.addEventListener('focus', () => show(hit));
-      hit.addEventListener('mouseleave', hide);
-      hit.addEventListener('blur', hide);
-    });
+    shell.addEventListener('pointerover', event => { const hit = event.target.closest('.chart-hit'); if (hit) show(hit); });
+    shell.addEventListener('pointerout', event => { if (event.target.closest('.chart-hit')) hide(); });
+    shell.addEventListener('focusin', event => { const hit = event.target.closest('.chart-hit'); if (hit) show(hit); });
+    shell.addEventListener('focusout', event => { if (event.target.closest('.chart-hit')) hide(); });
     scroll.addEventListener('wheel', event => {
       if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
         scroll.scrollLeft += event.deltaY || event.deltaX;
@@ -201,7 +215,7 @@ function metricCard(label, value, detail, tone = 'green') {
 }
 
 async function dashboard() {
-  const data = await api('/api/dashboard');
+  const data = await cachedApi('/api/dashboard');
   const heroList = (items, kind) => `
     <section class="rank-panel ${kind}">
       <div class="panel-title"><div><p class="eyebrow">${kind === 'heroes' ? 'Steal the good habits' : 'Coaching queue'}</p><h3>${kind === 'heroes' ? 'Heroes' : 'Heroes in Training'}</h3></div><span>${items.length}</span></div>
@@ -238,17 +252,17 @@ async function dashboard() {
     </section>`;
 
   bindCharts($('#app'));
-  bindOpen();
 }
 
 async function loadDrivers() {
-  drivers = await api('/api/drivers') || [];
+  drivers = await cachedApi('/api/drivers') || [];
+  drivers.forEach(driver => { driver._search = Object.values(driver).join(' ').toLowerCase(); });
   return drivers;
 }
 
 function driverRows(list, showPta) {
   return list.map(driver => `
-    <tr class="open" data-id="${driver.id}">
+    <tr class="open" data-id="${driver.id}" data-search="${esc(driver._search)}" data-priority="${priority(driver)}">
       ${showPta ? `<td class="pta-cell ${priority(driver)}"><span class="priority-chip">${priority(driver).toUpperCase()}</span><b>${esc(driver.pta_raw || 'N/A')}</b><small>${esc(relative(driver.pta_at))}</small></td>` : ''}
       <td><b class="truck-no">${esc(driver.truck)}</b></td>
       <td><b>${esc(driver.full_name)}</b><small class="subline">${esc(driver.pta_code)}</small></td>
@@ -283,29 +297,27 @@ async function queue(isPta) {
       <div class="table-scroll"><table><thead><tr>${isPta ? '<th>PTA / Priority</th>' : ''}<th>Truck</th><th>Driver</th><th>Div</th><th>Operational</th><th>Planning</th><th>Note</th><th>Type</th><th>Location</th></tr></thead><tbody></tbody></table></div>
     </section>`;
 
+  let baseList = [...drivers];
+  if (isPta) baseList = baseList.filter(driver => driver.actionable).sort((a, b) => {
+    const pa = priority(a) === 'pinned' ? -1 : 0;
+    const pb = priority(b) === 'pinned' ? -1 : 0;
+    return pa - pb || new Date(a.pta_at) - new Date(b.pta_at);
+  });
+  $('tbody').innerHTML = driverRows(baseList, isPta);
   const draw = () => {
     const query = $('#search').value.toLowerCase();
     const filter = $('#filter').value;
-    let list = drivers.filter(driver => JSON.stringify(driver).toLowerCase().includes(query));
-    if (filter) list = list.filter(driver => priority(driver) === filter);
-    if (isPta) {
-      list = list.filter(driver => driver.actionable).sort((a, b) => {
-        const pa = priority(a) === 'pinned' ? -1 : 0;
-        const pb = priority(b) === 'pinned' ? -1 : 0;
-        return pa - pb || new Date(a.pta_at) - new Date(b.pta_at);
-      });
-    }
-    $('tbody').innerHTML = driverRows(list, isPta);
-    bindOpen();
+    $$('tbody tr').forEach(row => { row.hidden = !row.dataset.search.includes(query) || !!filter && row.dataset.priority !== filter; });
   };
 
-  $('#search').addEventListener('input', draw);
+  $('#search').addEventListener('input', debounce(draw));
   $('#filter').addEventListener('change', draw);
   draw();
 }
 
 async function bols() {
-  const list = await api('/api/bols');
+  const list = await cachedApi('/api/bols');
+  list.forEach(item => { item._search = Object.values(item).join(' ').toLowerCase(); });
   $('#app').innerHTML = pageHead('Missing BOLs', 'A persistent admin queue. During a driver call, these live near the end of the conversation—not at hello.') + `
     <section class="glass-panel table-panel">
       <div class="table-toolbar">
@@ -318,19 +330,138 @@ async function bols() {
   const draw = () => {
     const query = $('#search').value.toLowerCase();
     const filter = $('#filter').value;
-    const filtered = list.filter(item => JSON.stringify(item).toLowerCase().includes(query) && (!filter || (filter === 'done') === !!item.mentioned_at));
-    $('tbody').innerHTML = filtered.map(item => `
-      <tr class="open" data-id="${item.driver_id}">
+    $$('tbody tr').forEach(row => { row.hidden = !row.dataset.search.includes(query) || !!filter && row.dataset.state !== filter; });
+  };
+  $('tbody').innerHTML = list.map(item => `
+      <tr class="open" data-id="${item.driver_id}" data-search="${esc(item._search)}" data-state="${item.mentioned_at ? 'done' : 'open'}">
         <td><b>${esc(item.full_name)}</b></td><td><b class="truck-no">${esc(item.truck)}</b></td><td>${esc(item.order_number)}</td>
         <td>${esc(item.empty_call_date)}</td><td>${esc(item.origin)}</td><td>${esc(item.destination)}</td>
         <td>${item.empty_call_date ? `${Math.max(0, Math.floor((Date.now() - new Date(item.empty_call_date)) / 864e5))}d` : 'Unknown'}</td>
         <td>${esc(item.bol_type)}</td><td>${item.mentioned_at ? `<span class="status-pill good">Mentioned</span>` : '<span class="status-pill alert">Pending</span>'}</td>
       </tr>`).join('');
-    bindOpen();
-  };
-  $('#search').addEventListener('input', draw);
+  $('#search').addEventListener('input', debounce(draw));
   $('#filter').addEventListener('change', draw);
   draw();
+}
+
+function driverOptions(list, selected = '') {
+  return `<option value="">Select a driver…</option>${list.map(driver =>
+    `<option value="${driver.id}" ${String(driver.id) === String(selected) ? 'selected' : ''}>${esc(driver.truck)} · ${esc(driver.full_name)}</option>`
+  ).join('')}`;
+}
+
+function reminderRow(item) {
+  const overdue = !item.completed_at && item.due_at && new Date(item.due_at) < new Date();
+  return `<label class="organizer-item reminder ${overdue ? 'late' : ''} ${item.completed_at ? 'complete' : ''}">
+    <input data-organizer-complete="${item.id}" data-driver-id="${item.driver_id}" type="checkbox" ${item.completed_at ? 'checked' : ''}>
+    <span class="organizer-driver"><b>${esc(item.truck)} · ${esc(item.full_name)}</b><small>${esc(displayDate(item.due_at))}</small></span>
+    <span class="organizer-copy">${esc(item.text)}</span>
+  </label>`;
+}
+
+async function organizer() {
+  const data = await cachedApi('/api/organizer', 10000);
+  const notes = data.items.filter(item => item.item_type === 'note');
+  const reminders = data.items.filter(item => item.item_type === 'reminder');
+  const renderItems = () => {
+    const query = $('#organizerSearch').value.trim().toLowerCase();
+    const driverId = $('#organizerDriverFilter').value;
+    const matches = item => (!driverId || String(item.driver_id) === driverId) &&
+      (!query || `${item.full_name} ${item.truck} ${item.text}`.toLowerCase().includes(query));
+    $('#notesList').innerHTML = notes.filter(matches).map(item => `<article class="organizer-item note">
+      <span class="organizer-driver"><b>${esc(item.truck)} · ${esc(item.full_name)}</b><small>${esc(displayDate(item.created_at))}</small></span>
+      <p class="organizer-copy">${esc(item.text)}</p>
+    </article>`).join('') || '<p class="empty-copy">No matching notes.</p>';
+    $('#remindersList').innerHTML = reminders.filter(matches).map(reminderRow).join('') || '<p class="empty-copy">No matching reminders.</p>';
+  };
+
+  $('#app').innerHTML = pageHead('Notes & Reminders', 'A separate driver-specific workspace for everything you need to remember or revisit.', 'WAA // Personal Operations') + `
+    <section class="glass-panel organizer-compose">
+      <div class="panel-title"><div><p class="eyebrow">Capture with context</p><h3>New Driver Item</h3></div><span class="status-pill">Driver required</span></div>
+      <div class="organizer-form">
+        <label class="field"><span>Driver</span><select id="organizerDriver">${driverOptions(data.drivers)}</select></label>
+        <label class="field"><span>Type</span><select id="organizerType"><option value="note">Note</option><option value="reminder">Reminder</option></select></label>
+        <label class="field grow"><span>What do you need to remember?</span><input id="organizerText" placeholder="Write a useful, specific note or follow-up"></label>
+        <label class="field" id="organizerDueField" hidden><span>Due</span><input id="organizerDue" type="datetime-local"></label>
+        <button id="organizerSave" type="button">Save Item</button>
+      </div>
+    </section>
+    <section class="glass-panel organizer-controls">
+      <div class="searchbox"><span aria-hidden="true">⌕</span><input id="organizerSearch" placeholder="Search notes, reminders, drivers or trucks"></div>
+      <select id="organizerDriverFilter" aria-label="Driver filter"><option value="">All drivers</option>${driverOptions(data.drivers).replace('<option value="">Select a driver…</option>', '')}</select>
+    </section>
+    <section class="organizer-grid">
+      <div class="glass-panel"><div class="panel-title"><div><p class="eyebrow">Reference</p><h3>Driver Notes</h3></div><span>${notes.length}</span></div><div id="notesList" class="organizer-list"></div></div>
+      <div class="glass-panel"><div class="panel-title"><div><p class="eyebrow">Follow through</p><h3>Reminders</h3></div><span>${reminders.filter(item => !item.completed_at).length} open</span></div><div id="remindersList" class="organizer-list"></div></div>
+    </section>`;
+
+  $('#organizerType').addEventListener('change', event => { $('#organizerDueField').hidden = event.target.value !== 'reminder'; });
+  $('#organizerSearch').addEventListener('input', debounce(renderItems));
+  $('#organizerDriverFilter').addEventListener('change', renderItems);
+  $('#organizerSave').addEventListener('click', async () => {
+    const driverId = Number($('#organizerDriver').value);
+    const type = $('#organizerType').value;
+    const text = $('#organizerText').value.trim();
+    const due = $('#organizerDue').value;
+    if (!driverId || !text || (type === 'reminder' && !due)) { toast('Choose a driver and complete the item'); return; }
+    const body = type === 'note' ? { action: 'note', text } : { action: 'reminder', text, due_at: due };
+    await api(`/api/drivers/${driverId}/action`, { method: 'POST', body: JSON.stringify(body) });
+    invalidate('/api/organizer', '/api/activity', `/api/drivers/${driverId}`);
+    toast(type === 'note' ? 'Driver note saved' : 'Driver reminder saved');
+    organizer();
+  });
+  renderItems();
+}
+
+const activityLabels = {
+  note: 'Note added', reminder: 'Reminder created', complete_reminder: 'Reminder status changed',
+  pta: 'PTA updated', bol_mentioned: 'Missing BOL status changed', call_flow_update: 'Call flow updated',
+  transition_regenerated: 'Transition regenerated', transition_saved: 'Transition saved',
+  home_checked: 'Home time reviewed', preplan_reviewed: 'Preplan reviewed', routing_checked: 'Routing reviewed',
+  safety_mentioned_at: 'Safety discussed', include_transition: 'Transition selection changed'
+};
+
+function localDayRange(value) {
+  const start = new Date(`${value}T00:00:00`);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { start: start.toISOString(), end: end.toISOString() };
+}
+
+async function activity() {
+  const today = new Date();
+  const defaultDay = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const selected = activity.selectedDay || defaultDay;
+  const range = localDayRange(selected);
+  const path = `/api/activity?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}`;
+  const rows = await cachedApi(path, 5000);
+  const driverRows = rows.filter(row => row.driver_id);
+  const render = () => {
+    const driverId = $('#activityDriver').value;
+    const visible = rows.filter(row => !driverId || String(row.driver_id) === driverId);
+    $('#activityList').innerHTML = visible.map(row => {
+      let detail = {};
+      try { detail = JSON.parse(row.detail_json || '{}'); } catch { detail = {}; }
+      const detailText = detail.text || detail.field || detail.action || '';
+      return `<article class="activity-row ${row.driver_id ? '' : 'system'}">
+        <time>${esc(new Date(`${row.occurred_at.replace(' ', 'T')}Z`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}</time>
+        <div><b>${esc(activityLabels[row.action] || row.action.replaceAll('_', ' '))}</b><small>${row.driver_id ? `${esc(row.truck)} · ${esc(row.full_name)}` : 'WAA operations'}</small>${detailText ? `<p>${esc(detailText)}</p>` : ''}</div>
+        ${row.driver_id ? `<button class="secondary open" data-id="${row.driver_id}" type="button">Open Driver</button>` : ''}
+      </article>`;
+    }).join('') || '<p class="empty-copy">No recorded activity for this day.</p>';
+    $('#activityCount').textContent = `${visible.length} action${visible.length === 1 ? '' : 's'}`;
+  };
+  const uniqueDrivers = [...new Map(driverRows.map(row => [row.driver_id, row])).values()];
+  $('#app').innerHTML = pageHead('Daily Activity Review', 'Review what you completed today with every action tied back to its driver.', 'WAA // Daily Record') + `
+    <section class="glass-panel activity-toolbar">
+      <label class="field"><span>Review date</span><input id="activityDate" type="date" value="${selected}"></label>
+      <label class="field"><span>Driver</span><select id="activityDriver"><option value="">All activity</option>${uniqueDrivers.map(row => `<option value="${row.driver_id}">${esc(row.truck)} · ${esc(row.full_name)}</option>`).join('')}</select></label>
+      <div class="activity-summary"><span id="activityCount"></span><b>${uniqueDrivers.length} drivers touched</b></div>
+    </section>
+    <section class="glass-panel"><div class="panel-title"><div><p class="eyebrow">Chronological record</p><h3>${esc(new Date(`${selected}T12:00:00`).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }))}</h3></div></div><div id="activityList" class="activity-list"></div></section>`;
+  $('#activityDate').addEventListener('change', event => { activity.selectedDay = event.target.value; invalidate('/api/activity'); activity(); });
+  $('#activityDriver').addEventListener('change', render);
+  render();
 }
 
 async function transition() {
@@ -467,6 +598,10 @@ function noteList(notes) {
     : '<p class="empty-copy">Nothing captured yet. Keep this conversational—only save what will actually help later.</p>';
 }
 
+function followupList(reminders) {
+  return reminders.length ? reminders.map(reminder => `<label class="follow-row ${!reminder.completed_at && new Date(reminder.due_at) < new Date() ? 'late' : ''}"><input class="item-action" data-action="complete_reminder" data-item="${reminder.id}" type="checkbox" ${reminder.completed_at ? 'checked' : ''}><span>${esc(reminder.text)}<small>${esc(displayDate(reminder.due_at))}</small></span></label>`).join('') : '<p class="empty-copy">No reminders.</p>';
+}
+
 async function openCard(id) {
   if (!id) return;
   cardId = id;
@@ -547,7 +682,7 @@ async function openCard(id) {
       <aside class="call-side">
         <section class="side-card snapshot"><p class="eyebrow">Driver snapshot</p><dl><div><dt>Truck</dt><dd>${esc(driver.truck)}</dd></div><div><dt>Location</dt><dd>${esc(driver.location)}</dd></div><div><dt>Status</dt><dd>${esc(driver.operational_status)}</dd></div><div><dt>Planning</dt><dd>${esc(driver.planning_status)}</dd></div><div><dt>Freshness</dt><dd>${esc(displayDate(driver.observed_at))}</dd></div></dl></section>
         <section class="side-card notes-rail"><div class="side-title"><div><p class="eyebrow">Remember this</p><h3>Call Notes</h3></div><span>Alt+N</span></div><p class="rail-copy">Use this like a scratchpad, not a form. Save the sentence you would tell yourself later.</p><div class="quick-note"><textarea id="quickNote" placeholder="Driver mentioned…"></textarea><button id="saveNote" type="button">Save Note</button></div><div id="noteList">${noteList(card.notes || [])}</div></section>
-        <section class="side-card followups"><p class="eyebrow">After the call</p><h3>Follow-ups</h3><div class="follow-add"><input id="remtext" placeholder="Reminder"><input id="remdue" type="datetime-local"><button id="addReminder" type="button">Add</button></div>${(card.reminders || []).map(reminder => `<label class="follow-row ${!reminder.completed_at && new Date(reminder.due_at) < new Date() ? 'late' : ''}"><input class="item-action" data-action="complete_reminder" data-item="${reminder.id}" type="checkbox" ${reminder.completed_at ? 'checked' : ''}><span>${esc(reminder.text)}<small>${esc(displayDate(reminder.due_at))}</small></span></label>`).join('') || '<p class="empty-copy">No reminders.</p>'}</section>
+        <section class="side-card followups"><p class="eyebrow">After the call</p><h3>Follow-ups</h3><div class="follow-add"><input id="remtext" placeholder="Reminder"><input id="remdue" type="datetime-local"><button id="addReminder" type="button">Add</button></div><div id="followupList">${followupList(card.reminders || [])}</div></section>
       </aside>
     </div>`;
 
@@ -572,32 +707,6 @@ function bindCardEvents(card) {
     }, 1400);
   };
 
-  $$('[data-conversation]', root).forEach(element => {
-    const event = element.tagName === 'TEXTAREA' || element.tagName === 'INPUT' ? 'blur' : 'change';
-    element.addEventListener(event, async () => {
-      await api(`/api/drivers/${cardId}/conversation`, {
-        method: 'POST',
-        body: JSON.stringify({ field: element.dataset.conversation, value: element.value })
-      });
-      setSaved(element);
-    });
-  });
-
-  $$('[data-action]:not(.item-action)', root).forEach(element => {
-    element.addEventListener('change', async () => {
-      const value = element.type === 'checkbox' ? element.checked : element.value;
-      await driverAction(element.dataset.action, value);
-      setSaved(element);
-    });
-  });
-
-  $$('.item-action', root).forEach(element => {
-    element.addEventListener('change', async () => {
-      await driverAction(element.dataset.action, element.checked, { item_id: +element.dataset.item });
-      toast('Saved');
-    });
-  });
-
   const saveNote = async () => {
     const box = $('#quickNote');
     const text = box.value.trim();
@@ -607,29 +716,53 @@ function bindCardEvents(card) {
     $('#noteList').innerHTML = noteList(updated.notes || []);
     toast('Note kept');
   };
-  $('#saveNote').addEventListener('click', saveNote);
-  $('#quickNote').addEventListener('keydown', event => {
-    if (event.key === 'Enter' && !event.shiftKey) {
+  const addReminder = async () => {
+    const text = $('#remtext').value.trim();
+    const due = $('#remdue').value;
+    if (!text || !due) return;
+    const updated = await driverAction('reminder', null, { text, due_at: due });
+    $('#remtext').value = '';
+    $('#remdue').value = '';
+    $('#followupList').innerHTML = followupList(updated.reminders || []);
+    toast('Reminder added');
+  };
+  const newSafetyNote = async () => {
+    const note = await api('/api/safety/random');
+    $('#safety').textContent = note.note;
+    await driverAction('safety_note_id', note.id);
+  };
+
+  root.addEventListener('change', async event => {
+    const element = event.target;
+    if (element.matches('[data-conversation]')) {
+      await api(`/api/drivers/${cardId}/conversation`, {
+        method: 'POST', body: JSON.stringify({ field: element.dataset.conversation, value: element.value })
+      });
+      invalidate('/api/activity', `/api/drivers/${cardId}`);
+      setSaved(element);
+    } else if (element.matches('.item-action')) {
+      await driverAction(element.dataset.action, element.checked, { item_id: Number(element.dataset.item) });
+      toast('Saved');
+    } else if (element.matches('[data-action]')) {
+      const value = element.type === 'checkbox' ? element.checked : element.value;
+      await driverAction(element.dataset.action, value);
+      setSaved(element);
+    }
+  });
+  root.addEventListener('click', event => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    if (button.id === 'saveNote') saveNote();
+    else if (button.id === 'addReminder') addReminder();
+    else if (button.id === 'random') newSafetyNote();
+    else if (button.dataset.jump) $(`.call-step[data-step="${button.dataset.jump}"]`, root)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  root.addEventListener('keydown', event => {
+    if (event.target.id === 'quickNote' && event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       saveNote();
     }
   });
-  $('#addReminder').addEventListener('click', async () => {
-    const text = $('#remtext').value.trim();
-    const due = $('#remdue').value;
-    if (!text || !due) return;
-    await driverAction('reminder', null, { text, due_at: due });
-    toast('Reminder added');
-    openCard(cardId);
-  });
-  $('#random').addEventListener('click', async () => {
-    const note = await api('/api/safety/random');
-    $('#safety').textContent = note.note;
-    await driverAction('safety_note_id', note.id);
-  });
-  $$('[data-jump]', root).forEach(button => button.addEventListener('click', () => {
-    $(`.call-step[data-step="${button.dataset.jump}"]`, root)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }));
 
   root.addEventListener('focusin', event => {
     const step = event.target.closest('.call-step');
@@ -641,14 +774,12 @@ function bindCardEvents(card) {
 }
 
 async function driverAction(action, value, extra = {}) {
-  return api(`/api/drivers/${cardId}/action`, {
+  const result = await api(`/api/drivers/${cardId}/action`, {
     method: 'POST',
     body: JSON.stringify({ action, value, ...extra })
   });
-}
-
-function bindOpen() {
-  $$('.open').forEach(element => element.addEventListener('click', () => openCard(+element.dataset.id)));
+  invalidate('/api/drivers', '/api/dashboard', '/api/bols', '/api/organizer', '/api/activity', `/api/drivers/${cardId}`);
+  return result;
 }
 
 function closeCard() {
@@ -668,12 +799,31 @@ document.addEventListener('keydown', event => {
     $('#quickNote')?.focus();
   }
 });
+document.addEventListener('click', event => {
+  const opener = event.target.closest('.open[data-id]');
+  if (opener) openCard(Number(opener.dataset.id));
+});
+document.addEventListener('change', async event => {
+  const checkbox = event.target.closest('[data-organizer-complete]');
+  if (!checkbox) return;
+  checkbox.disabled = true;
+  try {
+    await api(`/api/drivers/${checkbox.dataset.driverId}/action`, {
+      method: 'POST', body: JSON.stringify({ action: 'complete_reminder', item_id: Number(checkbox.dataset.organizerComplete) })
+    });
+    invalidate('/api/organizer', '/api/activity', `/api/drivers/${checkbox.dataset.driverId}`);
+    toast('Reminder updated');
+    organizer();
+  } catch (error) { checkbox.checked = !checkbox.checked; checkbox.disabled = false; toast(error.message); }
+});
 
 const routes = {
   dashboard,
   pta: () => queue(true),
   workflow: () => queue(false),
   bols,
+  organizer,
+  activity,
   transition,
   imports
 };
@@ -682,9 +832,12 @@ async function route() {
   const name = location.hash.slice(1) || 'dashboard';
   $$('nav a').forEach(anchor => anchor.classList.toggle('active', anchor.hash === `#${name}`));
   try {
+    state.routeController?.abort();
+    state.routeController = new AbortController();
     await (routes[name] || dashboard)();
   }
   catch (error) {
+    if (error.name === 'AbortError') return;
     $('#app').innerHTML = `<div class="console-fault"><p class="eyebrow">WAA fault</p><h2>Console fault</h2><p>${esc(error.message)}</p></div>`;
   }
 }

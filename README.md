@@ -2,6 +2,8 @@
 
 WAA is a fully local, driver-centered operations console for PTA, workflow, rolling idle, Missing BOL, transition, reminders, notes, safety coaching, audit history, imports, data quality, and backups.
 
+The **Notes & Reminders** tab is a separate driver-specific organizer: choose the canonical driver, capture a note or dated reminder, search across the fleet, and complete reminders without opening the call flow. The **Daily Review** tab turns WAA's audit trail into a readable day-by-day record with local-date and driver filters and direct links back to each Driver Work Card.
+
 ## Launch on the company Windows PC
 
 1. Copy or clone this repository to any writable folder.
@@ -19,6 +21,8 @@ WAA treats the Windows **Downloads** folder as the automatic intake location for
 - the newest **Missing BOL / Order Details Missing BOL** report
 
 WAA resolves the real Windows Downloads known folder when possible, including redirected corporate profiles. On startup, while the app is being used, and when **Scan Downloads Now** is pressed, WAA finds only the newest matching file for each report family, validates its actual content, copies the source into `%LOCALAPPDATA%\Waa\reports`, imports new data into SQLite, and leaves the original file untouched in Downloads. SHA-256/content checks prevent repeat imports of an already-current report.
+
+Periodic scans run in a background PowerShell runspace so report discovery and identity reconciliation cannot stall normal browser requests. Manual scans remain explicit and report their result immediately.
 
 Supported automatic file forms are `.csv`, `.txt`, and `.xlsx`. XLSX support is native: PowerShell reads the OpenXML ZIP/XML package directly using built-in .NET classes. Excel does not need to be installed or running. The reader searches worksheets for the expected report headers rather than assuming the first worksheet or trusting the filename.
 
@@ -59,6 +63,8 @@ The UI uses the same neon operations-console design throughout the dashboard, qu
 
 The server binds `System.Net.IPAddress.Loopback` only. Static paths are canonicalized, imported content is data only, SQL values are escaped before statement construction, CORS is loopback-only, and a strict CSP blocks outside scripts, styles, frames, and connections. SQLite enables foreign keys, WAL, busy timeout, indexes and transactions. Startup performs an integrity check and enters read-only recovery mode on failure.
 
+Hot screens use purpose-built indexed queries. The complete Driver Work Card is returned by one SQLite JSON query instead of a chain of database-process launches. Browser routes use short-lived in-memory caching with explicit mutation invalidation, cancellable reads, delegated interaction handlers, render-once table filtering, section-level card updates, and contained off-screen layout. Static assets are held in memory by the loopback server and receive a short cache lifetime; API responses remain `no-store`.
+
 ## Run the tests
 
 On Windows, from a PowerShell prompt in the repository:
@@ -68,6 +74,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Run-Tests.ps1
 ```
 
 The suite uses no external test framework and creates its database under the temporary directory.
+
+The repository also includes `tests/Identity.Tests.ps1` for cross-report canonical identity behavior and `tests/Measure-PtaPerformance.ps1` for the bulk PTA pipeline.
 
 ## Identity and business rules
 

@@ -2,9 +2,13 @@
 
 ## Delivered
 
-WAA is a complete local Windows driver-operations application with six hash-routed pages: Dashboard, PTA Tracking, Workflow, Missing BOLs, Transition, and Imports/Data Quality. The shared Driver Work Card centralizes PTA history/editing, weighted idle history, BOL mentions, home-time review, on-time state, preplan review/response, routing, randomized safety coaching, chronological notes, restart-safe reminders/timers, transition selection, and activity history.
+WAA is a complete local Windows driver-operations application with eight hash-routed pages: Dashboard, PTA Tracking, Workflow, Missing BOLs, Notes & Reminders, Daily Review, Transition, and Imports/Data Quality. The shared Driver Work Card centralizes PTA history/editing, weighted idle history, BOL mentions, home-time review, on-time state, preplan review/response, routing, randomized safety coaching, chronological notes, restart-safe reminders/timers, transition selection, and activity history.
+
+The application now also includes two first-class pages. **Notes & Reminders** is a fleet-wide organizer that requires a canonical driver for every item and supports capture, search, filtering, due-state display, and completion. **Daily Review** presents the immutable audit trail as a local-day chronological record, keeps driver actions attributed to the canonical driver/current truck, supports driver filtering, and opens the shared Driver Work Card directly.
 
 The Gothic cybernetic interface uses centralized dark gunmetal/neon tokens, angular panels, responsive tables, strong focus states, text-backed alert colors, inline SVG charts, and reduced-motion support. It contains no third-party frontend code, CDN, build step, or Internet dependency.
+
+Performance work is integrated into the existing architecture: the Driver Work Card is assembled by one SQLite JSON query; current-driver lookups are targeted; dashboard latest-row ties and true contiguous weighted 28-day history are handled correctly; driver/audit/organizer indexes are migrated in place; automatic Downloads scans run in a non-blocking runspace and reconcile identity only after actual imports; startup backups retain the newest ten automatic copies; static assets are memory-cached; and the byte-accurate HTTP reader enforces header/body limits and timeouts. The client uses cancellable cached route reads, explicit invalidation, render-once table filtering, delegated table/card/chart interactions, partial card-section refreshes, and CSS layout/paint containment.
 
 ## Architecture and major files
 
@@ -25,11 +29,13 @@ Operational SQLite lives only at `%LOCALAPPDATA%\Waa\waa.db`. The schema covers 
 
 Preview never writes. Commit reparses the supplied raw source, validates rows, records parser/source metadata and the exact source, and rejects exact duplicates by SHA-256. Ambiguous or unmatched identity evidence remains visible for explicit alias resolution.
 
-## Validation completed
+## Validation completed — 2026-08-09 integrated performance/organizer revision
 
-- `tests/Run-Tests.ps1`: **33/33 assertions passed** using PowerShell 7.5.2 and the official SQLite 3.53.4 Linux validation shell. Coverage includes schema creation, integrity, WAL/FKs, identity examples, PTA parsing/sentinels/23:57, rolling-idle parsing, duplicate detection, weighted math, zero hours and partial coverage, manual PTA history, durable notes/reminders/timers, transitions, 29-column BOL import, invalid-import rejection, backups, clean restart, persistence, traversal rejection, loopback binding, and offline frontend checks.
-- End-to-end server exercise: launched the real TCP server, verified health, committed a representative PTA through HTTP, read the resulting driver through HTTP, served the web client, and rejected encoded traversal with HTTP 404.
-- JavaScript syntax check passed. The official SQLite Windows archive hash was verified as `88b4659fe747896b853af10157316b4ade143553efb89c1c8ca7423a278dcc8b`.
+- `tests/Run-Tests.ps1`: **43/43 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. New coverage includes targeted current-driver retrieval, driver-specific organizer data, daily activity attribution, performance indexes, HTTP limits/timeouts/static caching, and integrated navigation, in addition to the prior database/import/workflow/security coverage.
+- `tests/Identity.Tests.ps1`: **7/7 scenarios passed**, including Rolling-first, PTA-first, placeholder reconciliation, assignment history, and ambiguous derived-code isolation.
+- `tests/Measure-PtaPerformance.ps1`: **500 rows**, 149.6 ms parse, 87.9 ms database phase, result `responsive` in the validation environment.
+- End-to-end real TCP server exercise passed health, memory-cached static delivery, a multibyte Unicode PTA POST, Driver Note creation, organizer retrieval, and local-day activity retrieval.
+- JavaScript syntax, whitespace validation, SQLite schema execution, single-query Driver Card JSON, organizer SQL, daily activity SQL, latest-row tie handling, and contiguous weighted 28-day SQL all passed. The official SQLite Windows archive hash was verified as `88b4659fe747896b853af10157316b4ade143553efb89c1c8ca7423a278dcc8b`.
 
 ## Intentionally unresolved business rules
 
@@ -41,12 +47,5 @@ On the target Windows machine, double-click `Start-Waa.cmd` (or run `Start-Waa.p
 
 ## Codex Run Metadata
 
-- Completed: 2026-08-09T01:27:43+00:00
-- Codex exit code: 0
-- Resume key: `019fe40f-17e8-75b0-9c5a-2fe9294a9381`
-
-Resume this exact Codex session with:
-
-```bash
-cd ~/Waa && codex exec --yolo -C "$PWD" resume "019fe40f-17e8-75b0-9c5a-2fe9294a9381" "Continue this WAA session. Inspect the current repository state before making any changes."
-```
+- Integrated revision completed: 2026-08-09T15:22:47Z
+- Validation status: complete

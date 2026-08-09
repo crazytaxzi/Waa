@@ -48,13 +48,13 @@ CREATE INDEX IF NOT EXISTS idx_call_sessions_driver ON driver_call_sessions(driv
 function Get-WaaConversationCycle {
     param([Parameter(Mandatory = $true)][int]$DriverId)
 
-    $driver = @(Get-CurrentDrivers | Where-Object { [int]$_.id -eq $DriverId } | Select-Object -First 1)
-    if ($driver.Count -eq 0) { throw 'Driver not found' }
+    $driver = Get-CurrentDriver $DriverId
+    if ($null -eq $driver) { throw 'Driver not found' }
 
-    $truck = [string]$driver[0].truck
+    $truck = [string]$driver.truck
     if ([string]::IsNullOrWhiteSpace($truck)) { $truck = 'NO-TRUCK' }
 
-    $anchor = [string]$driver[0].pta_at
+    $anchor = [string]$driver.pta_at
     if (-not [string]::IsNullOrWhiteSpace($anchor) -and $anchor.Length -ge 10) {
         $anchor = $anchor.Substring(0, 10)
     }

@@ -1,56 +1,5 @@
 Set-StrictMode -Version Latest
 
-function Parse-Date {
-    param([AllowNull()][string]$Text)
-    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
-
-    $number = 0.0
-    if ([double]::TryParse($Text,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$number) -and
-        $number -ge 20000 -and $number -le 100000) {
-        try { return [datetime]::FromOADate($number).ToString('s') } catch { }
-    }
-
-    $date = [datetime]::MinValue
-    $styles = [Globalization.DateTimeStyles]::AssumeLocal
-    if ([datetime]::TryParse($Text,[Globalization.CultureInfo]::InvariantCulture,$styles,[ref]$date)) {
-        return $date.ToString('s')
-    }
-    return $null
-}
-
-function Split-ImportRows {
-    param([AllowNull()][string]$Raw)
-
-    $rows = [Collections.Generic.List[object]]::new()
-    if ([string]::IsNullOrWhiteSpace($Raw)) { return $rows }
-
-    $reader = [IO.StringReader]::new($Raw)
-    try {
-        while ($true) {
-            $line = $reader.ReadLine()
-            if ($null -eq $line) { break }
-            if ([string]::IsNullOrWhiteSpace($line)) { continue }
-
-            $trimmed = $line.Trim()
-            if ($line.IndexOf("`t",[StringComparison]::Ordinal) -ge 0) {
-                $cells = [regex]::Split($line,"`t")
-            }
-            elseif ($trimmed.StartsWith('|')) {
-                $cells = @($trimmed.Trim('|') -split '(?<!\\)\|' | ForEach-Object { $_.Trim().Replace('\_','_').Replace('\|','|') })
-            }
-            else {
-                $cells = @($line -split ',(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)' | ForEach-Object { $_.Trim(' ','"') })
-            }
-
-            if (($cells -join '') -match '^[-: ]+$') { continue }
-            [void]$rows.Add([object[]]$cells)
-        }
-    }
-    finally { $reader.Dispose() }
-
-    return $rows
-}
-
 function ConvertTo-WaaIdentitySqlLiteral {
     param([AllowNull()]$Value)
     if ($null -eq $Value) { return 'NULL' }

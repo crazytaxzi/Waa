@@ -53,18 +53,24 @@ function Backup-Waa {
     $destination = Join-Path $directory "waa-$stamp-$Reason.db"
     $safe = $destination.Replace("'", "''")
     Invoke-Sql ".backup '$safe'" | Out-Null
+    if ($Reason -eq 'startup') {
+        @(Get-ChildItem -LiteralPath $directory -Filter 'waa-*-startup.db' -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -Skip 10) |
+            ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
+    }
     return @{ path = $destination; name = [IO.Path]::GetFileName($destination) }
 }
 
 function Initialize-Waa {
-    param([string]$Root, [string]$DataRoot)
+    param([string]$Root, [string]$DataRoot, [switch]$SkipStartupBackup)
     $script:Root = $Root
     $script:DataRoot = $DataRoot
     [IO.Directory]::CreateDirectory($DataRoot) | Out-Null
     $script:Db = Join-Path $DataRoot 'waa.db'
     $script:Sqlite = if ($env:WAA_SQLITE_TEST) { $env:WAA_SQLITE_TEST } else { Join-Path $Root 'runtime/sqlite/sqlite3.exe' }
     if (-not (Test-Path -LiteralPath $script:Sqlite)) { throw "Bundled SQLite runtime missing: $script:Sqlite" }
-    if (Test-Path -LiteralPath $script:Db) { Backup-Waa 'startup' | Out-Null }
+    if ((Test-Path -LiteralPath $script:Db) -and -not $SkipStartupBackup) { Backup-Waa 'startup' | Out-Null }
 
     $schema = @'
 PRAGMA foreign_keys=ON;
@@ -91,9 +97,14 @@ CREATE TABLE IF NOT EXISTS audit_history(id INTEGER PRIMARY KEY, occurred_at TEX
 CREATE INDEX IF NOT EXISTS idx_alias ON driver_aliases(alias_value);
 CREATE INDEX IF NOT EXISTS idx_pta_driver_time ON pta_observations(driver_id,observed_at DESC);
 CREATE INDEX IF NOT EXISTS idx_truck_time ON truck_history(truck,observed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_truck_driver_time ON truck_history(driver_id,observed_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_idle_driver_end ON idle_periods(driver_id,period_end DESC);
 CREATE INDEX IF NOT EXISTS idx_bol_driver ON missing_bols(driver_id,mentioned_at);
+CREATE INDEX IF NOT EXISTS idx_notes_driver_created ON driver_notes(driver_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reminder_due ON reminders(completed_at,due_at);
+CREATE INDEX IF NOT EXISTS idx_reminder_driver_due ON reminders(driver_id,completed_at,due_at);
+CREATE INDEX IF NOT EXISTS idx_audit_driver_time ON audit_history(entity_type,entity_id,occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_history(occurred_at DESC);
 INSERT OR IGNORE INTO schema_version(version) VALUES(1);
 INSERT OR IGNORE INTO transition_drafts(id,body) VALUES(1,'No Open ACE/ACI''s');
 INSERT OR IGNORE INTO safety_notes(note) VALUES
@@ -152,6 +163,11 @@ function Find-Driver {
 function Parse-Date {
     param([AllowNull()][string]$Text)
     if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    $number = 0.0
+    if ([double]::TryParse($Text,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$number) -and
+        $number -ge 20000 -and $number -le 100000) {
+        try { return [datetime]::FromOADate($number).ToString('s') } catch { }
+    }
     $date = [datetime]::MinValue
     $styles = [Globalization.DateTimeStyles]::AssumeLocal
     if ([datetime]::TryParse($Text, [Globalization.CultureInfo]::InvariantCulture, $styles, [ref]$date)) { return $date.ToString('s') }
@@ -159,8 +175,9 @@ function Parse-Date {
 }
 
 function Split-ImportRows {
-    param([string]$Raw)
+    param([AllowNull()][string]$Raw)
     $rows = [Collections.Generic.List[object]]::new()
+    if ([string]::IsNullOrWhiteSpace($Raw)) { return $rows }
     $reader = [IO.StringReader]::new($Raw)
     try {
         while ($true) {
@@ -386,7 +403,13 @@ function Import-WaaData {
     $preview = Get-ImportPreview $Raw $Filename $RequestedType
     if ($preview.errors.Count -gt 0) { throw ($preview.errors -join '; ') }
     if ($preview.type -eq 'pta') { return Import-PtaBulk $Raw $Filename }
+    $managedImporter = Get-Command Import-WaaManagedReport -ErrorAction SilentlyContinue
+    if ($null -ne $managedImporter) {
+        return Import-WaaManagedReport -Canonical $Raw -Filename $Filename -Type $preview.type
+    }
 
+    # Compatibility fallback for callers that import only Waa.psm1. The complete application
+    # loads ReportIntake.ps1 and uses its single-transaction managed importer above.
     $hashSql = ConvertTo-SqlLiteral $preview.hash
     if ((Invoke-Sql "SELECT count(*) c FROM import_batches WHERE source_hash=$hashSql;" -Json)[0].c -gt 0) { throw 'Duplicate import: this exact source was already committed.' }
     $rows = Split-ImportRows $Raw
@@ -438,21 +461,40 @@ function Import-WaaData {
 
 function Get-Dashboard {
     $sql = @'
-WITH latest AS (SELECT driver_id,max(period_end) e FROM idle_periods GROUP BY driver_id),
-s AS (SELECT i.*,CASE WHEN i.engine_hours=0 THEN NULL ELSE round(i.idle_hours*100.0/i.engine_hours,2) END p FROM idle_periods i JOIN latest l ON l.driver_id=i.driver_id AND l.e=i.period_end),
-ranked AS (SELECT i.*,row_number() OVER(PARTITION BY driver_id ORDER BY period_end DESC) rn FROM idle_periods i),
+WITH ranked AS (SELECT i.*,row_number() OVER(PARTITION BY driver_id ORDER BY period_end DESC,id DESC) rn FROM idle_periods i),
+s AS (SELECT i.*,CASE WHEN i.engine_hours=0 THEN NULL ELSE round(i.idle_hours*100.0/i.engine_hours,2) END p FROM ranked i WHERE rn=1),
 recent AS (SELECT *,lag(period_end) OVER(PARTITION BY driver_id ORDER BY period_start) previous_end FROM ranked WHERE rn<=4),
-d28 AS (SELECT driver_id,sum(engine_hours) e,sum(idle_hours) i,count(*) n,sum(CASE WHEN previous_end IS NOT NULL AND period_start<=previous_end THEN 1 ELSE 0 END) overlaps FROM recent GROUP BY driver_id)
+d28 AS (SELECT driver_id,sum(engine_hours) e,sum(idle_hours) i,count(*) n,
+  sum(CASE WHEN previous_end IS NOT NULL AND julianday(period_start)-julianday(previous_end)<>1 THEN 1 ELSE 0 END) gaps
+  FROM recent GROUP BY driver_id)
 SELECT d.id,d.full_name,d.pta_code,s.truck,s.engine_hours engine7,s.idle_hours idle7,s.p p7,
-CASE WHEN d28.e=0 OR d28.n<4 OR d28.overlaps>0 THEN NULL ELSE round(d28.i*100.0/d28.e,2) END p28,
-d28.e engine28,d28.n weeks28,CASE WHEN d28.n=4 AND d28.overlaps=0 THEN 'Complete' ELSE 'Partial Data' END coverage28
+CASE WHEN d28.e=0 OR d28.n<4 OR d28.gaps>0 THEN NULL ELSE round(d28.i*100.0/d28.e,2) END p28,
+d28.e engine28,d28.n weeks28,CASE WHEN d28.n=4 AND d28.gaps=0 THEN 'Complete' ELSE 'Partial Data' END coverage28
 FROM drivers d JOIN s ON s.driver_id=d.id LEFT JOIN d28 ON d28.driver_id=d.id;
 '@
     $drivers=@(Invoke-Sql $sql -Json)
     $history=@(Invoke-Sql "SELECT period_end,round(sum(idle_hours)*100.0/nullif(sum(engine_hours),0),2) p7 FROM idle_periods GROUP BY period_end ORDER BY period_end;" -Json)
+    $history28=@(Invoke-Sql @'
+WITH fleet_week AS (
+  SELECT period_end,sum(engine_hours) engine_hours,sum(idle_hours) idle_hours
+  FROM idle_periods GROUP BY period_end
+), marked AS (
+  SELECT *,lag(period_end) OVER(ORDER BY period_end) previous_end FROM fleet_week
+), rolling AS (
+  SELECT period_end,
+         sum(engine_hours) OVER(ORDER BY period_end ROWS BETWEEN 3 PRECEDING AND CURRENT ROW) engine28,
+         sum(idle_hours) OVER(ORDER BY period_end ROWS BETWEEN 3 PRECEDING AND CURRENT ROW) idle28,
+         count(*) OVER(ORDER BY period_end ROWS BETWEEN 3 PRECEDING AND CURRENT ROW) weeks,
+         sum(CASE WHEN previous_end IS NOT NULL AND julianday(period_end)-julianday(previous_end)<>7 THEN 1 ELSE 0 END)
+           OVER(ORDER BY period_end ROWS BETWEEN 3 PRECEDING AND CURRENT ROW) gaps
+  FROM marked
+)
+SELECT period_end,CASE WHEN weeks=4 AND gaps=0 THEN round(idle28*100.0/nullif(engine28,0),2) END p28
+FROM rolling ORDER BY period_end;
+'@ -Json)
     $over=@($drivers | Where-Object {$null -ne $_.p7 -and [double]$_.p7 -gt 50}).Count
     $valid=@($drivers | Where-Object {$null -ne $_.p7} | Sort-Object {[double]$_.p7})
-    return @{drivers=$drivers;heroes=@($valid|Select-Object -First 5);training=@($valid|Sort-Object {[double]$_.p7} -Descending|Select-Object -First 5);over50=$over;history7=$history;history28=$history}
+    return @{drivers=$drivers;heroes=@($valid|Select-Object -First 5);training=@($valid|Sort-Object {[double]$_.p7} -Descending|Select-Object -First 5);over50=$over;history7=$history;history28=$history28}
 }
 
 function Get-CurrentDrivers {
@@ -465,18 +507,72 @@ FROM drivers d LEFT JOIN p ON p.driver_id=d.id AND p.rn=1 LEFT JOIN t ON t.drive
     return Invoke-Sql $sql -Json
 }
 
+function Get-CurrentDriver {
+    param([int]$Id)
+    $sql=@"
+WITH p AS (
+  SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
+  FROM pta_observations WHERE driver_id=$Id
+), t AS (
+  SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
+  FROM truck_history WHERE driver_id=$Id
+)
+SELECT d.id,d.full_name,d.pta_code,coalesce(p.truck,t.truck) truck,p.division,p.pta_at,p.pta_raw,
+       p.actionable,p.operational_status,p.planning_status,p.operational_note,p.driver_type,p.location,p.source,p.observed_at
+FROM drivers d LEFT JOIN p ON p.driver_id=d.id AND p.rn=1 LEFT JOIN t ON t.driver_id=d.id AND t.rn=1
+WHERE d.id=$Id;
+"@
+    $rows=@(Invoke-Sql $sql -Json)
+    if(!$rows.Count){return $null}
+    return $rows[0]
+}
+
 function Get-DriverCard {
     param([int]$Id)
-    $driver=@(Get-CurrentDrivers | Where-Object {[int]$_.id -eq $Id}) | Select-Object -First 1
-    if(-not $driver){throw 'Driver not found'}
-    $idle=@(Invoke-Sql "SELECT period_start,period_end,engine_hours,idle_hours,round(idle_hours*100.0/nullif(engine_hours,0),2) percent FROM idle_periods WHERE driver_id=$Id ORDER BY period_end DESC LIMIT 12;" -Json)
-    $bols=@(Invoke-Sql "SELECT * FROM missing_bols WHERE driver_id=$Id ORDER BY empty_call_date DESC;" -Json)
-    $work=@(Invoke-Sql "SELECT * FROM driver_work_items WHERE driver_id=$Id;" -Json)
-    $notes=@(Invoke-Sql "SELECT * FROM driver_notes WHERE driver_id=$Id ORDER BY created_at DESC;" -Json)
-    $reminders=@(Invoke-Sql "SELECT * FROM reminders WHERE driver_id=$Id ORDER BY completed_at,due_at;" -Json)
-    $timers=@(Invoke-Sql "SELECT * FROM timers WHERE driver_id=$Id ORDER BY completed_at,target_at;" -Json)
-    $audit=@(Invoke-Sql "SELECT * FROM audit_history WHERE entity_type='driver' AND entity_id='$Id' ORDER BY occurred_at DESC LIMIT 50;" -Json)
-    return @{driver=$driver;idle=$idle;bols=$bols;work=if($work.Count){$work[0]}else{$null};notes=$notes;reminders=$reminders;timers=$timers;audit=$audit}
+    $sql=@"
+WITH p AS (
+  SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
+  FROM pta_observations WHERE driver_id=$Id
+), t AS (
+  SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
+  FROM truck_history WHERE driver_id=$Id
+), current_driver AS (
+  SELECT d.id,d.full_name,d.pta_code,coalesce(p.truck,t.truck) truck,p.division,p.pta_at,p.pta_raw,
+         p.actionable,p.operational_status,p.planning_status,p.operational_note,p.driver_type,p.location,p.source,p.observed_at
+  FROM drivers d LEFT JOIN p ON p.driver_id=d.id AND p.rn=1 LEFT JOIN t ON t.driver_id=d.id AND t.rn=1
+  WHERE d.id=$Id
+)
+SELECT json_object(
+  'driver',json(coalesce((SELECT json_object('id',id,'full_name',full_name,'pta_code',pta_code,'truck',truck,'division',division,
+    'pta_at',pta_at,'pta_raw',pta_raw,'actionable',actionable,'operational_status',operational_status,'planning_status',planning_status,
+    'operational_note',operational_note,'driver_type',driver_type,'location',location,'source',source,'observed_at',observed_at) FROM current_driver),'null')),
+  'idle',json(coalesce((SELECT json_group_array(json_object('period_start',period_start,'period_end',period_end,'engine_hours',engine_hours,
+    'idle_hours',idle_hours,'percent',percent)) FROM (SELECT period_start,period_end,engine_hours,idle_hours,
+    round(idle_hours*100.0/nullif(engine_hours,0),2) percent FROM idle_periods WHERE driver_id=$Id ORDER BY period_end DESC LIMIT 12)),'[]')),
+  'bols',json(coalesce((SELECT json_group_array(json_object('id',id,'order_number',order_number,'empty_call_date',empty_call_date,
+    'origin',origin,'destination',destination,'mileage',mileage,'bol_type',bol_type,'first_seen_at',first_seen_at,'last_seen_at',last_seen_at,
+    'mentioned_at',mentioned_at)) FROM (SELECT * FROM missing_bols WHERE driver_id=$Id ORDER BY empty_call_date DESC)),'[]')),
+  'work',json(coalesce((SELECT json_object('driver_id',driver_id,'cycle_key',cycle_key,'home_checked',home_checked,'expected_work',expected_work,
+    'home_status',home_status,'home_reason',home_reason,'ontime_status',ontime_status,'ontime_reason',ontime_reason,'ontime_checked_at',ontime_checked_at,
+    'preplan_reviewed',preplan_reviewed,'preplan_response',preplan_response,'preplan_note',preplan_note,'routing_checked',routing_checked,
+    'routing_status',routing_status,'routing_note',routing_note,'safety_note_id',safety_note_id,'safety_mentioned_at',safety_mentioned_at,
+    'include_transition',include_transition,'transition_note',transition_note,'updated_at',updated_at) FROM driver_work_items WHERE driver_id=$Id),'null')),
+  'notes',json(coalesce((SELECT json_group_array(json_object('id',id,'driver_id',driver_id,'note',note,'created_at',created_at))
+    FROM (SELECT * FROM driver_notes WHERE driver_id=$Id ORDER BY created_at DESC)),'[]')),
+  'reminders',json(coalesce((SELECT json_group_array(json_object('id',id,'driver_id',driver_id,'text',text,'due_at',due_at,
+    'completed_at',completed_at,'created_at',created_at)) FROM (SELECT * FROM reminders WHERE driver_id=$Id ORDER BY completed_at,due_at)),'[]')),
+  'timers',json(coalesce((SELECT json_group_array(json_object('id',id,'driver_id',driver_id,'label',label,'target_at',target_at,
+    'completed_at',completed_at,'created_at',created_at)) FROM (SELECT * FROM timers WHERE driver_id=$Id ORDER BY completed_at,target_at)),'[]')),
+  'audit',json(coalesce((SELECT json_group_array(json_object('id',id,'occurred_at',occurred_at,'action',action,'entity_type',entity_type,
+    'entity_id',entity_id,'detail_json',detail_json)) FROM (SELECT * FROM audit_history WHERE entity_type='driver' AND entity_id='$Id'
+    ORDER BY occurred_at DESC,id DESC LIMIT 50)),'[]'))
+);
+"@
+    $json=[string](Invoke-Sql $sql)
+    if([string]::IsNullOrWhiteSpace($json)){throw 'Driver not found'}
+    $card=ConvertFrom-Json -InputObject $json
+    if($null -eq $card.driver){throw 'Driver not found'}
+    return $card
 }
 
 function Save-DriverAction {
@@ -485,12 +581,12 @@ function Save-DriverAction {
     switch($action){
         'pta' {
             $pta=Parse-Date ([string]$Body.value); if(!$pta){throw 'Invalid PTA date'}
-            $current=Get-CurrentDrivers|Where-Object{[int]$_.id-eq$Id}|Select-Object -First 1
+            $current=Get-CurrentDriver $Id
             $values=@($Id,$current.truck,$current.division,$current.pta_code,$Body.value,$pta,$current.operational_status,$current.planning_status,$current.operational_note,$current.driver_type,$current.location)|ForEach-Object{ConvertTo-SqlLiteral $_}
             Invoke-Sql "INSERT INTO pta_observations(driver_id,truck,division,driver_code,pta_raw,pta_at,actionable,operational_status,planning_status,operational_note,driver_type,location,source) VALUES($($values[0..5]-join ','),1,$($values[6..10]-join ','),'manual');" -AllowWrite|Out-Null
         }
-        'note' {$q=ConvertTo-SqlLiteral $Body.text;Invoke-Sql "INSERT INTO driver_notes(driver_id,note) VALUES($Id,$q);" -AllowWrite|Out-Null}
-        'reminder' {$t=ConvertTo-SqlLiteral $Body.text;$d=ConvertTo-SqlLiteral(Parse-Date $Body.due_at);Invoke-Sql "INSERT INTO reminders(driver_id,text,due_at) VALUES($Id,$t,$d);" -AllowWrite|Out-Null}
+        'note' {$text=([string]$Body.text).Trim();if(!$text){throw 'Note text is required'};$q=ConvertTo-SqlLiteral $text;Invoke-Sql "INSERT INTO driver_notes(driver_id,note) VALUES($Id,$q);" -AllowWrite|Out-Null}
+        'reminder' {$text=([string]$Body.text).Trim();$due=Parse-Date $Body.due_at;if (-not $text -or -not $due) {throw 'Reminder text and a valid due time are required'};$t=ConvertTo-SqlLiteral $text;$d=ConvertTo-SqlLiteral $due;Invoke-Sql "INSERT INTO reminders(driver_id,text,due_at) VALUES($Id,$t,$d);" -AllowWrite|Out-Null}
         'timer' {$t=ConvertTo-SqlLiteral $Body.label;$d=ConvertTo-SqlLiteral(Parse-Date $Body.target_at);Invoke-Sql "INSERT INTO timers(driver_id,label,target_at) VALUES($Id,$t,$d);" -AllowWrite|Out-Null}
         'bol_mentioned' {Invoke-Sql "UPDATE missing_bols SET mentioned_at=CASE WHEN mentioned_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
         'complete_reminder' {Invoke-Sql "UPDATE reminders SET completed_at=CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
@@ -506,6 +602,44 @@ function Save-DriverAction {
     }
     Add-Audit $action 'driver' $Id $Body
     return Get-DriverCard $Id
+}
+
+function Get-Organizer {
+    $sql=@'
+WITH latest_truck AS (
+  SELECT driver_id,truck,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
+  FROM truck_history
+)
+SELECT n.id,'note' item_type,n.driver_id,d.full_name,t.truck,n.note text,NULL due_at,NULL completed_at,n.created_at created_at
+FROM driver_notes n JOIN drivers d ON d.id=n.driver_id
+LEFT JOIN latest_truck t ON t.driver_id=n.driver_id AND t.rn=1
+UNION ALL
+SELECT r.id,'reminder',r.driver_id,d.full_name,t.truck,r.text,r.due_at,r.completed_at,r.created_at
+FROM reminders r JOIN drivers d ON d.id=r.driver_id
+LEFT JOIN latest_truck t ON t.driver_id=r.driver_id AND t.rn=1
+ORDER BY 9 DESC;
+'@
+    return @{drivers=@(Get-CurrentDrivers);items=@(Invoke-Sql $sql -Json)}
+}
+
+function Get-DailyActivity {
+    param([string]$StartUtc,[string]$EndUtc)
+    $start=ConvertTo-SqlLiteral $StartUtc
+    $end=ConvertTo-SqlLiteral $EndUtc
+    $sql=@"
+WITH latest_truck AS (
+  SELECT driver_id,truck,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
+  FROM truck_history
+)
+SELECT a.id,a.occurred_at,a.action,a.entity_type,a.entity_id,a.detail_json,
+       d.id driver_id,d.full_name,t.truck
+FROM audit_history a
+LEFT JOIN drivers d ON a.entity_type='driver' AND d.id=CAST(a.entity_id AS INTEGER)
+LEFT JOIN latest_truck t ON t.driver_id=d.id AND t.rn=1
+WHERE a.occurred_at >= $start AND a.occurred_at < $end
+ORDER BY a.occurred_at DESC,a.id DESC;
+"@
+    return Invoke-Sql $sql -Json
 }
 
 function Get-Transition {
@@ -565,4 +699,4 @@ function Restore-Waa {
     return @{ok=$true}
 }
 
-Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-DriverCard,Save-DriverAction,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa
+Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,ConvertTo-SqlLiteral,Parse-Date,Split-ImportRows,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-CurrentDriver,Get-DriverCard,Save-DriverAction,Get-Organizer,Get-DailyActivity,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa
