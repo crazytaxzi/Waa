@@ -561,7 +561,10 @@ SELECT period_end,weeks,gaps,CASE WHEN weeks=4 AND gaps=0 THEN round(idle28*100.
 FROM rolling ORDER BY period_end;
 '@ -Json)
     $over=@($drivers | Where-Object {$null -ne $_.p7 -and [double]$_.p7 -gt 50}).Count
-    $valid=@($drivers | Where-Object {$null -ne $_.p7} | Sort-Object {[double]$_.p7})
+    # Exact 0% and 100% weekly values are retained as source data but excluded from
+    # comparative Top 5 rankings as likely telemetry/reporting edge cases. This guard
+    # intentionally does not alter fleet history or any weighted 28-day calculation.
+    $valid=@($drivers | Where-Object {$null -ne $_.p7 -and [double]$_.p7 -gt 0 -and [double]$_.p7 -lt 100} | Sort-Object {[double]$_.p7})
     $complete28=@($drivers|Where-Object{$_.coverage28-eq'Complete'}).Count
     $latestFleet28=if($history28.Count){$history28[-1]}else{$null}
     return @{drivers=$drivers;heroes=@($valid|Select-Object -First 5);training=@($valid|Sort-Object {[double]$_.p7} -Descending|Select-Object -First 5);over50=$over;history7=$history;history28=$history28;coverage28=@{complete_drivers=$complete28;tracked_drivers=$drivers.Count;fleet_weeks=$(if($null-ne$latestFleet28){[int]$latestFleet28.weeks}else{0});fleet_ready=($null-ne$latestFleet28-and$null-ne$latestFleet28.p28)}}

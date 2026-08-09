@@ -54,6 +54,8 @@ Drivers without a current truck association are surfaced by the **Needs Truck** 
 
 The UI uses the same neon operations-console design throughout the dashboard, queues, imports, transition screen, and Driver Work Card. Charts are custom SVG components with actual connected trend lines, area glow, axes, keyboard-focusable/hoverable inspection bands, crosshairs, tooltips, and horizontal scrolling as history grows. The same chart component is reused for fleet history and driver idle coaching.
 
+The two 7-day Top 5 lists exclude exact 0% and 100% readings as likely telemetry/reporting edge cases. Those records remain stored and visible, and the safeguard does not filter, clamp, or otherwise alter the fleet or driver weighted 28-day calculations.
+
 ## Architecture and security
 
 - `Start-Waa.ps1` — dependency-free launcher
