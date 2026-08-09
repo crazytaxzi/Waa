@@ -1,0 +1,75 @@
+name: Integrate current-unit identity reconciliation
+
+on:
+  push:
+    branches:
+      - agent/current-unit-identity
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/current-unit-identity
+          fetch-depth: 0
+
+      - name: Prepare exact current main
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Copy-Item '.github/scripts/apply-current-unit-identity.py' "$env:RUNNER_TEMP\apply-current-unit-identity.py"
+          Copy-Item '.github/scripts/preserve-queue-state.py' "$env:RUNNER_TEMP\preserve-queue-state.py"
+          git fetch origin main
+          git checkout -B main origin/main
+          $expected = 'd67f15219f3104983ad4d8d5c22eebb5a64e9ff0'
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $expected) {
+            throw "main changed during identity audit. Expected $expected but found $actual. Refusing to overwrite unaudited work."
+          }
+
+      - name: Integrate identity logic into the canonical parser
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python "$env:RUNNER_TEMP\apply-current-unit-identity.py"
+          python "$env:RUNNER_TEMP\preserve-queue-state.py"
+
+      - name: Validate Windows PowerShell 5.1 syntax
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in @('src/ReportParsing.ps1','tests/Identity.Tests.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file).Path,
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List | Out-String | Write-Error
+              throw "Windows PowerShell parser errors in $file"
+            }
+          }
+
+      - name: Run complete WAA regression and identity suites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\tests\Run-Tests.ps1
+          .\tests\Identity.Tests.ps1
+
+      - name: Commit integrated identity architecture to main
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'Sentionce'
+          git config user.email 'crazytaxzi@gmail.com'
+          git add src/ReportParsing.ps1 tests/Identity.Tests.ps1
+          if (git diff --cached --quiet) { throw 'Identity integration produced no changes.' }
+          git commit -m 'Reconcile extended PTA identities by current assignment'
+          git push origin HEAD:main
