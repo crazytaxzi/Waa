@@ -112,7 +112,6 @@ function Read-WaaTextFile {
     param([Parameter(Mandatory = $true)][string]$Path)
 
     $bytes = [IO.File]::ReadAllBytes($Path)
-
     if ($bytes.Length -ge 2 -and $bytes[0] -eq 0xff -and $bytes[1] -eq 0xfe) {
         return [Text.Encoding]::Unicode.GetString($bytes).TrimStart([char]0xfeff)
     }
@@ -122,7 +121,6 @@ function Read-WaaTextFile {
     if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xef -and $bytes[1] -eq 0xbb -and $bytes[2] -eq 0xbf) {
         return [Text.Encoding]::UTF8.GetString($bytes, 3, $bytes.Length - 3)
     }
-
     return [Text.Encoding]::UTF8.GetString($bytes)
 }
 
@@ -138,8 +136,7 @@ function Get-WaaZipEntryText {
     $stream = $entry.Open()
     $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true)
     try {
-        $text = $reader.ReadToEnd()
-        return $text
+        return $reader.ReadToEnd()
     }
     finally {
         $reader.Dispose()
@@ -147,17 +144,29 @@ function Get-WaaZipEntryText {
     }
 }
 
+function Get-WaaXmlAttribute {
+    param(
+        [Parameter(Mandatory = $true)]$Node,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [string]$NamespaceUri
+    )
+
+    if ($null -eq $Node) { return '' }
+    if ([string]::IsNullOrWhiteSpace($NamespaceUri)) {
+        return [string]$Node.GetAttribute($Name)
+    }
+    return [string]$Node.GetAttribute($Name, $NamespaceUri)
+}
+
 function Get-WaaColumnIndexFromRef {
     param([Parameter(Mandatory = $true)][string]$Ref)
 
     if ($Ref -notmatch '^([A-Za-z]+)') { return -1 }
-
     $letters = $Matches[1].ToUpperInvariant().ToCharArray()
     $n = 0
     foreach ($ch in $letters) {
         $n = ($n * 26) + ([int]$ch - [int][char]'A' + 1)
     }
-
     return ($n - 1)
 }
 
@@ -165,16 +174,9 @@ function Get-WaaWorkbookEntryName {
     param([Parameter(Mandatory = $true)][string]$Target)
 
     $value = $Target.Replace('\', '/')
-    if ($value.StartsWith('/')) {
-        return $value.TrimStart('/')
-    }
-    if ($value.StartsWith('xl/')) {
-        return $value
-    }
-
-    while ($value.StartsWith('../')) {
-        $value = $value.Substring(3)
-    }
+    if ($value.StartsWith('/')) { return $value.TrimStart('/') }
+    if ($value.StartsWith('xl/')) { return $value }
+    while ($value.StartsWith('../')) { $value = $value.Substring(3) }
     return ('xl/' + $value.TrimStart('/'))
 }
 
@@ -189,15 +191,19 @@ function Read-WaaXlsxSheets {
         $sharedText = Get-WaaZipEntryText -Zip $zip -Name 'xl/sharedStrings.xml'
         if (-not [string]::IsNullOrWhiteSpace($sharedText)) {
             [xml]$sharedXml = $sharedText
-            foreach ($si in $sharedXml.SelectNodes("//*[local-name()='si']")) {
-                $parts = @($si.SelectNodes(".//*[local-name()='t']") | ForEach-Object { [string]$_.InnerText })
+            foreach ($sharedItem in $sharedXml.SelectNodes("//*[local-name()='si']")) {
+                $parts = @(
+                    $sharedItem.SelectNodes(".//*[local-name()='t']") |
+                        ForEach-Object { [string]$_.InnerText }
+                )
                 $shared += ($parts -join '')
             }
         }
 
         $workbookText = Get-WaaZipEntryText -Zip $zip -Name 'xl/workbook.xml'
         $relationsText = Get-WaaZipEntryText -Zip $zip -Name 'xl/_rels/workbook.xml.rels'
-        if ([string]::IsNullOrWhiteSpace($workbookText) -or [string]::IsNullOrWhiteSpace($relationsText)) {
+        if ([string]::IsNullOrWhiteSpace($workbookText) -or
+            [string]::IsNullOrWhiteSpace($relationsText)) {
             throw 'The XLSX package is missing workbook relationship data.'
         }
 
@@ -206,19 +212,21 @@ function Read-WaaXlsxSheets {
 
         $relationMap = @{}
         foreach ($relation in $relationsXml.SelectNodes("//*[local-name()='Relationship']")) {
-            $relationMap[[string]$relation.Id] = [string]$relation.Target
+            $id = Get-WaaXmlAttribute -Node $relation -Name 'Id'
+            $target = Get-WaaXmlAttribute -Node $relation -Name 'Target'
+            if (-not [string]::IsNullOrWhiteSpace($id) -and
+                -not [string]::IsNullOrWhiteSpace($target)) {
+                $relationMap[$id] = $target
+            }
         }
 
         $sheets = @()
         foreach ($sheet in $workbookXml.SelectNodes("//*[local-name()='sheet']")) {
-            $relationshipId = $sheet.GetAttribute(
-                'id',
-                'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-            )
+            $relationshipId = Get-WaaXmlAttribute -Node $sheet -Name 'id' -NamespaceUri 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
             if ([string]::IsNullOrWhiteSpace($relationshipId)) { continue }
             if (-not $relationMap.ContainsKey($relationshipId)) { continue }
 
-            $entryName = Get-WaaWorkbookEntryName -Target $relationMap[$relationshipId]
+            $entryName = Get-WaaWorkbookEntryName -Target ([string]$relationMap[$relationshipId])
             $sheetText = Get-WaaZipEntryText -Zip $zip -Name $entryName
             if ([string]::IsNullOrWhiteSpace($sheetText)) { continue }
 
@@ -230,15 +238,21 @@ function Read-WaaXlsxSheets {
                 $maxIndex = -1
 
                 foreach ($cell in $rowNode.SelectNodes("./*[local-name()='c']")) {
-                    $index = Get-WaaColumnIndexFromRef -Ref ([string]$cell.r)
+                    $cellReference = Get-WaaXmlAttribute -Node $cell -Name 'r'
+                    $index = Get-WaaColumnIndexFromRef -Ref $cellReference
                     if ($index -lt 0) { continue }
                     if ($index -gt $maxIndex) { $maxIndex = $index }
 
-                    $cellType = [string]$cell.t
+                    # Numeric/date cells commonly omit t entirely. GetAttribute returns an empty
+                    # string for that valid OpenXML case, unlike property access under StrictMode.
+                    $cellType = Get-WaaXmlAttribute -Node $cell -Name 't'
                     $value = ''
 
                     if ($cellType -eq 'inlineStr') {
-                        $inlineParts = @($cell.SelectNodes(".//*[local-name()='t']") | ForEach-Object { [string]$_.InnerText })
+                        $inlineParts = @(
+                            $cell.SelectNodes(".//*[local-name()='t']") |
+                                ForEach-Object { [string]$_.InnerText }
+                        )
                         $value = $inlineParts -join ''
                     }
                     else {
@@ -262,21 +276,20 @@ function Read-WaaXlsxSheets {
                 }
 
                 if ($maxIndex -ge 0) {
-                    $row = [string[]]::new($maxIndex + 1)
+                    $row = [string[]]@(0..$maxIndex | ForEach-Object { '' })
                     for ($i = 0; $i -le $maxIndex; $i++) {
                         if ($cellValues.ContainsKey($i)) {
                             $row[$i] = [string]$cellValues[$i]
-                        }
-                        else {
-                            $row[$i] = ''
                         }
                     }
                     $rows += ,$row
                 }
             }
 
+            $sheetName = Get-WaaXmlAttribute -Node $sheet -Name 'name'
+            if ([string]::IsNullOrWhiteSpace($sheetName)) { $sheetName = 'Worksheet' }
             $sheets += ,@{
-                name = [string]$sheet.name
+                name = $sheetName
                 rows = $rows
             }
         }
@@ -302,12 +315,9 @@ function Find-WaaColumn {
     for ($i = 0; $i -lt $Headers.Count; $i++) {
         $header = Normalize-WaaHeader -Text ([string]$Headers[$i])
         foreach ($alias in $Aliases) {
-            if ($header -eq (Normalize-WaaHeader -Text $alias)) {
-                return $i
-            }
+            if ($header -eq (Normalize-WaaHeader -Text $alias)) { return $i }
         }
     }
-
     return -1
 }
 
@@ -315,7 +325,6 @@ function Convert-WaaExcelDate {
     param([AllowNull()][string]$Value)
 
     if ([string]::IsNullOrWhiteSpace($Value)) { return $Value }
-
     $number = 0.0
     $parsed = [double]::TryParse(
         $Value,
@@ -324,14 +333,9 @@ function Convert-WaaExcelDate {
         [ref]$number
     )
     if ($parsed -and $number -ge 20000 -and $number -le 100000) {
-        try {
-            return [datetime]::FromOADate($number).ToString('MM/dd/yyyy HH:mm')
-        }
-        catch {
-            return $Value
-        }
+        try { return [datetime]::FromOADate($number).ToString('MM/dd/yyyy HH:mm') }
+        catch { return $Value }
     }
-
     return $Value
 }
 
@@ -367,8 +371,7 @@ function Get-WaaCanonicalTextFromRows {
                 idle    = Find-WaaColumn -Headers $headers -Aliases @('[Rolling 7 Day Idle Time]/60', 'Rolling 7 Day Idle Time/60')
                 measure = Find-WaaColumn -Headers $headers -Aliases @('Measure Names', 'Measure Name')
             }
-            $missing = @($candidate.Values | Where-Object { [int]$_ -lt 0 })
-            if ($missing.Count -eq 0) {
+            if (@($candidate.Values | Where-Object { [int]$_ -lt 0 }).Count -eq 0) {
                 $headerIndex = $rowIndex
                 $map = $candidate
                 break
@@ -385,7 +388,10 @@ function Get-WaaCanonicalTextFromRows {
                 code        = Find-WaaColumn -Headers $headers -Aliases @('Last Dispatch Driver cd', 'Last Dispatch Driver Code', 'Driver cd')
                 name        = Find-WaaColumn -Headers $headers -Aliases @('Last Dispatch Driver nm', 'Last Dispatch Driver Name', 'Driver Name')
             }
-            if ($candidate.order -ge 0 -and $candidate.date -ge 0 -and $candidate.code -ge 0 -and $candidate.name -ge 0) {
+            if ($candidate.order -ge 0 -and
+                $candidate.date -ge 0 -and
+                $candidate.code -ge 0 -and
+                $candidate.name -ge 0) {
                 $headerIndex = $rowIndex
                 $map = $candidate
                 break
@@ -397,10 +403,10 @@ function Get-WaaCanonicalTextFromRows {
         throw "No $Type report header was found in the workbook/report."
     }
 
-    $output = [System.Collections.Generic.List[string]]::new()
+    $output = New-Object System.Collections.Generic.List[string]
 
     if ($Type -eq 'idle') {
-        $canonicalHeaders = @(
+        $output.Add((@(
             'Group by  (copy)',
             'Unit Code',
             'Week Start Date',
@@ -408,8 +414,7 @@ function Get-WaaCanonicalTextFromRows {
             '[Rolling 7 Day Engine Time]/60',
             '[Rolling 7 Day Idle Time]/60',
             'Measure Names'
-        )
-        $output.Add(($canonicalHeaders -join "`t"))
+        ) -join "`t"))
 
         for ($rowIndex = $headerIndex + 1; $rowIndex -lt $Rows.Count; $rowIndex++) {
             $row = @($Rows[$rowIndex])
@@ -466,7 +471,6 @@ function Get-WaaCanonicalTextFromRows {
     if ($output.Count -lt 2) {
         throw "The $Type report header was found, but no data rows were found."
     }
-
     return ($output -join "`r`n")
 }
 
@@ -476,18 +480,16 @@ function Get-WaaCanonicalReportText {
         [Parameter(Mandatory = $true)][ValidateSet('idle', 'bol')][string]$Type
     )
 
-    $extension = [IO.Path]::GetExtension($Path).ToLowerInvariant()
-    if ($extension -eq '.xlsx') {
+    if ([IO.Path]::GetExtension($Path).ToLowerInvariant() -eq '.xlsx') {
         $sheetErrors = @()
         foreach ($sheet in @(Read-WaaXlsxSheets -Path $Path)) {
             try {
                 return Get-WaaCanonicalTextFromRows -Rows @($sheet.rows) -Type $Type
             }
             catch {
-                $sheetErrors += ($sheet.name + ': ' + $_.Exception.Message)
+                $sheetErrors += ([string]$sheet.name + ': ' + $_.Exception.Message)
             }
         }
-
         $detail = if ($sheetErrors.Count -gt 0) { ' ' + ($sheetErrors -join ' | ') } else { '' }
         throw "No worksheet in $([IO.Path]::GetFileName($Path)) matches the $Type report structure.$detail"
     }
@@ -513,7 +515,8 @@ function Add-WaaDriverSql {
     }
 
     $codeSql = ConvertTo-WaaSqlLiteral $code
-    $nameSql = ConvertTo-WaaSqlLiteral $(if (-not [string]::IsNullOrWhiteSpace($name)) { $name } else { $code })
+    $nameValue = if (-not [string]::IsNullOrWhiteSpace($name)) { $name } else { $code }
+    $nameSql = ConvertTo-WaaSqlLiteral $nameValue
     $ptaSql = ConvertTo-WaaSqlLiteral $ptaCode
 
     return @"
@@ -580,7 +583,7 @@ function Import-WaaManagedReport {
 
     [void]$sql.AppendLine(
         "INSERT INTO import_batches(source_hash,import_type,parser_version,filename,source_type,raw_source,row_count,warning_count,error_count) " +
-        "VALUES($hashSql,$typeSql,'2.0.1',$fileSql,'downloads',$rawSql,$sourceRowCount,0,0);"
+        "VALUES($hashSql,$typeSql,'2.0.2',$fileSql,'downloads',$rawSql,$sourceRowCount,0,0);"
     )
 
     if ($Type -eq 'idle') {
@@ -638,7 +641,8 @@ function Import-WaaManagedReport {
             $order = [string]$row[0]
             $driverCode = [string]$row[6]
             $driverName = [string]$row[7]
-            if ([string]::IsNullOrWhiteSpace($order) -and [string]::IsNullOrWhiteSpace($driverCode)) { continue }
+            if ([string]::IsNullOrWhiteSpace($order) -and
+                [string]::IsNullOrWhiteSpace($driverCode)) { continue }
 
             [void]$sql.AppendLine((Add-WaaDriverSql -Code $driverCode -Name $driverName))
 
@@ -709,7 +713,6 @@ function Set-WaaIntakeStatus {
     $name = if ($null -ne $File) { $File.Name } else { $null }
     $path = if ($null -ne $File) { $File.FullName } else { $null }
     $modified = if ($null -ne $File) { $File.LastWriteTimeUtc.ToString('s') } else { $null }
-
     $values = @(
         $Downloads, $name, $path, $modified, $Hash, $Managed, $ImportId, $Status, $Detail, $Type
     ) | ForEach-Object { ConvertTo-WaaSqlLiteral $_ }
@@ -745,7 +748,6 @@ function Get-WaaNewestDownload {
     )
 
     if (-not (Test-Path -LiteralPath $Downloads)) { return $null }
-
     $namePattern = if ($Type -eq 'bol') {
         '(?i)(missing.*bol|bol.*missing|order.*details.*bol)'
     }
@@ -791,7 +793,9 @@ function Invoke-WaaDownloadsScan {
         try {
             $fileHash = Get-WaaFileSha256 -Path $file.FullName
             $typeSql = ConvertTo-WaaSqlLiteral $type
-            $previous = @(Invoke-Sql "SELECT source_hash,status,managed_path,import_batch_id FROM report_intake_status WHERE report_type=$typeSql;" -Json)
+            $previous = @(
+                Invoke-Sql "SELECT source_hash,status,managed_path,import_batch_id FROM report_intake_status WHERE report_type=$typeSql;" -Json
+            )
 
             if ($previous.Count -gt 0 -and
                 $previous[0].source_hash -eq $fileHash -and
@@ -829,7 +833,6 @@ function Invoke-WaaDownloadsScan {
         catch {
             $errorHash = $null
             try { $errorHash = Get-WaaFileSha256 -Path $file.FullName } catch { }
-
             Set-WaaIntakeStatus -Type $type -Downloads $downloads -File $file -Status 'Error' -Detail $_.Exception.Message -Managed $null -Hash $errorHash -ImportId $null
             $results[$type] = @{
                 status = 'Error'
