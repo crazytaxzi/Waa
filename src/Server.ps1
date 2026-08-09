@@ -220,14 +220,12 @@ try {
                     elseif ($method -eq 'GET' -and $path -eq '/api/drivers') {
                         Send-JsonArray $request.stream 200 @(Get-CurrentDrivers) | Out-Null
                     }
-                    elseif ($method -eq 'GET' -and $path -match '^/api/drivers/(\d+)$') {
-                        Send-Json $request.stream 200 (Get-DriverCard ([int]$Matches[1])) | Out-Null
+                    elseif ($method -eq 'GET' -and $path -match '^/api/drivers/(\d+)/context$') {
+                        $driverId = [int]$Matches[1]
+                        Send-Json $request.stream 200 @{card=Get-DriverCard $driverId;conversation=Get-WaaConversation -DriverId $driverId} | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -match '^/api/drivers/(\d+)/action$') {
                         Send-Json $request.stream 200 (Save-DriverAction ([int]$Matches[1]) $body) | Out-Null
-                    }
-                    elseif ($method -eq 'GET' -and $path -match '^/api/drivers/(\d+)/conversation$') {
-                        Send-Json $request.stream 200 (Get-WaaConversation -DriverId ([int]$Matches[1])) | Out-Null
                     }
                     elseif ($method -eq 'POST' -and $path -match '^/api/drivers/(\d+)/conversation$') {
                         Send-Json $request.stream 200 (Save-WaaConversation -DriverId ([int]$Matches[1]) -Body $body) | Out-Null

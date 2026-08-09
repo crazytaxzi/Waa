@@ -332,7 +332,8 @@ function Import-WaaManagedReport {
     param(
         [Parameter(Mandatory = $true)][string]$Canonical,
         [Parameter(Mandatory = $true)][string]$Filename,
-        [Parameter(Mandatory = $true)][ValidateSet('idle', 'bol')][string]$Type
+        [Parameter(Mandatory = $true)][ValidateSet('idle', 'bol')][string]$Type,
+        [switch]$SkipIdentityRepair
     )
 
     $hash = Get-WaaTextSha256 $Canonical
@@ -457,7 +458,7 @@ function Import-WaaManagedReport {
     [void]$sql.AppendLine('COMMIT;')
     Invoke-Sql $sql.ToString() -AllowWrite | Out-Null
 
-    $repair = Repair-WaaDriverIdentity
+    $repair = if ($SkipIdentityRepair) { @{evidence=0;merged=0;ambiguous=0} } else { Repair-WaaDriverIdentity }
     $batch = @(Invoke-Sql "SELECT id FROM import_batches WHERE source_hash=$hashSql;" -Json)
     return @{
         status = 'Imported'
@@ -507,7 +508,17 @@ function Get-WaaNewestDownload {
         [Parameter(Mandatory = $true)][string]$Downloads,
         [Parameter(Mandatory = $true)][ValidateSet('idle','bol')][string]$Type
     )
-    if (-not (Test-Path -LiteralPath $Downloads)) { return $null }
+    $candidates = @(Get-WaaDownloadCandidates -Downloads $Downloads -Type $Type)
+    if ($candidates.Count -eq 0) { return $null }
+    return $candidates[0]
+}
+
+function Get-WaaDownloadCandidates {
+    param(
+        [Parameter(Mandatory = $true)][string]$Downloads,
+        [Parameter(Mandatory = $true)][ValidateSet('idle','bol')][string]$Type
+    )
+    if (-not (Test-Path -LiteralPath $Downloads)) { return @() }
     $namePattern = if ($Type -eq 'bol') {
         '(?i)(missing.*bol|bol.*missing|order.*details.*bol)'
     }
@@ -522,8 +533,7 @@ function Get-WaaNewestDownload {
             } |
             Sort-Object LastWriteTimeUtc -Descending
     )
-    if ($candidates.Count -eq 0) { return $null }
-    return $candidates[0]
+    return $candidates
 }
 
 function Invoke-WaaDownloadsScan {
@@ -534,7 +544,8 @@ function Invoke-WaaDownloadsScan {
     $results = @{}
 
     foreach ($type in @('idle','bol')) {
-        $file = Get-WaaNewestDownload -Downloads $downloads -Type $type
+        $candidates = @(Get-WaaDownloadCandidates -Downloads $downloads -Type $type)
+        $file = if ($candidates.Count) { $candidates[0] } else { $null }
         if ($null -eq $file) {
             Set-WaaIntakeStatus -Type $type -Downloads $downloads -File $null -Status 'Waiting' -Detail 'No matching report found in Downloads.' -Managed $null -Hash $null -ImportId $null
             $results[$type] = @{ status = 'Waiting'; detail = 'No matching report found.' }
@@ -542,6 +553,49 @@ function Invoke-WaaDownloadsScan {
         }
 
         try {
+            if ($type -eq 'idle') {
+                # A 28-day result needs four consecutive weekly snapshots. Process the newest
+                # eight candidates oldest-first so a new install can backfill immediately,
+                # instead of waiting four weeks after importing only the newest download.
+                $historyFiles = @($candidates | Select-Object -First 8 | Sort-Object LastWriteTimeUtc)
+                $signatureText = ($historyFiles | ForEach-Object { "$($_.Name)|$($_.Length)|$($_.LastWriteTimeUtc.Ticks)" }) -join "`n"
+                $signature = Get-WaaTextSha256 $signatureText
+                $signatureSql = ConvertTo-WaaSqlLiteral $signature
+                $priorSignature = [string](Invoke-Sql "SELECT value FROM settings WHERE key='idle_download_signature';")
+                if ($priorSignature -eq $signature) {
+                    $results[$type] = @{status='Current';file=$file.Name;imported=$false;detail="$($historyFiles.Count) recent weekly report candidates already checked."}
+                    continue
+                }
+
+                $importedCount = 0
+                $latestImport = $null
+                $latestManaged = $null
+                $historyErrors = [Collections.Generic.List[string]]::new()
+                foreach ($historyFile in $historyFiles) {
+                    try {
+                        $canonical = Get-WaaCanonicalReportText -Path $historyFile.FullName -Type idle
+                        $folder = Join-Path $reportRoot 'idle'
+                        $stamp = $historyFile.LastWriteTimeUtc.ToString('yyyyMMdd-HHmmss')
+                        $managedPath = Join-Path $folder ($stamp + '_' + $historyFile.Name)
+                        if (-not (Test-Path -LiteralPath $managedPath)) { Copy-Item -LiteralPath $historyFile.FullName -Destination $managedPath -Force }
+                        $import = Import-WaaManagedReport -Canonical $canonical -Filename $historyFile.Name -Type idle -SkipIdentityRepair
+                        if ($import.imported) { $importedCount++ }
+                        if ($historyFile.FullName -eq $file.FullName) { $latestImport=$import;$latestManaged=$managedPath }
+                    }
+                    catch { [void]$historyErrors.Add("$($historyFile.Name): $($_.Exception.Message)") }
+                }
+                if ($importedCount -gt 0) { Repair-WaaDriverIdentity | Out-Null }
+                Invoke-Sql "INSERT INTO settings(key,value,updated_at) VALUES('idle_download_signature',$signatureSql,CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=CURRENT_TIMESTAMP;" -AllowWrite | Out-Null
+                $fileHash = Get-WaaFileSha256 $file.FullName
+                $status = if($null-eq$latestImport){'Error'}elseif($importedCount){'Imported'}else{'Current'}
+                $detail = "$importedCount new weekly report(s) imported; $($historyFiles.Count) recent candidate(s) checked for 28-day coverage."
+                if($historyErrors.Count){$detail += " $($historyErrors.Count) invalid candidate(s) skipped: $($historyErrors -join ' | ')"}
+                $latestImportId = if($null-ne$latestImport){$latestImport.import_batch_id}else{$null}
+                Set-WaaIntakeStatus -Type idle -Downloads $downloads -File $file -Status $status -Detail $detail -Managed $latestManaged -Hash $fileHash -ImportId $latestImportId
+                $results[$type] = @{status=$status;file=$file.Name;managed=$latestManaged;imported=($importedCount -gt 0);imported_count=$importedCount;checked=$historyFiles.Count;errors=$historyErrors.Count;detail=$detail}
+                continue
+            }
+
             $fileHash = Get-WaaFileSha256 $file.FullName
             $typeSql = ConvertTo-WaaSqlLiteral $type
             $previous = @(Invoke-Sql "SELECT source_hash,status,managed_path,import_batch_id FROM report_intake_status WHERE report_type=$typeSql;" -Json)

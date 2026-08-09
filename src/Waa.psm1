@@ -528,11 +528,16 @@ WITH ranked AS (SELECT i.*,row_number() OVER(PARTITION BY driver_id ORDER BY per
 s AS (SELECT i.*,CASE WHEN i.engine_hours=0 THEN NULL ELSE round(i.idle_hours*100.0/i.engine_hours,2) END p FROM ranked i WHERE rn=1),
 recent AS (SELECT *,lag(period_end) OVER(PARTITION BY driver_id ORDER BY period_start) previous_end FROM ranked WHERE rn<=4),
 d28 AS (SELECT driver_id,sum(engine_hours) e,sum(idle_hours) i,count(*) n,
-  sum(CASE WHEN previous_end IS NOT NULL AND julianday(period_start)-julianday(previous_end)<>1 THEN 1 ELSE 0 END) gaps
+  sum(CASE WHEN previous_end IS NOT NULL AND julianday(period_start)-julianday(previous_end)<>1 THEN 1 ELSE 0 END) gaps,
+  sum(CASE WHEN julianday(period_end)-julianday(period_start)=6 THEN 1 ELSE 0 END) valid_weeks
   FROM recent GROUP BY driver_id)
 SELECT d.id,d.full_name,d.pta_code,s.truck,s.engine_hours engine7,s.idle_hours idle7,s.p p7,
-CASE WHEN d28.e=0 OR d28.n<4 OR d28.gaps>0 THEN NULL ELSE round(d28.i*100.0/d28.e,2) END p28,
-d28.e engine28,d28.n weeks28,CASE WHEN d28.n=4 AND d28.gaps=0 THEN 'Complete' ELSE 'Partial Data' END coverage28
+CASE WHEN d28.e=0 OR d28.n<4 OR d28.gaps>0 OR d28.valid_weeks<4 THEN NULL ELSE round(d28.i*100.0/d28.e,2) END p28,
+d28.e engine28,d28.n weeks28,CASE WHEN d28.n=4 AND d28.gaps=0 AND d28.valid_weeks=4 THEN 'Complete' ELSE 'Partial Data' END coverage28,
+CASE WHEN d28.n<4 THEN CAST(d28.n AS TEXT)||'/4 weekly reports'
+     WHEN d28.valid_weeks<4 THEN 'A source period is not seven days'
+     WHEN d28.gaps>0 THEN 'Weekly reports are not consecutive'
+     WHEN d28.e=0 THEN 'No engine-hour data' ELSE 'Four consecutive weekly reports' END coverage28_detail
 FROM drivers d JOIN s ON s.driver_id=d.id LEFT JOIN d28 ON d28.driver_id=d.id;
 '@
     $drivers=@(Invoke-Sql $sql -Json)
@@ -552,12 +557,14 @@ WITH fleet_week AS (
            OVER(ORDER BY period_end ROWS BETWEEN 3 PRECEDING AND CURRENT ROW) gaps
   FROM marked
 )
-SELECT period_end,CASE WHEN weeks=4 AND gaps=0 THEN round(idle28*100.0/nullif(engine28,0),2) END p28
+SELECT period_end,weeks,gaps,CASE WHEN weeks=4 AND gaps=0 THEN round(idle28*100.0/nullif(engine28,0),2) END p28
 FROM rolling ORDER BY period_end;
 '@ -Json)
     $over=@($drivers | Where-Object {$null -ne $_.p7 -and [double]$_.p7 -gt 50}).Count
     $valid=@($drivers | Where-Object {$null -ne $_.p7} | Sort-Object {[double]$_.p7})
-    return @{drivers=$drivers;heroes=@($valid|Select-Object -First 5);training=@($valid|Sort-Object {[double]$_.p7} -Descending|Select-Object -First 5);over50=$over;history7=$history;history28=$history28}
+    $complete28=@($drivers|Where-Object{$_.coverage28-eq'Complete'}).Count
+    $latestFleet28=if($history28.Count){$history28[-1]}else{$null}
+    return @{drivers=$drivers;heroes=@($valid|Select-Object -First 5);training=@($valid|Sort-Object {[double]$_.p7} -Descending|Select-Object -First 5);over50=$over;history7=$history;history28=$history28;coverage28=@{complete_drivers=$complete28;tracked_drivers=$drivers.Count;fleet_weeks=$(if($null-ne$latestFleet28){[int]$latestFleet28.weeks}else{0});fleet_ready=($null-ne$latestFleet28-and$null-ne$latestFleet28.p28)}}
 }
 
 function Get-CurrentDrivers {
@@ -638,6 +645,18 @@ SELECT json_object(
     return $card
 }
 
+function Get-DriverFollowups {
+    param([int]$Id)
+    $sql=@"
+SELECT json_object(
+  'notes',json(coalesce((SELECT json_group_array(json_object('id',id,'driver_id',driver_id,'note',note,'created_at',created_at)) FROM (SELECT * FROM driver_notes WHERE driver_id=$Id ORDER BY created_at DESC)),'[]')),
+  'reminders',json(coalesce((SELECT json_group_array(json_object('id',id,'driver_id',driver_id,'text',text,'due_at',due_at,'completed_at',completed_at,'created_at',created_at)) FROM (SELECT * FROM reminders WHERE driver_id=$Id ORDER BY completed_at,due_at)),'[]')),
+  'timers',json(coalesce((SELECT json_group_array(json_object('id',id,'driver_id',driver_id,'label',label,'target_at',target_at,'completed_at',completed_at,'created_at',created_at)) FROM (SELECT * FROM timers WHERE driver_id=$Id ORDER BY completed_at,target_at)),'[]'))
+);
+"@
+    return ConvertFrom-Json -InputObject ([string](Invoke-Sql $sql))
+}
+
 function Save-DriverAction {
     param([int]$Id,[hashtable]$Body)
     $action=[string]$Body.action
@@ -662,9 +681,11 @@ function Save-DriverAction {
         'reminder' {$text=([string]$Body.text).Trim();$due=Parse-Date $Body.due_at;if (-not $text -or -not $due) {throw 'Reminder text and a valid due time are required'};$t=ConvertTo-SqlLiteral $text;$d=ConvertTo-SqlLiteral $due;Invoke-Sql "INSERT INTO reminders(driver_id,text,due_at) VALUES($Id,$t,$d);" -AllowWrite|Out-Null}
         'delete_note' {$item=[int]$Body.item_id;$changed=[int](Invoke-Sql "DELETE FROM driver_notes WHERE id=$item AND driver_id=$Id;SELECT changes();" -AllowWrite);if($changed-ne1){throw 'Driver note not found'}}
         'delete_reminder' {$item=[int]$Body.item_id;$changed=[int](Invoke-Sql "DELETE FROM reminders WHERE id=$item AND driver_id=$Id;SELECT changes();" -AllowWrite);if($changed-ne1){throw 'Driver reminder not found'}}
+        'delete_timer' {$item=[int]$Body.item_id;$changed=[int](Invoke-Sql "DELETE FROM timers WHERE id=$item AND driver_id=$Id;SELECT changes();" -AllowWrite);if($changed-ne1){throw 'Driver timer not found'}}
         'timer' {$t=ConvertTo-SqlLiteral $Body.label;$d=ConvertTo-SqlLiteral(Parse-Date $Body.target_at);Invoke-Sql "INSERT INTO timers(driver_id,label,target_at) VALUES($Id,$t,$d);" -AllowWrite|Out-Null}
         'bol_mentioned' {Invoke-Sql "UPDATE missing_bols SET mentioned_at=CASE WHEN mentioned_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
         'complete_reminder' {Invoke-Sql "UPDATE reminders SET completed_at=CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
+        'snooze_reminder' {Invoke-Sql "UPDATE reminders SET due_at=datetime(due_at,'+1 day'),completed_at=NULL WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
         'complete_timer' {Invoke-Sql "UPDATE timers SET completed_at=CASE WHEN completed_at IS NULL THEN CURRENT_TIMESTAMP ELSE NULL END WHERE id=$([int]$Body.item_id) AND driver_id=$Id;" -AllowWrite|Out-Null}
         default {
             $allowed=@('home_checked','expected_work','home_status','home_reason','ontime_status','ontime_reason','preplan_reviewed','preplan_response','preplan_note','routing_checked','routing_status','routing_note','safety_note_id','safety_mentioned_at','include_transition','transition_note')
@@ -672,11 +693,15 @@ function Save-DriverAction {
             $value=$Body.value
             if($action -eq 'safety_mentioned_at' -and $value){$value=(Get-Date).ToUniversalTime().ToString('s')}
             $q=ConvertTo-SqlLiteral $value
-            Invoke-Sql "INSERT INTO driver_work_items(driver_id,$action) VALUES($Id,$q) ON CONFLICT(driver_id) DO UPDATE SET $action=excluded.$action,updated_at=CURRENT_TIMESTAMP;" -AllowWrite|Out-Null
+            if($action-eq'ontime_status'){Invoke-Sql "INSERT INTO driver_work_items(driver_id,$action,ontime_checked_at) VALUES($Id,$q,CURRENT_TIMESTAMP) ON CONFLICT(driver_id) DO UPDATE SET $action=excluded.$action,ontime_checked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP;" -AllowWrite|Out-Null}
+            else{Invoke-Sql "INSERT INTO driver_work_items(driver_id,$action) VALUES($Id,$q) ON CONFLICT(driver_id) DO UPDATE SET $action=excluded.$action,updated_at=CURRENT_TIMESTAMP;" -AllowWrite|Out-Null}
         }
     }
-    Add-Audit $action 'driver' $Id $Body
-    return Get-DriverCard $Id
+    $auditBody=@{}
+    foreach($key in $Body.Keys){if($key-ne'return_followups'){$auditBody[$key]=$Body[$key]}}
+    Add-Audit $action 'driver' $Id $auditBody
+    if($Body.ContainsKey('return_followups')-and[bool]$Body.return_followups){return Get-DriverFollowups $Id}
+    return @{ok=$true}
 }
 
 function Get-Organizer {

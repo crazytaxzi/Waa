@@ -14,6 +14,12 @@ The Gothic cybernetic interface uses centralized dark gunmetal/neon tokens, angu
 
 Performance work is integrated into the existing architecture: the database layer now maintains one synchronized, self-restarting SQLite shell session for the application lifetime instead of launching `sqlite3.exe` for every query. It preserves the portable-runtime constraint and disposes the child process with the module. In a same-machine 100-query comparison, this reduced database transport time from 1010.8 ms to 308.2 ms (3.28x faster). The Driver Work Card is assembled by one SQLite JSON query; current-driver lookups are targeted; dashboard latest-row ties and true contiguous weighted 28-day history are handled correctly; driver/audit/organizer indexes are migrated in place; automatic Downloads scans run in a non-blocking runspace and reconcile identity only after actual imports; startup backups retain the newest ten automatic copies; static assets are memory-cached; and the byte-accurate HTTP reader enforces header/body limits and timeouts. The client uses cancellable cached route reads, explicit invalidation, render-once table filtering, delegated table/card/chart interactions, partial card-section refreshes, and CSS layout/paint containment.
 
+The multi-pass endpoint and reference audit removed the redundant standalone Driver Card and conversation GET routes and replaced them with one driver-context read. Conversation schema setup no longer runs on every read, conversation updates use a consolidated transaction, routine mutations return a minimal acknowledgement, and follow-up changes return only the three affected lists. Timers, timer deletion, reminder snoozing, on-time status/reason, and their Daily Review labels are now connected to the shared card instead of existing only as unreachable schema/action fields. All remaining browser API references map to a live server route.
+
+The missing 28-day idle result was traced to intake policy, not the weighted formula: WAA imported only the newest Rolling 7-Day file, even when the Downloads folder already contained the preceding weeks. It now examines up to eight recent candidates, imports them oldest-first, performs identity repair once per batch, and records a lightweight directory signature so unchanged periodic scans do no parsing or hashing work. Dashboard coverage explains whether it has 1–4 weeks, a non-seven-day period, a gap, or zero engine hours. Four consecutive valid weekly reports still produce the required weighted `SUM(idle)/SUM(engine)` result.
+
+Rendering was simplified for low-end PCs: continuous ambient/signal/pulse animation, full-window backdrop blur, SVG point drop shadows, and large live blur layers were removed while retaining the dark neon visual hierarchy. Copy such as “Heroes in Training,” “Steal the good habits,” and the invented organization expansion was replaced with direct operational language.
+
 ## Architecture and major files
 
 - `Start-Waa.cmd` / `Start-Waa.ps1`: no-install Windows entry points.
@@ -33,12 +39,12 @@ Operational SQLite lives only at `%LOCALAPPDATA%\Waa\waa.db`. The schema covers 
 
 Preview never writes. Commit reparses the supplied raw source, validates rows, records parser/source metadata and the exact source, and rejects exact duplicates by SHA-256. Ambiguous or unmatched identity evidence remains visible for explicit alias resolution.
 
-## Validation completed — 2026-08-09 persistent database-session revision
+## Validation completed — 2026-08-09 full audit and 28-day idle revision
 
-- `tests/Run-Tests.ps1`: **56/56 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. Coverage includes persistent SQLite-session lifecycle, targeted current-driver retrieval, driver-specific organizer data, daily activity attribution/deletion, ownership-checked note/reminder deletion, card-listener replacement, versioned client assets, manual truck assignment/history/audit/overwrite protection, performance indexes, HTTP limits/timeouts/static caching, and integrated navigation, in addition to the prior database/import/workflow/security coverage.
+- `tests/Run-Tests.ps1`: **64/64 assertions passed** using a temporary PowerShell 7.5.2 validation runtime and the official SQLite 3.53.4 Linux shell. New coverage proves four-file idle backfill produces a weighted 28-day value, unchanged history takes the signature fast path, the card uses one context read with no redundant conversation GET, conversation updates return a compact audited session, ordinary mutations avoid full-card payloads, and reminder snooze/timer deletion/on-time controls are connected. Prior database/import/identity/workflow/security coverage remains intact.
 - `tests/Identity.Tests.ps1`: **7/7 scenarios passed**, including Rolling-first, PTA-first, placeholder reconciliation, assignment history, and ambiguous derived-code isolation.
-- `tests/Measure-PtaPerformance.ps1`: **500 rows**, 149.6 ms parse, 87.9 ms database phase, result `responsive` in the validation environment.
-- End-to-end real TCP server exercises passed health, memory-cached static delivery, a multibyte Unicode PTA POST, single note/reminder creation, deletion ownership enforcement, note/reminder deletion, Daily Review deletion, organizer retrieval, local-day activity retrieval, manual truck assignment, Workflow refresh, driver audit attribution, and assignment overwrite protection.
+- `tests/Measure-PtaPerformance.ps1`: **500 rows**, 147.7 ms parse, 31.7 ms database phase, 1959.7 ms complete preview/reparse/import/identity pipeline, result `responsive` in the validation environment.
+- End-to-end real TCP server exercises passed health, the consolidated driver-context route, compact conversation update, and minimal driver-action response, in addition to the prior static delivery, Unicode PTA, organizer, deletion, activity, assignment, and ownership exercises.
 - JavaScript syntax, whitespace validation, SQLite schema execution, single-query Driver Card JSON, organizer SQL, daily activity SQL, latest-row tie handling, and contiguous weighted 28-day SQL all passed. The official SQLite Windows archive hash was verified as `88b4659fe747896b853af10157316b4ade143553efb89c1c8ca7423a278dcc8b`.
 
 ## Intentionally unresolved business rules
@@ -51,5 +57,5 @@ On the target Windows machine, double-click `Start-Waa.cmd` (or run `Start-Waa.p
 
 ## Codex Run Metadata
 
-- Integrated revision completed: 2026-08-09T17:02:00Z
+- Integrated revision completed: 2026-08-09T17:15:00Z
 - Validation status: complete

@@ -68,19 +68,13 @@ function Get-WaaConversationCycle {
 function Get-WaaConversation {
     param([Parameter(Mandatory = $true)][int]$DriverId)
 
-    Initialize-WaaConversation
     $cycle = Get-WaaConversationCycle -DriverId $DriverId
     $cycleSql = ConvertTo-WaaConversationSqlLiteral $cycle
-
-    Invoke-Sql (
-        "INSERT OR IGNORE INTO driver_call_sessions(driver_id,cycle_key) VALUES(" +
-        "$DriverId,$cycleSql);"
-    ) -AllowWrite | Out-Null
-
     $rows = @(
         Invoke-Sql (
+            "INSERT OR IGNORE INTO driver_call_sessions(driver_id,cycle_key) VALUES($DriverId,$cycleSql);" +
             "SELECT * FROM driver_call_sessions WHERE driver_id=$DriverId AND cycle_key=$cycleSql LIMIT 1;"
-        ) -Json
+        ) -Json -AllowWrite
     )
     if ($rows.Count -eq 0) { throw 'Unable to open driver call session' }
 
@@ -111,15 +105,12 @@ function Save-WaaConversation {
     $sessionId = [int]$session.id
     $valueSql = ConvertTo-WaaConversationSqlLiteral $Body.value
 
-    Invoke-Sql "UPDATE driver_call_sessions SET $field=$valueSql,updated_at=CURRENT_TIMESTAMP WHERE id=$sessionId;" -AllowWrite | Out-Null
-
     $detail = @{
         field = $field
         session_id = $sessionId
         cycle_key = [string]$session.cycle_key
     } | ConvertTo-Json -Compress
     $detailSql = ConvertTo-WaaConversationSqlLiteral $detail
-    Invoke-Sql "INSERT INTO audit_history(action,entity_type,entity_id,detail_json) VALUES('call_flow_update','driver','$DriverId',$detailSql);" -AllowWrite | Out-Null
-
-    return Get-WaaConversation -DriverId $DriverId
+    $rows = @(Invoke-Sql "BEGIN;UPDATE driver_call_sessions SET $field=$valueSql,updated_at=CURRENT_TIMESTAMP WHERE id=$sessionId;INSERT INTO audit_history(action,entity_type,entity_id,detail_json) VALUES('call_flow_update','driver','$DriverId',$detailSql);COMMIT;SELECT * FROM driver_call_sessions WHERE id=$sessionId;" -Json -AllowWrite)
+    return $rows[0]
 }

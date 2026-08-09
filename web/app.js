@@ -92,7 +92,9 @@ function chart(rows, options = {}) {
     dateField = 'period_end',
     tone = 'green',
     title = 'Idle history',
-    compact = false
+    compact = false,
+    emptyMessage = 'No valid history yet',
+    emptyDetail = 'The graph will populate as reports accumulate.'
   } = options;
 
   const points = (rows || [])
@@ -100,7 +102,7 @@ function chart(rows, options = {}) {
     .filter(point => Number.isFinite(point.value));
 
   if (!points.length) {
-    return `<div class="chart-empty"><span>No valid history yet</span><small>The graph will wake up as reports accumulate.</small></div>`;
+    return `<div class="chart-empty"><span>${esc(emptyMessage)}</span><small>${esc(emptyDetail)}</small></div>`;
   }
 
   const id = `chart-${++chartSequence}`;
@@ -219,23 +221,23 @@ async function dashboard() {
   const data = await cachedApi('/api/dashboard');
   const heroList = (items, kind) => `
     <section class="rank-panel ${kind}">
-      <div class="panel-title"><div><p class="eyebrow">${kind === 'heroes' ? 'Steal the good habits' : 'Coaching queue'}</p><h3>${kind === 'heroes' ? 'Heroes' : 'Heroes in Training'}</h3></div><span>${items.length}</span></div>
+      <div class="panel-title"><div><p class="eyebrow">${kind === 'heroes' ? 'Lowest current idle' : 'Highest current idle'}</p><h3>${kind === 'heroes' ? 'Strong Performers' : 'Coaching Priority'}</h3></div><span>${items.length}</span></div>
       <div class="rank-list">
         ${items.map((item, index) => `
           <button class="rank-row open" data-id="${item.id}">
             <span class="rank-number">0${index + 1}</span>
             <span class="rank-driver"><b>${esc(item.full_name)}</b><small>Truck ${esc(item.truck)} · ${esc(item.pta_code)}</small></span>
-            <span class="rank-value"><b>${fmtPercent(item.p7)}</b><small>28D ${fmtPercent(item.p28)} · ${fmtHours(item.engine7)}</small></span>
+            <span class="rank-value"><b>${fmtPercent(item.p7)}</b><small>${item.p28 == null ? `28D ${esc(item.coverage28_detail)}` : `28D ${fmtPercent(item.p28)}`} · ${fmtHours(item.engine7)}</small></span>
           </button>`).join('') || '<p class="empty-copy">Waiting for idle history.</p>'}
       </div>
     </section>`;
 
-  $('#app').innerHTML = pageHead('Fleet Pulse', 'A glanceable live board: what is healthy, what needs attention, and who has habits worth copying.') + `
+  $('#app').innerHTML = pageHead('Fleet Pulse', 'Current idle performance, coaching priorities, and 28-day data coverage.') + `
     <section class="metrics-strip">
       ${metricCard('Over 50% idle', String(data.over50), 'Latest valid rolling 7-day', data.over50 ? 'red' : 'green')}
       ${metricCard('Tracked drivers', String(data.drivers.length), 'Drivers with current idle data', 'blue')}
+      ${metricCard('28-day ready', `${data.coverage28?.complete_drivers || 0}/${data.coverage28?.tracked_drivers || 0}`, `Fleet history ${data.coverage28?.fleet_weeks || 0}/4 weeks`, data.coverage28?.fleet_ready ? 'green' : 'purple')}
       ${metricCard('Best current idle', data.heroes?.[0] ? fmtPercent(data.heroes[0].p7) : '—', data.heroes?.[0]?.full_name || 'Awaiting data', 'green')}
-      ${metricCard('Coaching focus', data.training?.[0] ? fmtPercent(data.training[0].p7) : '—', data.training?.[0]?.full_name || 'Awaiting data', 'purple')}
     </section>
     <section class="dashboard-grid">
       <div class="glass-panel chart-panel green-edge">
@@ -244,7 +246,7 @@ async function dashboard() {
       </div>
       <div class="glass-panel chart-panel purple-edge">
         <div class="panel-title"><div><p class="eyebrow">Long view</p><h3>28-Day Coverage</h3></div><span class="pulse-dot purple"></span></div>
-        ${chart(data.history28, { tone: 'purple', title: 'Fleet 28-day view' })}
+        ${chart(data.history28, { tone: 'purple', title: 'Fleet weighted 28-day idle', emptyMessage: `Building 28-day history: ${data.coverage28?.fleet_weeks || 0}/4 weeks`, emptyDetail: 'WAA backfills up to eight recent weekly reports from Downloads. Four consecutive seven-day reports are required.' })}
       </div>
     </section>
     <section class="dashboard-grid rank-grid">
@@ -281,7 +283,7 @@ async function queue(isPta) {
   const title = isPta ? 'PTA Attention Queue' : 'Driver Workflow';
   const subtitle = isPta
     ? 'The call list is ordered by attention. 23:57 pins first; equipment sentinels stay out of the driver queue.'
-    : 'Open a driver and move through a natural phone conversation instead of a wall of checkboxes.';
+    : 'Open a driver to review the current assignment and complete the call workflow.';
 
   $('#app').innerHTML = pageHead(title, subtitle) + `
     <section class="glass-panel table-panel">
@@ -315,7 +317,7 @@ async function queue(isPta) {
 async function bols() {
   const list = await cachedApi('/api/bols');
   list.forEach(item => { item._search = Object.values(item).join(' ').toLowerCase(); });
-  $('#app').innerHTML = pageHead('Missing BOLs', 'A persistent admin queue. During a driver call, these live near the end of the conversation—not at hello.') + `
+  $('#app').innerHTML = pageHead('Missing BOLs', 'Persistent driver-specific items for call close-out and follow-up.') + `
     <section class="glass-panel table-panel">
       <div class="table-toolbar">
         <div class="searchbox"><span aria-hidden="true">⌕</span><input id="search" placeholder="Search driver, truck, order, lane"></div>
@@ -417,10 +419,14 @@ async function organizer() {
 
 const activityLabels = {
   note: 'Note added', reminder: 'Reminder created', complete_reminder: 'Reminder status changed',
+  delete_note: 'Note deleted', delete_reminder: 'Reminder deleted', snooze_reminder: 'Reminder snoozed',
+  timer: 'Timer started', complete_timer: 'Timer status changed', delete_timer: 'Timer deleted',
   pta: 'PTA updated', assign_truck: 'Truck assigned', bol_mentioned: 'Missing BOL status changed', call_flow_update: 'Call flow updated',
   transition_regenerated: 'Transition regenerated', transition_saved: 'Transition saved',
-  home_checked: 'Home time reviewed', preplan_reviewed: 'Preplan reviewed', routing_checked: 'Routing reviewed',
-  safety_mentioned_at: 'Safety discussed', include_transition: 'Transition selection changed'
+  home_checked: 'Home time reviewed', expected_work: 'Work expectation updated', home_status: 'Home-time status updated', home_reason: 'Home-time note updated',
+  ontime_status: 'On-time status updated', ontime_reason: 'On-time note updated', preplan_reviewed: 'Preplan reviewed', preplan_response: 'Preplan response updated', preplan_note: 'Preplan note updated',
+  routing_checked: 'Routing reviewed', routing_status: 'Routing status updated', routing_note: 'Routing note updated', safety_note_id: 'Safety note selected',
+  safety_mentioned_at: 'Safety discussed', include_transition: 'Transition selection changed', transition_note: 'Transition note updated'
 };
 
 function localDayRange(value) {
@@ -458,7 +464,7 @@ async function activity() {
     <section class="glass-panel activity-toolbar">
       <label class="field"><span>Review date</span><input id="activityDate" type="date" value="${selected}"></label>
       <label class="field"><span>Driver</span><select id="activityDriver"><option value="">All activity</option>${uniqueDrivers.map(row => `<option value="${row.driver_id}">${esc(row.truck)} · ${esc(row.full_name)}</option>`).join('')}</select></label>
-      <div class="activity-summary"><span id="activityCount"></span><b>${uniqueDrivers.length} drivers touched</b></div>
+      <div class="activity-summary"><span id="activityCount"></span><b>${uniqueDrivers.length} drivers with activity</b></div>
     </section>
     <section class="glass-panel"><div class="panel-title"><div><p class="eyebrow">Chronological record</p><h3>${esc(new Date(`${selected}T12:00:00`).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' }))}</h3></div></div><div id="activityList" class="activity-list"></div></section>`;
   $('#activityDate').addEventListener('change', event => { activity.selectedDay = event.target.value; invalidate('/api/activity'); activity(); });
@@ -468,7 +474,7 @@ async function activity() {
 
 async function transition() {
   const data = await api('/api/transition');
-  $('#app').innerHTML = pageHead('Transition Draft', 'A clean handoff, not another system to wrestle. Edit it like normal text and copy when you are done.') + `
+  $('#app').innerHTML = pageHead('Transition Draft', 'Edit the handoff as plain text, then copy it when complete.') + `
     <section class="glass-panel transition-panel">
       <div class="panel-title"><div><p class="eyebrow">Current handoff</p><h3>${data.is_manual ? 'Manual Draft' : 'Generated Draft'}</h3></div><small>${esc(displayDate(data.updated_at))}</small></div>
       <textarea id="draft" class="transition-editor" spellcheck="true">${esc(data.body)}</textarea>
@@ -500,13 +506,13 @@ async function imports() {
   const reportCard = (title, item, tone) => `
     <div class="intake-card ${tone}">
       <div class="intake-icon" aria-hidden="true"></div>
-      <div><p class="eyebrow">Automatic intake</p><h3>${esc(title)}</h3><b>${esc(item?.source_name || 'Waiting for report')}</b><small>${esc(item?.source_modified_utc ? displayDate(item.source_modified_utc) : 'No matching download yet')}</small><p>${esc(item?.detail || 'WAA is watching Downloads for the newest matching report.')}</p></div>
+      <div><p class="eyebrow">Automatic intake</p><h3>${esc(title)}</h3><b>${esc(item?.source_name || 'Waiting for report')}</b><small>${esc(item?.source_modified_utc ? displayDate(item.source_modified_utc) : 'No matching download yet')}</small><p>${esc(item?.detail || 'WAA is watching Downloads for matching reports.')}</p></div>
       <span class="status-pill ${item?.status === 'Error' ? 'alert' : item?.status === 'Imported' || item?.status === 'Current' ? 'good' : ''}">${esc(item?.status || 'Waiting')}</span>
     </div>`;
 
   $('#app').innerHTML = pageHead('Imports / Data Quality', 'Downloads feeds idle and Missing BOL automatically. PTA stays intentional: copy, preview, commit.') + `
     <section class="intake-header glass-panel">
-      <div><p class="eyebrow">Downloads watcher</p><h3>${esc(intake.downloads_path)}</h3><p>Only the newest matching report of each type is considered. Originals remain untouched.</p></div>
+      <div><p class="eyebrow">Downloads watcher</p><h3>${esc(intake.downloads_path)}</h3><p>Idle intake checks up to eight recent weekly reports for 28-day history. Missing BOL uses the newest report. Originals remain untouched.</p></div>
       <button id="scan">Scan Downloads Now</button>
     </section>
     <section class="intake-grid">${reportCard('Rolling 7-Day Idle', intake.idle, 'green')}${reportCard('Missing BOL', intake.bol, 'purple')}</section>
@@ -526,7 +532,7 @@ async function imports() {
   $('#scan').addEventListener('click', async () => {
     const result = await api('/api/report-intake/scan', { method: 'POST', body: '{}' });
     const changed = result.results?.idle?.imported || result.results?.bol?.imported;
-    toast(changed ? 'Newest reports imported' : 'Downloads already current');
+    toast(changed ? 'Report history imported' : 'Downloads already current');
     imports();
   });
   $('#preview').addEventListener('click', async () => {
@@ -601,16 +607,18 @@ function noteList(notes) {
 }
 
 function followupList(reminders) {
-  return reminders.length ? reminders.map(reminder => `<div class="follow-row ${!reminder.completed_at && new Date(reminder.due_at) < new Date() ? 'late' : ''}"><input class="item-action" data-action="complete_reminder" data-item="${reminder.id}" type="checkbox" ${reminder.completed_at ? 'checked' : ''}><span>${esc(reminder.text)}<small>${esc(displayDate(reminder.due_at))}</small></span><button class="danger compact" data-delete-reminder="${reminder.id}" type="button">Delete</button></div>`).join('') : '<p class="empty-copy">No reminders.</p>';
+  return reminders.length ? reminders.map(reminder => `<div class="follow-row ${!reminder.completed_at && new Date(reminder.due_at) < new Date() ? 'late' : ''}"><input class="item-action" data-action="complete_reminder" data-item="${reminder.id}" type="checkbox" ${reminder.completed_at ? 'checked' : ''}><span>${esc(reminder.text)}<small>${esc(displayDate(reminder.due_at))}</small></span><button class="compact" data-snooze-reminder="${reminder.id}" type="button">+1 Day</button><button class="danger compact" data-delete-reminder="${reminder.id}" type="button">Delete</button></div>`).join('') : '<p class="empty-copy">No reminders.</p>';
+}
+
+function timerList(timers) {
+  return timers.length ? timers.map(timer => `<div class="follow-row ${!timer.completed_at && new Date(timer.target_at) < new Date() ? 'late' : ''}"><input class="item-action" data-action="complete_timer" data-item="${timer.id}" type="checkbox" ${timer.completed_at ? 'checked' : ''}><span>${esc(timer.label)}<small>${esc(displayDate(timer.target_at))}</small></span><button class="danger compact" data-delete-timer="${timer.id}" type="button">Delete</button></div>`).join('') : '<p class="empty-copy">No timers.</p>';
 }
 
 async function openCard(id) {
   if (!id) return;
   cardId = id;
-  const [card, conversation] = await Promise.all([
-    api(`/api/drivers/${id}`),
-    api(`/api/drivers/${id}/conversation`)
-  ]);
+  const context = await api(`/api/drivers/${id}/context`);
+  const { card, conversation } = context;
   const driver = card.driver;
   const work = card.work || {};
   const latestIdle = card.idle?.[0];
@@ -640,6 +648,7 @@ async function openCard(id) {
         ${conversationSelect('Timing looks…', 'eta_status', conversation.eta_status, ['Unknown', 'On Track', 'Tight', 'Late'])}
         ${conversationText('What is affecting it?', 'eta_note', conversation.eta_note, 'Traffic, shipper delay, weather…')}
       </div>
+      <div class="field-grid">${selectField('On-time status', 'ontime_status', work.ontime_status, ['Unknown', 'On Time', 'At Risk', 'Late'])}${textField('On-time reason / action', 'ontime_reason', work.ontime_reason, 'Why, and what needs to happen next')}</div>
       <details class="inline-detail"><summary>Adjust imported PTA only if needed</summary><label class="field"><span>Manual PTA observation</span><input data-action="pta" type="datetime-local" value="${esc(driver.pta_at?.slice(0, 16) || '')}"></label></details>`, 'blue-step'),
     callStep(3, 'Idle Coaching', idlePrompt, `
       <div class="idle-coach-head"><div><span>Latest 7D</span><b>${fmtPercent(latestIdle?.percent)}</b></div><div><span>Engine</span><b>${fmtHours(latestIdle?.engine_hours)}</b></div><div><span>Idle</span><b>${fmtHours(latestIdle?.idle_hours)}</b></div></div>
@@ -666,7 +675,7 @@ async function openCard(id) {
     callStep(7, 'Safety & Wrap', 'Finish like a human conversation: one useful reminder, anything else they need, then you are done.', `
       <div class="safety-box"><div><p class="eyebrow">Safety touch</p><p id="safety">Pick one useful note if it fits the conversation.</p></div><button id="random" type="button">New Safety Note</button></div>
       ${checkField('Safety note mentioned', 'safety_mentioned_at', work.safety_mentioned_at)}
-      ${conversationArea('Anything else worth remembering?', 'conversation_wrap', conversation.conversation_wrap, 'Not a report. Just the thing Future You will be glad you wrote down.')}
+      ${conversationArea('Anything else worth remembering?', 'conversation_wrap', conversation.conversation_wrap, 'Record only information that will help with the next follow-up.')}
       <div class="wrap-grid">${checkField('Include in Transition', 'include_transition', work.include_transition)}${textField('Transition note', 'transition_note', work.transition_note, 'Only the handoff-worthy part')}</div>`, 'green-step')
   ].join('');
 
@@ -684,7 +693,7 @@ async function openCard(id) {
       <aside class="call-side">
         <section class="side-card snapshot"><p class="eyebrow">Driver snapshot</p><dl><div><dt>Truck</dt><dd>${esc(driver.truck)}</dd></div><div><dt>Location</dt><dd>${esc(driver.location)}</dd></div><div><dt>Status</dt><dd>${esc(driver.operational_status)}</dd></div><div><dt>Planning</dt><dd>${esc(driver.planning_status)}</dd></div><div><dt>Freshness</dt><dd>${esc(displayDate(driver.observed_at))}</dd></div></dl>${hasTruck(driver) ? '' : `<div class="unassigned-truck"><p>No truck association is on record.</p><form class="quick-truck-form" data-driver-id="${driver.id}"><input name="truck" aria-label="Truck number" placeholder="Enter truck #" maxlength="24" required><button type="submit">Assign Truck</button></form></div>`}</section>
         <section class="side-card notes-rail"><div class="side-title"><div><p class="eyebrow">Remember this</p><h3>Call Notes</h3></div><span>Alt+N</span></div><p class="rail-copy">Use this like a scratchpad, not a form. Save the sentence you would tell yourself later.</p><div class="quick-note"><textarea id="quickNote" placeholder="Driver mentioned…"></textarea><button id="saveNote" type="button">Save Note</button></div><div id="noteList">${noteList(card.notes || [])}</div></section>
-        <section class="side-card followups"><p class="eyebrow">After the call</p><h3>Follow-ups</h3><div class="follow-add"><input id="remtext" placeholder="Reminder"><input id="remdue" type="datetime-local"><button id="addReminder" type="button">Add</button></div><div id="followupList">${followupList(card.reminders || [])}</div></section>
+        <section class="side-card followups"><p class="eyebrow">After the call</p><h3>Reminders</h3><div class="follow-add"><input id="remtext" placeholder="Reminder"><input id="remdue" type="datetime-local"><button id="addReminder" type="button">Add Reminder</button></div><div id="followupList">${followupList(card.reminders || [])}</div><h3 class="follow-heading">Timers</h3><div class="follow-add"><input id="timertext" placeholder="Timer label"><input id="timerdue" type="datetime-local"><button id="addTimer" type="button">Start Timer</button></div><div id="timerList">${timerList(card.timers || [])}</div></section>
       </aside>
     </div>`;
 
@@ -741,6 +750,21 @@ function bindCardEvents(card) {
       toast('Reminder added');
     } finally { button.disabled = false; }
   };
+  const addTimer = async () => {
+    const button = $('#addTimer');
+    if (button.disabled) return;
+    const label = $('#timertext').value.trim();
+    const target = $('#timerdue').value;
+    if (!label || !target) return;
+    button.disabled = true;
+    try {
+      const updated = await driverAction('timer', null, { label, target_at: target });
+      $('#timertext').value = '';
+      $('#timerdue').value = '';
+      $('#timerList').innerHTML = timerList(updated.timers || []);
+      toast('Timer started');
+    } finally { button.disabled = false; }
+  };
   const newSafetyNote = async () => {
     const note = await api('/api/safety/random');
     $('#safety').textContent = note.note;
@@ -769,6 +793,7 @@ function bindCardEvents(card) {
     if (!button) return;
     if (button.id === 'saveNote') saveNote();
     else if (button.id === 'addReminder') addReminder();
+    else if (button.id === 'addTimer') addTimer();
     else if (button.id === 'random') newSafetyNote();
     else if (button.dataset.deleteNote && confirm('Delete this driver note?')) {
       button.disabled = true;
@@ -777,6 +802,14 @@ function bindCardEvents(card) {
     else if (button.dataset.deleteReminder && confirm('Delete this reminder?')) {
       button.disabled = true;
       driverAction('delete_reminder', null, { item_id: Number(button.dataset.deleteReminder) }).then(updated => { $('#followupList').innerHTML = followupList(updated.reminders || []); toast('Reminder deleted'); }).catch(error => { button.disabled = false; toast(error.message); });
+    }
+    else if (button.dataset.snoozeReminder) {
+      button.disabled = true;
+      driverAction('snooze_reminder', null, { item_id: Number(button.dataset.snoozeReminder) }).then(updated => { $('#followupList').innerHTML = followupList(updated.reminders || []); toast('Reminder moved one day'); }).catch(error => { button.disabled = false; toast(error.message); });
+    }
+    else if (button.dataset.deleteTimer && confirm('Delete this timer?')) {
+      button.disabled = true;
+      driverAction('delete_timer', null, { item_id: Number(button.dataset.deleteTimer) }).then(updated => { $('#timerList').innerHTML = timerList(updated.timers || []); toast('Timer deleted'); }).catch(error => { button.disabled = false; toast(error.message); });
     }
     else if (button.dataset.jump) $(`.call-step[data-step="${button.dataset.jump}"]`, root)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, listenerOptions);
@@ -797,9 +830,12 @@ function bindCardEvents(card) {
 }
 
 async function driverAction(action, value, extra = {}) {
+  const returnFollowups = ['note', 'reminder', 'timer', 'delete_note', 'delete_reminder', 'delete_timer', 'complete_reminder', 'snooze_reminder', 'complete_timer'].includes(action);
+  const payload = { action, value, ...extra };
+  if (returnFollowups) payload.return_followups = true;
   const result = await api(`/api/drivers/${cardId}/action`, {
     method: 'POST',
-    body: JSON.stringify({ action, value, ...extra })
+    body: JSON.stringify(payload)
   });
   invalidate('/api/drivers', '/api/dashboard', '/api/bols', '/api/organizer', '/api/activity', `/api/drivers/${cardId}`);
   return result;
