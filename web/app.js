@@ -452,10 +452,10 @@ async function activity() {
       let detail = {};
       try { detail = JSON.parse(row.detail_json || '{}'); } catch { detail = {}; }
       const detailText = detail.text || detail.field || detail.action || '';
-      return `<article class="activity-row ${row.driver_id ? '' : 'system'}">
+      return `<article class="activity-row">
         <time>${esc(new Date(`${row.occurred_at.replace(' ', 'T')}Z`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}</time>
-        <div><b>${esc(activityLabels[row.action] || row.action.replaceAll('_', ' '))}</b><small>${row.driver_id ? `${esc(row.truck)} · ${esc(row.full_name)}` : 'WAA operations'}</small>${detailText ? `<p>${esc(detailText)}</p>` : ''}</div>
-        <div class="activity-actions">${row.driver_id ? `<button class="secondary open" data-id="${row.driver_id}" type="button">Open Driver</button>` : ''}<button class="danger" data-delete-activity="${row.id}" type="button">Delete Record</button></div>
+        <div><b>${esc(activityLabels[row.action] || row.action.replaceAll('_', ' '))}</b><small>${esc(row.truck)} · ${esc(row.full_name)}</small>${detailText ? `<p>${esc(detailText)}</p>` : ''}</div>
+        <div class="activity-actions"><button class="secondary open" data-id="${row.driver_id}" type="button">Open Driver</button><button class="danger" data-delete-activity="${row.id}" type="button">Delete Record</button></div>
       </article>`;
     }).join('') || '<p class="empty-copy">No recorded activity for this day.</p>';
     $('#activityCount').textContent = `${visible.length} action${visible.length === 1 ? '' : 's'}`;

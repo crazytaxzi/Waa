@@ -744,6 +744,7 @@ FROM audit_history a
 LEFT JOIN drivers d ON a.entity_type='driver' AND d.id=CAST(a.entity_id AS INTEGER)
 LEFT JOIN latest_truck t ON t.driver_id=d.id AND t.rn=1
 WHERE a.occurred_at >= $start AND a.occurred_at < $end
+  AND a.entity_type='driver' AND d.id IS NOT NULL
 ORDER BY a.occurred_at DESC,a.id DESC;
 "@
     return Invoke-Sql $sql -Json

@@ -62,6 +62,8 @@ The two 7-day Top 5 lists exclude exact 0% and 100% readings as likely telemetry
 
 The **Above 50% Coached** dashboard card measures drivers whose latest Rolling 7-Day idle is above 50% and who have a non-empty Idle Coaching plan saved in any Driver Card call session. It shows the coached percentage plus the exact coached/eligible driver counts. This coaching metric does not change idle measurements or Top 5 membership.
 
+Daily Review is intentionally driver-specific. System-level audit events such as imports, backups, transition regeneration, and other non-driver messages remain stored for operational evidence but are excluded from the review list.
+
 ## Architecture and security
 
 - `Start-Waa.ps1` — dependency-free launcher
