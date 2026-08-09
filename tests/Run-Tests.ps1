@@ -6,6 +6,7 @@ function Assert($Condition,[string]$Message){if(!$Condition){throw "ASSERTION FA
 $data=Join-Path ([IO.Path]::GetTempPath()) ("waa-tests-"+[guid]::NewGuid());[IO.Directory]::CreateDirectory($data)|Out-Null
 try{
   $init=Initialize-Waa $root $data;Assert ($init.integrity-eq'ok') 'database creation, migration, and integrity';Assert ((Invoke-Sql "PRAGMA journal_mode;").Trim()-eq'wal') 'WAL enabled';Assert ((Invoke-Sql "PRAGMA foreign_keys;").Trim()-eq'1') 'foreign keys enabled on every database connection'
+  $jsonRows=@(Invoke-Sql "SELECT 10.0 p UNION ALL SELECT 20.0 p;" -Json);Assert ($jsonRows.Count-eq2-and-($jsonRows[0]-isnot[System.Array])-and[double]$jsonRows[1].p-eq20) 'SQLite JSON rows flatten across PowerShell versions'
   $examples=@{'Orlando Carmona'='CARMONAO';'Bruce D Ratcliff'='RATCLIFB';'Patrick Lachica Encinas'='LACHICAP';'Joan M Hernandez Lopez'='HERNANDJ';'Guadalupe Ochoa Felix'='OCHOAFEG';'Clarence Broadbrooks'='BROADBRC'};foreach($x in $examples.GetEnumerator()){Assert ((Convert-DriverCode $x.Key)-eq$x.Value) "identity code $($x.Key)"}
   $pta=@'
 | Truck | Division | Driver Code | PTA | Operational Status | Planning Status | Operational Note | Driver Type | Location | N1 | N2 |
