@@ -148,6 +148,7 @@ CREATE TABLE IF NOT EXISTS pta_observations(id INTEGER PRIMARY KEY, driver_id IN
 CREATE TABLE IF NOT EXISTS idle_periods(id INTEGER PRIMARY KEY, driver_id INTEGER REFERENCES drivers(id), truck TEXT, period_start TEXT NOT NULL, period_end TEXT NOT NULL, engine_hours REAL NOT NULL, idle_hours REAL NOT NULL, import_batch_id INTEGER REFERENCES import_batches(id), UNIQUE(driver_id,period_start,period_end));
 CREATE TABLE IF NOT EXISTS missing_bols(id INTEGER PRIMARY KEY, driver_id INTEGER REFERENCES drivers(id), order_number TEXT, empty_call_date TEXT, origin TEXT, destination TEXT, mileage TEXT, bol_type TEXT, raw_fields_json TEXT NOT NULL, first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, mentioned_at TEXT, import_batch_id INTEGER REFERENCES import_batches(id));
 CREATE TABLE IF NOT EXISTS driver_work_items(driver_id INTEGER PRIMARY KEY REFERENCES drivers(id), cycle_key TEXT, home_checked INTEGER NOT NULL DEFAULT 0, expected_work TEXT NOT NULL DEFAULT 'Unknown', home_status TEXT NOT NULL DEFAULT 'Unknown', home_reason TEXT, ontime_status TEXT NOT NULL DEFAULT 'Unknown', ontime_reason TEXT, ontime_checked_at TEXT, preplan_reviewed INTEGER NOT NULL DEFAULT 0, preplan_response TEXT NOT NULL DEFAULT 'Unknown', preplan_note TEXT, routing_checked INTEGER NOT NULL DEFAULT 0, routing_status TEXT NOT NULL DEFAULT 'Unknown', routing_note TEXT, safety_note_id INTEGER, safety_mentioned_at TEXT, include_transition INTEGER NOT NULL DEFAULT 0, transition_note TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS driver_call_sessions(id INTEGER PRIMARY KEY, driver_id INTEGER NOT NULL REFERENCES drivers(id), cycle_key TEXT NOT NULL, opened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, fuel_status TEXT NOT NULL DEFAULT 'Unknown', fuel_note TEXT, driver_eta TEXT, eta_status TEXT NOT NULL DEFAULT 'Unknown', eta_note TEXT, idle_plan TEXT, load_help_status TEXT NOT NULL DEFAULT 'Unknown', load_help_note TEXT, conversation_wrap TEXT, completed_at TEXT, UNIQUE(driver_id,cycle_key));
 CREATE TABLE IF NOT EXISTS driver_notes(id INTEGER PRIMARY KEY, driver_id INTEGER NOT NULL REFERENCES drivers(id), note TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS reminders(id INTEGER PRIMARY KEY, driver_id INTEGER NOT NULL REFERENCES drivers(id), text TEXT NOT NULL, due_at TEXT NOT NULL, completed_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS timers(id INTEGER PRIMARY KEY, driver_id INTEGER NOT NULL REFERENCES drivers(id), label TEXT NOT NULL, target_at TEXT NOT NULL, completed_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -161,6 +162,7 @@ CREATE INDEX IF NOT EXISTS idx_truck_time ON truck_history(truck,observed_at DES
 CREATE INDEX IF NOT EXISTS idx_truck_driver_time ON truck_history(driver_id,observed_at DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_idle_driver_end ON idle_periods(driver_id,period_end DESC);
 CREATE INDEX IF NOT EXISTS idx_bol_driver ON missing_bols(driver_id,mentioned_at);
+CREATE INDEX IF NOT EXISTS idx_call_sessions_driver ON driver_call_sessions(driver_id,updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_notes_driver_created ON driver_notes(driver_id,created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_reminder_due ON reminders(completed_at,due_at);
 CREATE INDEX IF NOT EXISTS idx_reminder_driver_due ON reminders(driver_id,completed_at,due_at);
@@ -180,6 +182,19 @@ INSERT OR IGNORE INTO safety_notes(note) VALUES
 COMMIT;
 '@
     Invoke-Sql $schema -AllowWrite | Out-Null
+    $callSessionColumns = @(Invoke-Sql 'PRAGMA table_info(driver_call_sessions);' -Json)
+    if (@($callSessionColumns | Where-Object { $_.name -eq 'completed_at' }).Count -eq 0) {
+        Invoke-Sql 'ALTER TABLE driver_call_sessions ADD COLUMN completed_at TEXT;' -AllowWrite | Out-Null
+    }
+    # Older PowerShell JSON conversion could turn ISO PTA text into a DateTime and
+    # produce culture-formatted MM/dd/yyyy cycle suffixes. Canonicalize those keys
+    # once so database and UI queue queries use the same stable yyyy-MM-dd identity.
+    Invoke-Sql @'
+UPDATE OR IGNORE driver_call_sessions
+SET cycle_key=substr(cycle_key,1,length(cycle_key)-10)||substr(cycle_key,-4,4)||'-'||substr(cycle_key,-10,2)||'-'||substr(cycle_key,-7,2)
+WHERE substr(cycle_key,-10) GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]';
+'@ -AllowWrite | Out-Null
+    Invoke-Sql 'INSERT OR IGNORE INTO schema_version(version) VALUES(2);' -AllowWrite | Out-Null
     $integrity = (Invoke-Sql 'PRAGMA integrity_check;').Trim()
     if ($integrity -ne 'ok') { $script:ReadOnly = $true }
     return @{ db = $script:Db; integrity = $integrity; read_only = $script:ReadOnly }
@@ -578,6 +593,11 @@ function Get-CurrentDrivers {
 WITH p AS (SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM pta_observations WHERE driver_id IS NOT NULL),
 t AS (SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM truck_history)
 SELECT d.id,d.full_name,d.pta_code,coalesce(nullif(trim(p.truck),''),t.truck) truck,p.division,p.pta_at,p.pta_raw,p.actionable,p.operational_status,p.planning_status,p.operational_note,p.driver_type,p.location,p.source,p.observed_at
+      ,CASE WHEN EXISTS(
+        SELECT 1 FROM driver_call_sessions c WHERE c.driver_id=d.id
+          AND c.cycle_key=(coalesce(nullif(trim(p.truck),''),nullif(trim(t.truck),''),'NO-TRUCK')||'|'||coalesce(substr(p.pta_at,1,10),'UNANCHORED'))
+          AND c.completed_at IS NOT NULL
+       ) THEN 1 ELSE 0 END call_completed
 FROM drivers d LEFT JOIN p ON p.driver_id=d.id AND p.rn=1 LEFT JOIN t ON t.driver_id=d.id AND t.rn=1;
 '@
     return Invoke-Sql $sql -Json
@@ -634,14 +654,11 @@ SELECT json_object(
     'routing_status',routing_status,'routing_note',routing_note,'safety_note_id',safety_note_id,'safety_mentioned_at',safety_mentioned_at,
     'include_transition',include_transition,'transition_note',transition_note,'updated_at',updated_at) FROM driver_work_items WHERE driver_id=$Id),'null')),
   'notes',json(coalesce((SELECT json_group_array(json_object('id',id,'driver_id',driver_id,'note',note,'created_at',created_at))
-    FROM (SELECT * FROM driver_notes WHERE driver_id=$Id ORDER BY created_at DESC)),'[]')),
+    FROM (SELECT * FROM driver_notes WHERE driver_id=$Id ORDER BY created_at DESC,id DESC LIMIT 8)),'[]')),
   'reminders',json(coalesce((SELECT json_group_array(json_object('id',id,'driver_id',driver_id,'text',text,'due_at',due_at,
     'completed_at',completed_at,'created_at',created_at)) FROM (SELECT * FROM reminders WHERE driver_id=$Id ORDER BY completed_at,due_at)),'[]')),
   'timers',json(coalesce((SELECT json_group_array(json_object('id',id,'driver_id',driver_id,'label',label,'target_at',target_at,
-    'completed_at',completed_at,'created_at',created_at)) FROM (SELECT * FROM timers WHERE driver_id=$Id ORDER BY completed_at,target_at)),'[]')),
-  'audit',json(coalesce((SELECT json_group_array(json_object('id',id,'occurred_at',occurred_at,'action',action,'entity_type',entity_type,
-    'entity_id',entity_id,'detail_json',detail_json)) FROM (SELECT * FROM audit_history WHERE entity_type='driver' AND entity_id='$Id'
-    ORDER BY occurred_at DESC,id DESC LIMIT 50)),'[]'))
+    'completed_at',completed_at,'created_at',created_at)) FROM (SELECT * FROM timers WHERE driver_id=$Id ORDER BY completed_at,target_at)),'[]'))
 );
 "@
     $json=[string](Invoke-Sql $sql)
@@ -712,6 +729,15 @@ function Save-DriverAction {
 }
 
 function Get-Organizer {
+    $driverSql=@'
+WITH latest_truck AS (
+  SELECT driver_id,truck,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
+  FROM truck_history
+)
+SELECT d.id,d.full_name,coalesce(t.truck,'') truck
+FROM drivers d LEFT JOIN latest_truck t ON t.driver_id=d.id AND t.rn=1
+ORDER BY d.full_name;
+'@
     $sql=@'
 WITH latest_truck AS (
   SELECT driver_id,truck,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
@@ -726,7 +752,7 @@ FROM reminders r JOIN drivers d ON d.id=r.driver_id
 LEFT JOIN latest_truck t ON t.driver_id=r.driver_id AND t.rn=1
 ORDER BY 9 DESC;
 '@
-    return @{drivers=@(Get-CurrentDrivers);items=@(Invoke-Sql $sql -Json)}
+    return @{drivers=@(Invoke-Sql $driverSql -Json);items=@(Invoke-Sql $sql -Json)}
 }
 
 function Get-DailyActivity {

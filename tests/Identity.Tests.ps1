@@ -20,7 +20,6 @@ $data = Join-Path ([IO.Path]::GetTempPath()) ('waa-identity-' + [guid]::NewGuid(
 try {
     Initialize-Waa $root $data | Out-Null
     Initialize-WaaReportIntake $data
-    Initialize-WaaConversation
 
     # Rolling first: Group by (copy) splits once only. RATB + full name + derived PTA + unit
     # must become one canonical driver before a later PTA paste arrives.

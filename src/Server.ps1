@@ -14,7 +14,6 @@ Import-Module (Join-Path $PSScriptRoot 'Waa.psm1') -Force
 
 $state = Initialize-Waa $Root $DataRoot
 Initialize-WaaReportIntake $DataRoot
-Initialize-WaaConversation
 $startupIntake = Invoke-WaaDownloadsScan
 $startupIdentity = Repair-WaaDriverIdentity
 $script:LastIntakeScan = Get-Date

@@ -11,7 +11,16 @@ const api = async (path, options = {}) => {
   return body ?? [];
 };
 
-const state = { cache: new Map(), routeController: null, cardEventsController: null };
+const state = {
+  cache: new Map(),
+  routeController: null,
+  cardEventsController: null,
+  cardLoadController: null,
+  cardQueue: [],
+  cardStep: 1,
+  pendingSaves: new Set(),
+  saveFailed: false
+};
 const cachedApi = async (path, maxAge = 20000) => {
   const hit = state.cache.get(path);
   if (hit && Date.now() - hit.time < maxAge) return hit.value;
@@ -25,6 +34,26 @@ const invalidate = (...prefixes) => {
 const debounce = (fn, delay = 120) => {
   let timer;
   return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), delay); };
+};
+const setCardQueue = ids => {
+  state.cardQueue = [...new Set(ids.map(Number).filter(Boolean))];
+};
+const trackSave = promise => {
+  state.pendingSaves.add(promise);
+  promise.then(
+    () => state.pendingSaves.delete(promise),
+    () => {
+      state.pendingSaves.delete(promise);
+      state.saveFailed = true;
+    }
+  );
+  return promise;
+};
+const awaitPendingSaves = async () => {
+  while (state.pendingSaves.size) await Promise.allSettled([...state.pendingSaves]);
+  const successful = !state.saveFailed;
+  state.saveFailed = false;
+  return successful;
 };
 
 const esc = value => String(value ?? 'Unknown').replace(/[&<>"]/g, char => ({
@@ -157,11 +186,10 @@ function chart(rows, options = {}) {
                 <stop offset="0%" stop-color="currentColor" stop-opacity=".30"></stop>
                 <stop offset="100%" stop-color="currentColor" stop-opacity="0"></stop>
               </linearGradient>
-              <filter id="${id}-glow"><feGaussianBlur stdDeviation="3" result="blur"></feGaussianBlur><feMerge><feMergeNode in="blur"></feMergeNode><feMergeNode in="SourceGraphic"></feMergeNode></feMerge></filter>
             </defs>
             ${grid}
             <path class="chart-area" d="${areaPath}" fill="url(#${id}-fill)"></path>
-            <path class="chart-line" d="${linePath}" filter="url(#${id}-glow)"></path>
+            <path class="chart-line" d="${linePath}"></path>
             <line class="chart-crosshair" x1="0" y1="${top}" x2="0" y2="${top + plotHeight}" hidden></line>
             ${hits}
             ${dateLabels}
@@ -256,6 +284,7 @@ async function dashboard() {
     </section>`;
 
   bindCharts($('#app'));
+  setCardQueue([...(data.training || []), ...(data.heroes || [])].map(driver => driver.id));
 }
 
 async function loadDrivers() {
@@ -266,8 +295,9 @@ async function loadDrivers() {
 
 function driverRows(list, showPta) {
   return list.map(driver => `
-    <tr class="open" data-id="${driver.id}" data-search="${esc(driver._search)}" data-priority="${priority(driver)}" data-truck-state="${hasTruck(driver) ? 'assigned' : 'unassigned'}">
+    <tr class="open" data-id="${driver.id}" data-search="${esc(driver._search)}" data-priority="${priority(driver)}" data-truck-state="${hasTruck(driver) ? 'assigned' : 'unassigned'}" data-call-state="${driver.call_completed ? 'completed' : 'pending'}">
       ${showPta ? `<td class="pta-cell ${priority(driver)}"><span class="priority-chip">${priority(driver).toUpperCase()}</span><b>${esc(driver.pta_raw || 'N/A')}</b><small>${esc(relative(driver.pta_at))}</small></td>` : ''}
+      ${showPta ? '' : `<td>${driver.call_completed ? '<span class="status-pill good">Completed</span>' : '<span class="status-pill alert">Pending</span>'}</td>`}
       <td>${hasTruck(driver) ? `<b class="truck-no">${esc(driver.truck)}</b>` : `<form class="quick-truck-form" data-driver-id="${driver.id}"><input name="truck" aria-label="Truck number for ${esc(driver.full_name)}" placeholder="Truck #" maxlength="24" required><button type="submit">Assign</button></form>`}</td>
       <td><b>${esc(driver.full_name)}</b><small class="subline">${esc(driver.pta_code)}</small></td>
       <td>${esc(driver.division)}</td>
@@ -290,11 +320,13 @@ async function queue(isPta) {
     <section class="glass-panel table-panel">
       <div class="table-toolbar">
         <div class="searchbox"><span aria-hidden="true">⌕</span><input id="search" placeholder="Search driver, truck, division, status, location"></div>
-        <select id="filter" aria-label="${isPta ? 'Priority' : 'Truck assignment'} filter">
-          ${isPta ? '<option value="">All states</option><option value="pinned">Pinned 23:57</option><option value="overdue">Overdue</option><option value="immediate">Immediate</option><option value="future">Future</option>' : '<option value="">All drivers</option><option value="unassigned">Needs Truck</option><option value="assigned">Truck Assigned</option>'}
+        <select id="filter" aria-label="${isPta ? 'Priority' : 'Workflow'} filter">
+          ${isPta ? '<option value="">All states</option><option value="pinned">Pinned 23:57</option><option value="overdue">Overdue</option><option value="immediate">Immediate</option><option value="future">Future</option>' : '<option value="pending">Pending calls</option><option value="completed">Completed calls</option><option value="unassigned">Needs Truck</option><option value="assigned">Truck Assigned</option><option value="">All drivers</option>'}
         </select>
+        <button id="startQueue" type="button">${isPta ? 'Open First' : 'Start Queue'}</button>
+        <span id="queueCount" class="queue-count" aria-live="polite"></span>
       </div>
-      <div class="table-scroll"><table><thead><tr>${isPta ? '<th>PTA / Priority</th>' : ''}<th>Truck</th><th>Driver</th><th>Div</th><th>Operational</th><th>Planning</th><th>Note</th><th>Type</th><th>Location</th></tr></thead><tbody></tbody></table></div>
+      <div class="table-scroll"><table><thead><tr>${isPta ? '<th>PTA / Priority</th>' : '<th>Call</th>'}<th>Truck</th><th>Driver</th><th>Div</th><th>Operational</th><th>Planning</th><th>Note</th><th>Type</th><th>Location</th></tr></thead><tbody></tbody></table></div>
     </section>`;
 
   let baseList = [...drivers];
@@ -302,16 +334,25 @@ async function queue(isPta) {
     const pa = priority(a) === 'pinned' ? -1 : 0;
     const pb = priority(b) === 'pinned' ? -1 : 0;
     return pa - pb || new Date(a.pta_at) - new Date(b.pta_at);
-  });
+  }); else baseList.sort((a, b) => Number(a.call_completed) - Number(b.call_completed) || String(a.full_name).localeCompare(String(b.full_name)));
   $('tbody').innerHTML = driverRows(baseList, isPta);
   const draw = () => {
     const query = $('#search').value.toLowerCase();
     const filter = $('#filter').value;
-    $$('tbody tr').forEach(row => { const stateValue = isPta ? row.dataset.priority : row.dataset.truckState; row.hidden = !row.dataset.search.includes(query) || !!filter && stateValue !== filter; });
+    const visible = [];
+    $$('tbody tr').forEach(row => {
+      const stateValue = isPta ? row.dataset.priority : ['pending', 'completed'].includes(filter) ? row.dataset.callState : row.dataset.truckState;
+      row.hidden = !row.dataset.search.includes(query) || !!filter && stateValue !== filter;
+      if (!row.hidden) visible.push(Number(row.dataset.id));
+    });
+    setCardQueue(visible);
+    $('#queueCount').textContent = `${visible.length} driver${visible.length === 1 ? '' : 's'} in queue`;
+    $('#startQueue').disabled = !visible.length;
   };
 
   $('#search').addEventListener('input', debounce(draw));
   $('#filter').addEventListener('change', draw);
+  $('#startQueue').addEventListener('click', () => openCard(state.cardQueue[0]));
   draw();
 }
 
@@ -330,7 +371,12 @@ async function bols() {
   const draw = () => {
     const query = $('#search').value.toLowerCase();
     const filter = $('#filter').value;
-    $$('tbody tr').forEach(row => { row.hidden = !row.dataset.search.includes(query) || !!filter && row.dataset.state !== filter; });
+    const visible = [];
+    $$('tbody tr').forEach(row => {
+      row.hidden = !row.dataset.search.includes(query) || !!filter && row.dataset.state !== filter;
+      if (!row.hidden) visible.push(Number(row.dataset.id));
+    });
+    setCardQueue(visible);
   };
   $('tbody').innerHTML = list.map(item => `
       <tr class="open" data-id="${item.driver_id}" data-search="${esc(item._search)}" data-state="${item.mentioned_at ? 'done' : 'open'}">
@@ -429,6 +475,12 @@ const activityLabels = {
   routing_checked: 'Routing reviewed', routing_status: 'Routing status updated', routing_note: 'Routing note updated', safety_note_id: 'Safety note selected',
   safety_mentioned_at: 'Safety discussed', include_transition: 'Transition selection changed', transition_note: 'Transition note updated'
 };
+const callFieldLabels = {
+  fuel_status: 'Fuel status updated', fuel_note: 'Fuel note updated', driver_eta: 'Driver ETA updated',
+  eta_status: 'ETA status updated', eta_note: 'ETA note updated', idle_plan: 'Idle coaching plan updated',
+  load_help_status: 'Load-help status updated', load_help_note: 'Load-help note updated',
+  conversation_wrap: 'Call wrap-up updated', completed_at: 'Driver call completed'
+};
 
 function localDayRange(value) {
   const start = new Date(`${value}T00:00:00`);
@@ -451,14 +503,17 @@ async function activity() {
     $('#activityList').innerHTML = visible.map(row => {
       let detail = {};
       try { detail = JSON.parse(row.detail_json || '{}'); } catch { detail = {}; }
-      const detailText = detail.text || detail.field || detail.action || '';
+      const callLabel = row.action === 'call_flow_update' ? callFieldLabels[detail.field] : '';
+      const detailText = detail.text || detail.action || '';
+      const actionLabel = callLabel || activityLabels[row.action] || row.action.replaceAll('_', ' ');
       return `<article class="activity-row">
         <time>${esc(new Date(`${row.occurred_at.replace(' ', 'T')}Z`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }))}</time>
-        <div><b>${esc(activityLabels[row.action] || row.action.replaceAll('_', ' '))}</b><small>${esc(row.truck)} · ${esc(row.full_name)}</small>${detailText ? `<p>${esc(detailText)}</p>` : ''}</div>
+        <div><b>${esc(actionLabel)}</b><small>${esc(row.truck)} · ${esc(row.full_name)}</small>${detailText ? `<p>${esc(detailText)}</p>` : ''}</div>
         <div class="activity-actions"><button class="secondary open" data-id="${row.driver_id}" type="button">Open Driver</button><button class="danger" data-delete-activity="${row.id}" type="button">Delete Record</button></div>
       </article>`;
     }).join('') || '<p class="empty-copy">No recorded activity for this day.</p>';
     $('#activityCount').textContent = `${visible.length} action${visible.length === 1 ? '' : 's'}`;
+    setCardQueue(visible.map(row => row.driver_id));
   };
   const uniqueDrivers = [...new Map(driverRows.map(row => [row.driver_id, row])).values()];
   $('#app').innerHTML = pageHead('Daily Activity Review', 'Review what you completed today with every action tied back to its driver.', 'WAA // Daily Record') + `
@@ -595,11 +650,46 @@ function checkField(label, action, checked) {
   return `<label class="toggle-row"><input data-action="${esc(action)}" type="checkbox" ${checked ? 'checked' : ''}><span class="toggle-ui"></span><b>${esc(label)}</b></label>`;
 }
 
+function completedCallSteps(card, conversation) {
+  const work = card.work || {};
+  return new Set([
+    (conversation.fuel_status && conversation.fuel_status !== 'Unknown') || conversation.fuel_note ? 1 : 0,
+    conversation.driver_eta || (conversation.eta_status && conversation.eta_status !== 'Unknown') || (work.ontime_status && work.ontime_status !== 'Unknown') ? 2 : 0,
+    conversation.idle_plan ? 3 : 0,
+    (conversation.load_help_status && conversation.load_help_status !== 'Unknown') || work.preplan_reviewed || work.routing_checked ? 4 : 0,
+    work.home_checked ? 5 : 0,
+    !card.bols?.length || card.bols.every(item => item.mentioned_at) ? 6 : 0,
+    conversation.conversation_wrap || work.safety_mentioned_at || work.include_transition ? 7 : 0
+  ].filter(Boolean));
+}
+
+function showCardStep(number, focus = true) {
+  const root = $('#card');
+  if (!root) return;
+  state.cardStep = Math.min(7, Math.max(1, Number(number) || 1));
+  $$('.call-step', root).forEach(step => {
+    const active = Number(step.dataset.step) === state.cardStep;
+    step.hidden = !active;
+    step.classList.toggle('active', active);
+  });
+  $$('[data-jump]', root).forEach(button => {
+    const active = Number(button.dataset.jump) === state.cardStep;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-current', active ? 'step' : 'false');
+  });
+  const counter = $('#stepCounter', root);
+  if (counter) counter.textContent = `Step ${state.cardStep} of 7`;
+  if (focus) requestAnimationFrame(() => $(`.call-step[data-step="${state.cardStep}"] [data-conversation], .call-step[data-step="${state.cardStep}"] [data-action]`, root)?.focus());
+}
+
 function callStep(number, title, prompt, body, tone = '') {
+  const next = number < 7
+    ? `<button type="button" data-step-next>Next Step <span aria-hidden="true">→</span></button>`
+    : '<button type="button" data-finish-call>Finish Call &amp; Next Driver</button>';
   return `
     <section class="call-step ${tone}" data-step="${number}">
       <div class="step-number">${String(number).padStart(2, '0')}</div>
-      <div class="step-body"><p class="step-prompt">${esc(prompt)}</p><h3>${esc(title)}</h3>${body}<div class="step-save" aria-live="polite">Auto-saves as you move through the call</div></div>
+      <div class="step-body"><p class="step-prompt">${esc(prompt)}</p><h3>${esc(title)}</h3>${body}<div class="step-footer"><div class="step-save" aria-live="polite">Changes save automatically</div><div class="step-actions">${number > 1 ? '<button class="secondary" type="button" data-step-back><span aria-hidden="true">←</span> Back</button>' : ''}${next}</div></div></div>
     </section>`;
 }
 
@@ -619,8 +709,29 @@ function timerList(timers) {
 
 async function openCard(id) {
   if (!id) return;
-  cardId = id;
-  const context = await api(`/api/drivers/${id}/context`);
+  const requestedId = Number(id);
+  if (!state.cardQueue.includes(requestedId)) setCardQueue([requestedId]);
+  state.cardLoadController?.abort();
+  const controller = new AbortController();
+  state.cardLoadController = controller;
+  const shell = $('.modal-shell');
+  shell.classList.add('card-loading');
+  shell.setAttribute('aria-busy', 'true');
+  let context;
+  try {
+    context = await api(`/api/drivers/${requestedId}/context`, { signal: controller.signal });
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    toast(error.message);
+    return;
+  } finally {
+    if (state.cardLoadController === controller) {
+      shell.classList.remove('card-loading');
+      shell.removeAttribute('aria-busy');
+    }
+  }
+  if (controller.signal.aborted) return;
+  cardId = requestedId;
   const { card, conversation } = context;
   const driver = card.driver;
   const work = card.work || {};
@@ -628,6 +739,9 @@ async function openCard(id) {
   const idlePrompt = Number(latestIdle?.percent) > 50
     ? 'What can we change together to pull that idle number down?'
     : 'What is working well that is keeping idle under control?';
+  const completedSteps = completedCallSteps(card, conversation);
+  const initialStep = conversation.completed_at ? 7 : ([1, 2, 3, 4, 5, 6, 7].find(step => !completedSteps.has(step)) || 7);
+  const queueIndex = state.cardQueue.indexOf(requestedId);
 
   const bolRows = card.bols.length
     ? card.bols.map(item => `
@@ -688,8 +802,14 @@ async function openCard(id) {
       <div class="driver-identity"><p class="eyebrow">Live driver conversation</p><h2>${esc(driver.truck)} <span>·</span> ${esc(driver.full_name)}</h2><p>${esc(driver.pta_code)} · Div ${esc(driver.division)} · ${esc(driver.operational_status)} / ${esc(driver.planning_status)} · ${esc(driver.driver_type)} · ${esc(driver.location)}</p></div>
       <div class="driver-pta"><span>PTA</span><b>${esc(driver.pta_raw || 'N/A')}</b><small>${esc(relative(driver.pta_at))}</small></div>
     </header>
+    <div class="driver-queue-nav">
+      <button class="secondary" type="button" data-driver-prev ${queueIndex <= 0 ? 'disabled' : ''}>← Previous Driver</button>
+      <span>${queueIndex >= 0 ? `${queueIndex + 1} of ${state.cardQueue.length}` : 'Single driver'} · <b>${conversation.completed_at ? 'Call completed' : 'Call in progress'}</b></span>
+      <button class="secondary" type="button" data-driver-next ${queueIndex < 0 || queueIndex >= state.cardQueue.length - 1 ? 'disabled' : ''}>Next Driver →</button>
+    </div>
     <div class="call-progress" aria-label="Call flow">
-      ${['Fuel', 'ETA', 'Idle', 'Load', 'Home', 'BOL', 'Wrap'].map((name, index) => `<button type="button" data-jump="${index + 1}"><span>${index + 1}</span>${name}</button>`).join('')}
+      ${['Fuel', 'ETA', 'Idle', 'Load', 'Home', 'BOL', 'Wrap'].map((name, index) => `<button type="button" data-jump="${index + 1}" class="${completedSteps.has(index + 1) ? 'done' : ''}"><span>${completedSteps.has(index + 1) ? '✓' : index + 1}</span>${name}</button>`).join('')}
+      <strong id="stepCounter">Step ${initialStep} of 7</strong>
     </div>
     <div class="call-layout">
       <main class="call-main">${flow}</main>
@@ -704,7 +824,12 @@ async function openCard(id) {
   document.body.classList.add('modal-open');
   bindCharts($('#card'));
   bindCardEvents(card);
-  requestAnimationFrame(() => $('.call-main [data-conversation], .call-main [data-action]')?.focus());
+  const finishButton = $('[data-finish-call]', $('#card'));
+  if (conversation.completed_at && finishButton) {
+    finishButton.disabled = true;
+    finishButton.textContent = 'Call Completed';
+  }
+  showCardStep(initialStep);
 }
 
 function bindCardEvents(card) {
@@ -712,16 +837,63 @@ function bindCardEvents(card) {
   state.cardEventsController?.abort();
   state.cardEventsController = new AbortController();
   const listenerOptions = { signal: state.cardEventsController.signal };
+  const trackedAction = (...args) => trackSave(driverAction(...args));
+  const setSaving = element => {
+    const status = $('.step-save', element.closest('.call-step'));
+    if (status) status.textContent = 'Saving…';
+  };
   const setSaved = element => {
     const step = element.closest('.call-step');
     if (!step) return;
     const status = $('.step-save', step);
     status.textContent = 'Saved';
     step.classList.add('saved');
+    const progress = $(`[data-jump="${step.dataset.step}"]`, root);
+    progress?.classList.add('done');
+    if (progress) progress.querySelector('span').textContent = '✓';
     setTimeout(() => {
-      status.textContent = 'Auto-saves as you move through the call';
+      status.textContent = 'Changes save automatically';
       step.classList.remove('saved');
     }, 1400);
+  };
+  const moveStep = async delta => {
+    document.activeElement?.blur();
+    if (!await awaitPendingSaves()) return;
+    showCardStep(state.cardStep + delta);
+  };
+  const moveDriver = async delta => {
+    document.activeElement?.blur();
+    if (!await awaitPendingSaves()) return;
+    const index = state.cardQueue.indexOf(cardId);
+    const nextId = state.cardQueue[index + delta];
+    if (nextId) await openCard(nextId);
+  };
+  const finishCall = async button => {
+    if (button.disabled) return;
+    button.disabled = true;
+    document.activeElement?.blur();
+    if (!await awaitPendingSaves()) {
+      button.disabled = false;
+      return;
+    }
+    const finishedId = cardId;
+    const index = state.cardQueue.indexOf(finishedId);
+    const nextId = state.cardQueue[index + 1];
+    try {
+      await api(`/api/drivers/${finishedId}/conversation`, {
+        method: 'POST', body: JSON.stringify({ field: 'completed_at', value: true })
+      });
+      invalidate('/api/drivers', '/api/dashboard', '/api/activity', `/api/drivers/${finishedId}`);
+      toast(nextId ? 'Call completed · loading next driver' : 'Call completed');
+      if (nextId) await openCard(nextId);
+      else {
+        closeCard();
+        await route();
+      }
+    } catch (error) {
+      button.disabled = false;
+      toast(error.message);
+    }
   };
 
   const saveNote = async () => {
@@ -732,11 +904,12 @@ function bindCardEvents(card) {
     if (!text) return;
     button.disabled = true;
     try {
-      const updated = await driverAction('note', null, { text });
+      const updated = await trackedAction('note', null, { text });
       box.value = '';
       $('#noteList').innerHTML = noteList(updated.notes || []);
       toast('Note kept');
-    } finally { button.disabled = false; }
+    } catch (error) { toast(error.message); }
+    finally { button.disabled = false; }
   };
   const addReminder = async () => {
     const button = $('#addReminder');
@@ -746,12 +919,13 @@ function bindCardEvents(card) {
     if (!text || !due) return;
     button.disabled = true;
     try {
-      const updated = await driverAction('reminder', null, { text, due_at: due });
+      const updated = await trackedAction('reminder', null, { text, due_at: due });
       $('#remtext').value = '';
       $('#remdue').value = '';
       $('#followupList').innerHTML = followupList(updated.reminders || []);
       toast('Reminder added');
-    } finally { button.disabled = false; }
+    } catch (error) { toast(error.message); }
+    finally { button.disabled = false; }
   };
   const addTimer = async () => {
     const button = $('#addTimer');
@@ -761,34 +935,48 @@ function bindCardEvents(card) {
     if (!label || !target) return;
     button.disabled = true;
     try {
-      const updated = await driverAction('timer', null, { label, target_at: target });
+      const updated = await trackedAction('timer', null, { label, target_at: target });
       $('#timertext').value = '';
       $('#timerdue').value = '';
       $('#timerList').innerHTML = timerList(updated.timers || []);
       toast('Timer started');
-    } finally { button.disabled = false; }
+    } catch (error) { toast(error.message); }
+    finally { button.disabled = false; }
   };
   const newSafetyNote = async () => {
-    const note = await api('/api/safety/random');
-    $('#safety').textContent = note.note;
-    await driverAction('safety_note_id', note.id);
+    try {
+      const note = await api('/api/safety/random');
+      $('#safety').textContent = note.note;
+      await trackedAction('safety_note_id', note.id);
+    } catch (error) { toast(error.message); }
   };
 
   root.addEventListener('change', async event => {
     const element = event.target;
-    if (element.matches('[data-conversation]')) {
-      await api(`/api/drivers/${cardId}/conversation`, {
-        method: 'POST', body: JSON.stringify({ field: element.dataset.conversation, value: element.value })
-      });
-      invalidate('/api/activity', `/api/drivers/${cardId}`);
-      setSaved(element);
-    } else if (element.matches('.item-action')) {
-      await driverAction(element.dataset.action, element.checked, { item_id: Number(element.dataset.item) });
-      toast('Saved');
-    } else if (element.matches('[data-action]')) {
-      const value = element.type === 'checkbox' ? element.checked : element.value;
-      await driverAction(element.dataset.action, value);
-      setSaved(element);
+    const previousChecked = !element.checked;
+    try {
+      if (element.matches('[data-conversation]')) {
+        setSaving(element);
+        const driverId = cardId;
+        await trackSave(api(`/api/drivers/${driverId}/conversation`, {
+          method: 'POST', body: JSON.stringify({ field: element.dataset.conversation, value: element.value })
+        }));
+        invalidate('/api/activity', `/api/drivers/${driverId}`);
+        setSaved(element);
+      } else if (element.matches('.item-action')) {
+        await trackedAction(element.dataset.action, element.checked, { item_id: Number(element.dataset.item) });
+        toast('Saved');
+      } else if (element.matches('[data-action]')) {
+        setSaving(element);
+        const value = element.type === 'checkbox' ? element.checked : element.value;
+        await trackedAction(element.dataset.action, value);
+        setSaved(element);
+      }
+    } catch (error) {
+      if (element.type === 'checkbox') element.checked = previousChecked;
+      const status = $('.step-save', element.closest('.call-step'));
+      if (status) status.textContent = 'Save failed · try again';
+      toast(error.message);
     }
   }, listenerOptions);
   root.addEventListener('click', event => {
@@ -798,23 +986,28 @@ function bindCardEvents(card) {
     else if (button.id === 'addReminder') addReminder();
     else if (button.id === 'addTimer') addTimer();
     else if (button.id === 'random') newSafetyNote();
+    else if (button.dataset.stepNext !== undefined) moveStep(1);
+    else if (button.dataset.stepBack !== undefined) moveStep(-1);
+    else if (button.dataset.finishCall !== undefined) finishCall(button);
+    else if (button.dataset.driverNext !== undefined) moveDriver(1);
+    else if (button.dataset.driverPrev !== undefined) moveDriver(-1);
     else if (button.dataset.deleteNote && confirm('Delete this driver note?')) {
       button.disabled = true;
-      driverAction('delete_note', null, { item_id: Number(button.dataset.deleteNote) }).then(updated => { $('#noteList').innerHTML = noteList(updated.notes || []); toast('Note deleted'); }).catch(error => { button.disabled = false; toast(error.message); });
+      trackedAction('delete_note', null, { item_id: Number(button.dataset.deleteNote) }).then(updated => { $('#noteList').innerHTML = noteList(updated.notes || []); toast('Note deleted'); }).catch(error => { button.disabled = false; toast(error.message); });
     }
     else if (button.dataset.deleteReminder && confirm('Delete this reminder?')) {
       button.disabled = true;
-      driverAction('delete_reminder', null, { item_id: Number(button.dataset.deleteReminder) }).then(updated => { $('#followupList').innerHTML = followupList(updated.reminders || []); toast('Reminder deleted'); }).catch(error => { button.disabled = false; toast(error.message); });
+      trackedAction('delete_reminder', null, { item_id: Number(button.dataset.deleteReminder) }).then(updated => { $('#followupList').innerHTML = followupList(updated.reminders || []); toast('Reminder deleted'); }).catch(error => { button.disabled = false; toast(error.message); });
     }
     else if (button.dataset.snoozeReminder) {
       button.disabled = true;
-      driverAction('snooze_reminder', null, { item_id: Number(button.dataset.snoozeReminder) }).then(updated => { $('#followupList').innerHTML = followupList(updated.reminders || []); toast('Reminder moved one day'); }).catch(error => { button.disabled = false; toast(error.message); });
+      trackedAction('snooze_reminder', null, { item_id: Number(button.dataset.snoozeReminder) }).then(updated => { $('#followupList').innerHTML = followupList(updated.reminders || []); toast('Reminder moved one day'); }).catch(error => { button.disabled = false; toast(error.message); });
     }
     else if (button.dataset.deleteTimer && confirm('Delete this timer?')) {
       button.disabled = true;
-      driverAction('delete_timer', null, { item_id: Number(button.dataset.deleteTimer) }).then(updated => { $('#timerList').innerHTML = timerList(updated.timers || []); toast('Timer deleted'); }).catch(error => { button.disabled = false; toast(error.message); });
+      trackedAction('delete_timer', null, { item_id: Number(button.dataset.deleteTimer) }).then(updated => { $('#timerList').innerHTML = timerList(updated.timers || []); toast('Timer deleted'); }).catch(error => { button.disabled = false; toast(error.message); });
     }
-    else if (button.dataset.jump) $(`.call-step[data-step="${button.dataset.jump}"]`, root)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    else if (button.dataset.jump) showCardStep(button.dataset.jump);
   }, listenerOptions);
   root.addEventListener('keydown', event => {
     if (event.target.id === 'quickNote' && event.key === 'Enter' && !event.shiftKey) {
@@ -823,30 +1016,26 @@ function bindCardEvents(card) {
     }
   }, listenerOptions);
 
-  root.addEventListener('focusin', event => {
-    const step = event.target.closest('.call-step');
-    if (!step) return;
-    const number = step.dataset.step;
-    $$('[data-jump]', root).forEach(button => button.classList.toggle('active', button.dataset.jump === number));
-    $$('.call-step', root).forEach(node => node.classList.toggle('active', node === step));
-  }, listenerOptions);
 }
 
 async function driverAction(action, value, extra = {}) {
+  const driverId = cardId;
   const returnFollowups = ['note', 'reminder', 'timer', 'delete_note', 'delete_reminder', 'delete_timer', 'complete_reminder', 'snooze_reminder', 'complete_timer'].includes(action);
   const payload = { action, value, ...extra };
   if (returnFollowups) payload.return_followups = true;
-  const result = await api(`/api/drivers/${cardId}/action`, {
+  const result = await api(`/api/drivers/${driverId}/action`, {
     method: 'POST',
     body: JSON.stringify(payload)
   });
-  invalidate('/api/drivers', '/api/dashboard', '/api/bols', '/api/organizer', '/api/activity', `/api/drivers/${cardId}`);
+  invalidate('/api/drivers', '/api/dashboard', '/api/bols', '/api/organizer', '/api/activity', `/api/drivers/${driverId}`);
   return result;
 }
 
 function closeCard() {
   state.cardEventsController?.abort();
   state.cardEventsController = null;
+  state.cardLoadController?.abort();
+  state.cardLoadController = null;
   $('#modal').classList.add('hidden');
   document.body.classList.remove('modal-open');
   cardId = null;
@@ -861,6 +1050,13 @@ document.addEventListener('keydown', event => {
   if (event.altKey && event.key.toLowerCase() === 'n' && !$('#modal').classList.contains('hidden')) {
     event.preventDefault();
     $('#quickNote')?.focus();
+  }
+  if (event.altKey && !$('#modal').classList.contains('hidden') && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+    event.preventDefault();
+    document.activeElement?.blur();
+    awaitPendingSaves().then(successful => {
+      if (successful) showCardStep(state.cardStep + (event.key === 'ArrowRight' ? 1 : -1));
+    });
   }
 });
 document.addEventListener('click', async event => {
