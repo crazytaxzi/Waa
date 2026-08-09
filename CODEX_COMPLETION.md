@@ -38,3 +38,15 @@ The meanings of PTA `source_numeric_1` and `source_numeric_2` are unknown and ar
 ## Launch
 
 On the target Windows machine, double-click `Start-Waa.cmd` (or run `Start-Waa.ps1`). WAA selects loopback port 8765–8775, opens the default browser, and needs no installation, elevation, network, Python, Node, Java, package manager, or external PowerShell module.
+
+## Codex Run Metadata
+
+- Completed: 2026-08-09T01:27:43+00:00
+- Codex exit code: 0
+- Resume key: `019fe40f-17e8-75b0-9c5a-2fe9294a9381`
+
+Resume this exact Codex session with:
+
+```bash
+cd ~/Waa && codex exec --yolo -C "$PWD" resume "019fe40f-17e8-75b0-9c5a-2fe9294a9381" "Continue this WAA session. Inspect the current repository state before making any changes."
+```
