@@ -1,0 +1,6 @@
+.codex-run/
+__pycache__/
+*.pyc
+*.sqlite3
+waa.db*
+test-output/
