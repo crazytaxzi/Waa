@@ -37,8 +37,8 @@ jobs:
           Expand-StagedSource '.staging/server.gz.b64' 'src/Server.ps1'
           Expand-StagedSource '.staging/identity-tests.gz.b64' 'tests/Identity.Tests.ps1'
 
-      - name: Validate PowerShell syntax
-        shell: pwsh
+      - name: Validate Windows PowerShell 5.1 syntax
+        shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           foreach ($file in @('src/ReportParsing.ps1','src/ReportIntake.ps1','src/Server.ps1','tests/Identity.Tests.ps1')) {
@@ -47,12 +47,12 @@ jobs:
             [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path, [ref]$tokens, [ref]$errors) | Out-Null
             if ($errors.Count -gt 0) {
               $errors | Format-List | Out-String | Write-Error
-              throw "PowerShell parser errors in $file"
+              throw "Windows PowerShell parser errors in $file"
             }
           }
 
       - name: Run WAA regression suite
-        shell: powershell
+        shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           .\tests\Run-Tests.ps1
