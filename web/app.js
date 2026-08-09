@@ -583,7 +583,7 @@ function bindCardEvents(card) {
     });
   });
 
-  $$('[data-action]', root).forEach(element => {
+  $$('[data-action]:not(.item-action)', root).forEach(element => {
     element.addEventListener('change', async () => {
       const value = element.type === 'checkbox' ? element.checked : element.value;
       await driverAction(element.dataset.action, value);
