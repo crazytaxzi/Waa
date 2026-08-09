@@ -23,6 +23,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Copy-Item '.github/scripts/apply-current-unit-identity.py' "$env:RUNNER_TEMP\apply-current-unit-identity.py"
           Copy-Item '.github/scripts/preserve-queue-state.py' "$env:RUNNER_TEMP\preserve-queue-state.py"
+          Copy-Item '.github/scripts/fix-windows-test-cleanup.py' "$env:RUNNER_TEMP\fix-windows-test-cleanup.py"
           git fetch origin main
           git checkout -B main origin/main
           $expected = 'd67f15219f3104983ad4d8d5c22eebb5a64e9ff0'
@@ -37,12 +38,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
           python "$env:RUNNER_TEMP\apply-current-unit-identity.py"
           python "$env:RUNNER_TEMP\preserve-queue-state.py"
+          python "$env:RUNNER_TEMP\fix-windows-test-cleanup.py"
 
       - name: Validate Windows PowerShell 5.1 syntax
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          foreach ($file in @('src/ReportParsing.ps1','tests/Identity.Tests.ps1')) {
+          foreach ($file in @('src/ReportParsing.ps1','tests/Run-Tests.ps1','tests/Identity.Tests.ps1')) {
             $tokens = $null
             $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile(
@@ -69,7 +71,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           git config user.name 'Sentionce'
           git config user.email 'crazytaxzi@gmail.com'
-          git add src/ReportParsing.ps1 tests/Identity.Tests.ps1
+          git add src/ReportParsing.ps1 tests/Run-Tests.ps1 tests/Identity.Tests.ps1
           if (git diff --cached --quiet) { throw 'Identity integration produced no changes.' }
           git commit -m 'Reconcile extended PTA identities by current assignment'
           git push origin HEAD:main
