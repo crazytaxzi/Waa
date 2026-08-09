@@ -22,6 +22,8 @@ The 7-day Top 5 lists apply a display-only telemetry safeguard: exact 0% and 100
 
 The main dashboard 28-day chart now explicitly binds the shared chart renderer to `p28`; it previously inherited the renderer's `p7` default and therefore displayed an empty chart despite valid API data. Successful report scans and PTA commits also invalidate dashboard/driver caches immediately, so the next navigation cannot show a stale pre-import snapshot.
 
+Driver Card transition selection now synchronizes the persisted transition draft immediately. Generated drafts use `<truck> - <driver name> : <transition note>` lines in truck order. For manually edited drafts, synchronization surgically replaces only the affected driver's generated line, preserving unrelated manual content instead of requiring Regenerate or overwriting the draft.
+
 Rendering was simplified for low-end PCs: continuous ambient/signal/pulse animation, full-window backdrop blur, SVG point drop shadows, and large live blur layers were removed while retaining the dark neon visual hierarchy. Copy such as “Heroes in Training,” “Steal the good habits,” and the invented organization expansion was replaced with direct operational language.
 
 ## Architecture and major files

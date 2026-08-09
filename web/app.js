@@ -678,7 +678,7 @@ async function openCard(id) {
       <div class="safety-box"><div><p class="eyebrow">Safety touch</p><p id="safety">Pick one useful note if it fits the conversation.</p></div><button id="random" type="button">New Safety Note</button></div>
       ${checkField('Safety note mentioned', 'safety_mentioned_at', work.safety_mentioned_at)}
       ${conversationArea('Anything else worth remembering?', 'conversation_wrap', conversation.conversation_wrap, 'Record only information that will help with the next follow-up.')}
-      <div class="wrap-grid">${checkField('Include in Transition', 'include_transition', work.include_transition)}${textField('Transition note', 'transition_note', work.transition_note, 'Only the handoff-worthy part')}</div>`, 'green-step')
+      <div class="wrap-grid">${checkField('Send to Transition', 'include_transition', work.include_transition)}${textField('Transition note', 'transition_note', work.transition_note, 'One concise handoff line')}</div>`, 'green-step')
   ].join('');
 
   $('#card').innerHTML = `

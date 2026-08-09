@@ -703,6 +703,7 @@ function Save-DriverAction {
     $auditBody=@{}
     foreach($key in $Body.Keys){if($key-ne'return_followups'){$auditBody[$key]=$Body[$key]}}
     Add-Audit $action 'driver' $Id $auditBody
+    if($action-in@('include_transition','transition_note')){Update-TransitionDraft -DriverId $Id|Out-Null}
     if($Body.ContainsKey('return_followups')-and[bool]$Body.return_followups){return Get-DriverFollowups $Id}
     return @{ok=$true}
 }
@@ -757,14 +758,46 @@ function Remove-DailyActivity {
     return @{ok=$true;driver_id=$driverId}
 }
 
-function Get-Transition {
-    param([switch]$Regenerate)
-    if($Regenerate){
-        $rows=@(Invoke-Sql "WITH t AS (SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM truck_history) SELECT t.truck,d.full_name,w.transition_note FROM driver_work_items w JOIN drivers d ON d.id=w.driver_id LEFT JOIN t ON t.driver_id=d.id AND t.rn=1 WHERE w.include_transition=1 ORDER BY CAST(t.truck AS INTEGER),t.truck;" -Json)
+function Update-TransitionDraft {
+    param([switch]$Force,[int]$DriverId=0)
+    $manual=[int](Invoke-Sql 'SELECT is_manual FROM transition_drafts WHERE id=1;')
+    if($manual-and-not$Force){
+        if($DriverId-le0){return -1}
+        $driver=Get-CurrentDriver $DriverId
+        $work=@(Invoke-Sql "SELECT include_transition,coalesce(transition_note,'') transition_note FROM driver_work_items WHERE driver_id=$DriverId;" -Json)
+        if($null-eq$driver-or-not$work.Count){return -1}
+        $draft=@(Invoke-Sql 'SELECT body FROM transition_drafts WHERE id=1;' -Json)[0]
+        $body=[string]$draft.body
+        $namePattern=[regex]::Escape([string]$driver.full_name)
+        $body=[regex]::Replace($body,"(?m)^[^`r`n]* - $namePattern :[^`r`n]*(?:`r?`n)?",'').TrimEnd("`r","`n")
+        if([int]$work[0].include_transition-eq1){
+            $truck=if([string]::IsNullOrWhiteSpace([string]$driver.truck)){'Unknown'}else{[string]$driver.truck}
+            $line="$truck - $($driver.full_name) : $($work[0].transition_note)"
+            $body=if([string]::IsNullOrWhiteSpace($body)){$line}else{$body+"`r`n"+$line}
+        }
+        $q=ConvertTo-SqlLiteral $body
+        Invoke-Sql "UPDATE transition_drafts SET body=$q,updated_at=CURRENT_TIMESTAMP WHERE id=1;" -AllowWrite|Out-Null
+        return 1
+    }
+    $rows=@(Invoke-Sql @'
+WITH p AS (SELECT driver_id,truck,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM pta_observations WHERE driver_id IS NOT NULL),
+t AS (SELECT driver_id,truck,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn FROM truck_history)
+SELECT coalesce(nullif(trim(p.truck),''),t.truck,'Unknown') truck,d.full_name,coalesce(w.transition_note,'') transition_note
+FROM driver_work_items w JOIN drivers d ON d.id=w.driver_id
+LEFT JOIN p ON p.driver_id=d.id AND p.rn=1 LEFT JOIN t ON t.driver_id=d.id AND t.rn=1
+WHERE w.include_transition=1 ORDER BY CAST(coalesce(nullif(trim(p.truck),''),t.truck) AS INTEGER),coalesce(nullif(trim(p.truck),''),t.truck),d.full_name;
+'@ -Json)
         $lines=@("No Open ACE/ACI's")+@($rows|ForEach-Object{"$($_.truck) - $($_.full_name) : $($_.transition_note)"})
         $body=$lines-join"`r`n";$q=ConvertTo-SqlLiteral $body
         Invoke-Sql "UPDATE transition_drafts SET body=$q,is_manual=0,updated_at=CURRENT_TIMESTAMP WHERE id=1;" -AllowWrite|Out-Null
-        Add-Audit 'transition_regenerated' 'transition' 1 @{count=$rows.Count}
+    return $rows.Count
+}
+
+function Get-Transition {
+    param([switch]$Regenerate)
+    if($Regenerate){
+        $count=Update-TransitionDraft -Force
+        Add-Audit 'transition_regenerated' 'transition' 1 @{count=$count}
     }
     return (Invoke-Sql 'SELECT * FROM transition_drafts WHERE id=1;' -Json)[0]
 }

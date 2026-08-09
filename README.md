@@ -50,6 +50,10 @@ Notes are intentionally separate from the structured call questions. The sticky 
 
 Drivers without a current truck association are surfaced by the **Needs Truck** filter on Workflow. Assign the truck directly in that row or from the shared Driver Work Card. WAA validates and normalizes the truck number, appends a `manual` observation to `truck_history`, and audits the action against the canonical driver. The assignment never becomes driver identity and cannot silently replace an existing current truck; later imported assignment evidence remains historical in the same unified model.
 
+## Transition synchronization
+
+Selecting **Send to Transition** or changing that driver's transition note immediately synchronizes the persisted handoff line as `<truck> - <driver name> : <transition note>`. Generated drafts remain ordered by truck. If the transition text was manually edited, WAA adds, replaces, or removes only the affected driver's managed line and preserves all unrelated manual text. **Regenerate** remains available to intentionally rebuild the complete standard draft.
+
 ## Dashboard and charts
 
 The UI uses the same neon operations-console design throughout the dashboard, queues, imports, transition screen, and Driver Work Card. Charts are custom SVG components with actual connected trend lines, area glow, axes, keyboard-focusable/hoverable inspection bands, crosshairs, tooltips, and horizontal scrolling as history grows. The same chart component is reused for fleet history and driver idle coaching.
