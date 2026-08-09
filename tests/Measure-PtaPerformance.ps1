@@ -9,7 +9,6 @@ $root = Split-Path -Parent $PSScriptRoot
 if ($SqlitePath) { $env:WAA_SQLITE_TEST = $SqlitePath }
 
 Import-Module (Join-Path $root 'src/Waa.psm1') -Force
-. (Join-Path $root 'src/PtaIntake.ps1')
 
 $dataRoot = Join-Path ([IO.Path]::GetTempPath()) ('waa-pta-perf-' + [guid]::NewGuid())
 [IO.Directory]::CreateDirectory($dataRoot) | Out-Null
@@ -29,22 +28,22 @@ try {
     }
 
     $raw = $builder.ToString()
-    $preview = Get-WaaPtaPreview -Raw $raw
+    $preview = Get-ImportPreview $raw 'PTA benchmark' 'pta'
     if ($preview.errors.Count -gt 0) { throw ($preview.errors -join '; ') }
     if ($preview.valid_rows -ne $Rows) { throw "Expected $Rows rows, parser returned $($preview.valid_rows)." }
 
-    $result = Import-WaaPtaData -Raw $raw
+    $result = Import-WaaData $raw 'PTA benchmark' 'pta'
     $stored = [int]((Invoke-Sql 'SELECT count(*) FROM pta_observations;').Trim())
     if ($stored -ne $Rows) { throw "Expected $Rows stored PTA observations, found $stored." }
 
     Write-Host ''
-    Write-Host 'WAA PTA BULK PERFORMANCE' -ForegroundColor Cyan
+    Write-Host 'WAA PTA CORE PIPELINE PERFORMANCE' -ForegroundColor Cyan
     Write-Host ('Rows:       {0}' -f $Rows)
     Write-Host ('Parse:      {0} ms' -f $result.parse_ms)
     Write-Host ('Database:   {0} ms' -f $result.db_ms)
     Write-Host ('Total:      {0} ms' -f $result.total_ms)
     if ($result.total_ms -gt 5000) {
-        Write-Warning 'Bulk PTA import exceeded 5 seconds. Check endpoint protection/disk pressure on this workstation.'
+        Write-Warning 'PTA import exceeded 5 seconds. Check endpoint protection/disk pressure on this workstation.'
     }
     else {
         Write-Host 'Result:     responsive' -ForegroundColor Green
