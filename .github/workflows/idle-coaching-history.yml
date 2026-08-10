@@ -1,0 +1,99 @@
+name: Integrated idle coaching history
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.event.head_commit.message == 'Stage integrated idle coaching history'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Integrate idle coaching history into existing card flow
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $py = @'
+          from pathlib import Path
+
+          # Backend: expose existing driver_call_sessions idle_plan history through Get-DriverCard.
+          p = Path('src/Waa.psm1')
+          s = p.read_text(encoding='utf-8')
+          old = """  'idle',json(coalesce((SELECT json_group_array(json_object('period_start',period_start,'period_end',period_end,'engine_hours',engine_hours,\n    'idle_hours',idle_hours,'percent',percent)) FROM (SELECT period_start,period_end,engine_hours,idle_hours,\n    round(idle_hours*100.0/nullif(engine_hours,0),2) percent FROM idle_periods WHERE driver_id=$Id ORDER BY period_end DESC LIMIT 12)),'[]')),\n  'bols',json(coalesce((SELECT json_group_array(json_object('id',id,'order_number',order_number,'empty_call_date',empty_call_date,"""
+          new = """  'idle',json(coalesce((SELECT json_group_array(json_object('period_start',period_start,'period_end',period_end,'engine_hours',engine_hours,\n    'idle_hours',idle_hours,'percent',percent)) FROM (SELECT period_start,period_end,engine_hours,idle_hours,\n    round(idle_hours*100.0/nullif(engine_hours,0),2) percent FROM idle_periods WHERE driver_id=$Id ORDER BY period_end DESC LIMIT 12)),'[]')),\n  'idle_coaching',json(coalesce((SELECT json_group_array(json_object('cycle_key',cycle_key,'talked_at',talked_at,'idle_plan',idle_plan,\n    'idle_percent',idle_percent,'period_end',period_end)) FROM (\n      SELECT c.cycle_key,coalesce(c.completed_at,c.updated_at,c.opened_at) talked_at,c.idle_plan,\n        (SELECT round(i.idle_hours*100.0/nullif(i.engine_hours,0),2) FROM idle_periods i\n         WHERE i.driver_id=c.driver_id AND i.period_end<=substr(coalesce(c.completed_at,c.updated_at,c.opened_at),1,10)\n         ORDER BY i.period_end DESC,i.id DESC LIMIT 1) idle_percent,\n        (SELECT i.period_end FROM idle_periods i\n         WHERE i.driver_id=c.driver_id AND i.period_end<=substr(coalesce(c.completed_at,c.updated_at,c.opened_at),1,10)\n         ORDER BY i.period_end DESC,i.id DESC LIMIT 1) period_end\n      FROM driver_call_sessions c\n      WHERE c.driver_id=$Id AND trim(coalesce(c.idle_plan,''))<>''\n      ORDER BY coalesce(c.completed_at,c.updated_at,c.opened_at) DESC,c.id DESC LIMIT 12\n    )),'[]')),\n  'bols',json(coalesce((SELECT json_group_array(json_object('id',id,'order_number',order_number,'empty_call_date',empty_call_date,"""
+          if old not in s:
+              raise SystemExit('Get-DriverCard idle insertion point not found exactly')
+          p.write_text(s.replace(old,new), encoding='utf-8', newline='\n')
+
+          # Frontend: render only prior idle-specific coaching in the Idle step.
+          p = Path('web/app.js')
+          s = p.read_text(encoding='utf-8')
+          marker = """function timerList(timers) {\n  return timers.length ? timers.map(timer => `<div class=\"follow-row ${!timer.completed_at && new Date(timer.target_at) < new Date() ? 'late' : ''}\"><input class=\"item-action\" data-action=\"complete_timer\" data-item=\"${timer.id}\" type=\"checkbox\" ${timer.completed_at ? 'checked' : ''}><span>${esc(timer.label)}<small>${esc(displayDate(timer.target_at))}</small></span><button class=\"danger compact\" data-delete-timer=\"${timer.id}\" type=\"button\">Delete</button></div>`).join('') : '<p class=\"empty-copy\">No timers.</p>';\n}\n\nasync function openCard(id) {"""
+          helper = """function timerList(timers) {\n  return timers.length ? timers.map(timer => `<div class=\"follow-row ${!timer.completed_at && new Date(timer.target_at) < new Date() ? 'late' : ''}\"><input class=\"item-action\" data-action=\"complete_timer\" data-item=\"${timer.id}\" type=\"checkbox\" ${timer.completed_at ? 'checked' : ''}><span>${esc(timer.label)}<small>${esc(displayDate(timer.target_at))}</small></span><button class=\"danger compact\" data-delete-timer=\"${timer.id}\" type=\"button\">Delete</button></div>`).join('') : '<p class=\"empty-copy\">No timers.</p>';\n}\n\nfunction idleCoachingHistory(items, currentCycle) {\n  const rows = (items || []).filter(item => item.idle_plan && item.cycle_key !== currentCycle);\n  return `\n    <section class=\"idle-history\">\n      <div class=\"idle-history-title\"><div><p class=\"eyebrow\">Idle only</p><h4>Previous Idle Coaching</h4></div><span>${rows.length}</span></div>\n      ${rows.length ? rows.map(item => `\n        <article class=\"idle-history-row\">\n          <div class=\"idle-history-stat\"><b>${fmtPercent(item.idle_percent)}</b><small>${item.period_end ? `7D ending ${esc(new Date(item.period_end).toLocaleDateString([], { month: 'short', day: 'numeric' }))}` : 'Idle snapshot unavailable'}</small></div>\n          <div class=\"idle-history-copy\"><time>${esc(displayDate(item.talked_at))}</time><p>${esc(item.idle_plan)}</p></div>\n        </article>`).join('') : '<p class=\"empty-copy\">No previous idle coaching recorded for this driver.</p>'}\n    </section>`;\n}\n\nasync function openCard(id) {"""
+          if marker not in s:
+              raise SystemExit('app.js helper insertion point not found exactly')
+          s = s.replace(marker, helper)
+          old_step = """      ${chart([...(card.idle || [])].reverse(), { field: 'percent', tone: 'green', title: 'Driver rolling idle history', compact: true })}\n      ${conversationArea('What is their plan / what is working?', 'idle_plan', conversation.idle_plan, 'Keep it natural: “going to shut down during long waits”, “APU issue needs help”, “current routine is working”…')}`, 'purple-step'),"""
+          new_step = """      ${chart([...(card.idle || [])].reverse(), { field: 'percent', tone: 'green', title: 'Driver rolling idle history', compact: true })}\n      ${conversationArea('What is their plan / what is working?', 'idle_plan', conversation.idle_plan, 'Keep it natural: “going to shut down during long waits”, “APU issue needs help”, “current routine is working”…')}\n      ${idleCoachingHistory(card.idle_coaching || [], conversation.cycle_key)}`, 'purple-step'),"""
+          if old_step not in s:
+              raise SystemExit('Idle Coaching step insertion point not found exactly')
+          p.write_text(s.replace(old_step,new_step), encoding='utf-8', newline='\n')
+
+          # Styling stays in the main visual system.
+          p = Path('web/styles.css')
+          s = p.read_text(encoding='utf-8')
+          css = """\n\n.idle-history{margin-top:16px;padding:14px;border:1px solid #b34cff55;background:linear-gradient(145deg,#b34cff0d,#0b1119 58%,#7cff3a08);border-radius:13px;box-shadow:inset 0 1px #b34cff24}\n.idle-history-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}.idle-history-title h4{margin:0;font-family:Bahnschrift,\"Segoe UI\",sans-serif;font-size:14px;letter-spacing:.08em;text-transform:uppercase}.idle-history-title>span{display:grid;place-items:center;min-width:30px;height:26px;border:1px solid #b34cff66;color:var(--purple);font:700 11px Consolas,monospace}\n.idle-history-row{display:grid;grid-template-columns:130px minmax(0,1fr);gap:14px;align-items:start;padding:11px 0;border-top:1px solid #30394a88}.idle-history-row:first-of-type{border-top:0}.idle-history-stat b{display:block;color:var(--green);font:800 23px Bahnschrift,\"Segoe UI\",sans-serif;text-shadow:0 0 14px #7cff3a33}.idle-history-stat small,.idle-history-copy time{display:block;color:var(--muted);font-size:10px}.idle-history-copy p{margin:4px 0 0;color:#e8edf3;line-height:1.45}.idle-history .empty-copy{margin:4px 0 0}\n@media(max-width:700px){.idle-history-row{grid-template-columns:1fr}.idle-history-stat{display:flex;align-items:baseline;gap:9px}.idle-history-stat small{display:inline}}\n"""
+          if '.idle-history{' in s:
+              raise SystemExit('Idle coaching history CSS already exists unexpectedly')
+          p.write_text(s.rstrip()+css, encoding='utf-8', newline='\n')
+
+          # Regression: history contains only idle-plan sessions and includes the applicable rolling snapshot.
+          p = Path('tests/Run-Tests.ps1')
+          s = p.read_text(encoding='utf-8')
+          target = """  Invoke-Sql \"INSERT INTO drivers(full_name,pta_code) VALUES('Coached Driver','COACHEDD');INSERT INTO idle_periods(driver_id,truck,period_start,period_end,engine_hours,idle_hours) VALUES(last_insert_rowid(),'COACHED','2026-08-03','2026-08-09',10,8);INSERT INTO driver_call_sessions(driver_id,cycle_key,idle_plan) VALUES((SELECT id FROM drivers WHERE pta_code='COACHEDD'),'COACHED|2026-08-09','Reduce long-wait idling');\" -AllowWrite|Out-Null;$coachingDash=Get-Dashboard;Assert ($coachingDash.coaching.eligible-eq2-and$coachingDash.coaching.coached-eq1-and[double]$coachingDash.coaching.percent-eq50) 'dashboard reports coached share of drivers currently above 50% weekly idle'"""
+          replacement = target + ";$coachedId=[int](Invoke-Sql \"SELECT id FROM drivers WHERE pta_code='COACHEDD';\");Invoke-Sql \"INSERT INTO driver_call_sessions(driver_id,cycle_key,fuel_note) VALUES($coachedId,'COACHED|2026-08-10','Fuel only conversation');\" -AllowWrite|Out-Null;$coachedCard=Get-DriverCard $coachedId;Assert ($coachedCard.idle_coaching.Count-eq1-and$coachedCard.idle_coaching[0].idle_plan-eq'Reduce long-wait idling'-and[double]$coachedCard.idle_coaching[0].idle_percent-eq80) 'driver card idle coaching history contains only idle discussion and relevant rolling percentage'"
+          if target not in s:
+              raise SystemExit('Run-Tests coaching assertion insertion point not found exactly')
+          p.write_text(s.replace(target,replacement), encoding='utf-8', newline='\n')
+          '@
+          $py | python -
+
+      - name: Parse all PowerShell with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(Get-ChildItem -Recurse -File | Where-Object { $_.Extension -eq '.ps1' -or $_.Extension -eq '.psm1' })
+          foreach ($file in $files) {
+            $tokens=$null;$errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile($file.FullName,[ref]$tokens,[ref]$errors)|Out-Null
+            if($errors.Count){$errors|Format-List|Out-String|Write-Host;throw "PS5.1 parse failure: $($file.FullName)"}
+          }
+
+      - name: Validate JavaScript
+        shell: pwsh
+        run: node --check web/app.js
+
+      - name: Run established regression suites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          & .\tests\Run-Tests.ps1
+          & .\tests\Identity.Tests.ps1
+
+      - name: Commit integrated feature and remove validation workflow
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git config user.name 'Sentionce'
+          git config user.email 'crazytaxzi@gmail.com'
+          git rm .github/workflows/idle-coaching-history.yml
+          git add src/Waa.psm1 web/app.js web/styles.css tests/Run-Tests.ps1
+          git commit -m 'Add integrated idle coaching history to driver card'
+          git push origin HEAD:main
