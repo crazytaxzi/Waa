@@ -1,0 +1,67 @@
+name: Group Idle Coaching by driver
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.event.head_commit.message == 'Stage grouped Idle Coaching cards'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Group Idle Coaching into driver review cards
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python .github/apply_idle_grouping.py
+          @'
+          from pathlib import Path
+          for name in ('web/app.js','web/styles.css'):
+              p=Path(name); s=p.read_text(encoding='utf-8'); p.write_text(s.replace('\\"','"'),encoding='utf-8',newline='\n')
+          p=Path('tests/Run-Tests.ps1'); s=p.read_text(encoding='utf-8'); p.write_text(s.replace('-and-not$appSource','-and -not $appSource'),encoding='utf-8',newline='\n')
+          '@ | python -
+
+      - name: Parse all PowerShell with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(Get-ChildItem -Recurse -File | Where-Object { $_.Extension -eq '.ps1' -or $_.Extension -eq '.psm1' })
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($file.FullName,[ref]$tokens,[ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | Format-List | Out-String | Write-Host
+              throw "Windows PowerShell 5.1 parser errors in $($file.FullName)"
+            }
+          }
+          Write-Host "Windows PowerShell 5.1 parsed $($files.Count) PowerShell files successfully."
+
+      - name: Validate JavaScript
+        shell: pwsh
+        run: node --check web/app.js
+
+      - name: Run established regression suites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\tests\Run-Tests.ps1
+          & .\tests\Identity.Tests.ps1
+
+      - name: Commit integrated grouped view and remove staging files
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name "Sentionce"
+          git config user.email "crazytaxzi@gmail.com"
+          git rm .github/apply_idle_grouping.py .github/workflows/idle-grouping.yml
+          git add web/app.js web/styles.css web/index.html tests/Run-Tests.ps1
+          git commit -m "Group Idle Coaching history by driver"
+          git push origin HEAD:main
