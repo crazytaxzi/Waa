@@ -409,6 +409,51 @@ function reminderRow(item) {
   </div>`;
 }
 
+async function idleCoachingLog() {
+  const rows = await cachedApi('/api/idle-coaching', 5000);
+  rows.forEach(row => { row._search = `${row.full_name} ${row.truck} ${row.pta_code} ${row.idle_plan}`.toLowerCase(); });
+  const uniqueDrivers = new Set(rows.map(row => Number(row.driver_id)));
+  const above50 = rows.filter(row => Number.isFinite(Number(row.idle_percent)) && Number(row.idle_percent) > 50).length;
+  const latest = rows[0];
+
+  $('#app').innerHTML = pageHead('Idle Coaching', 'Only the idle conversations you recorded with drivers. No fuel, ETA, BOL, wrap-up, or general-note noise.', 'WAA // Coaching Record') + `
+    <section class="idle-log-summary">
+      <div class="idle-log-metric"><span>Conversations</span><b>${rows.length}</b><small>Idle discussions recorded</small></div>
+      <div class="idle-log-metric"><span>Drivers</span><b>${uniqueDrivers.size}</b><small>Drivers coached on idle</small></div>
+      <div class="idle-log-metric"><span>Over 50% at talk</span><b>${above50}</b><small>Coaching conversations above target</small></div>
+      <div class="idle-log-metric"><span>Most recent</span><b>${latest ? esc(displayDate(latest.talked_at)) : '—'}</b><small>${latest ? esc(latest.full_name) : 'No coaching recorded yet'}</small></div>
+    </section>
+    <section class="glass-panel idle-log-panel">
+      <div class="table-toolbar">
+        <div class="searchbox"><span aria-hidden="true">⌕</span><input id="idleLogSearch" placeholder="Search driver, truck, or what you discussed"></div>
+        <span id="idleLogCount" class="queue-count"></span>
+      </div>
+      <div id="idleLogList" class="idle-log-list"></div>
+    </section>`;
+
+  const draw = () => {
+    const query = $('#idleLogSearch').value.trim().toLowerCase();
+    const visible = rows.filter(row => !query || row._search.includes(query));
+    $('#idleLogCount').textContent = `${visible.length} conversation${visible.length === 1 ? '' : 's'}`;
+    setCardQueue([...new Set(visible.map(row => Number(row.driver_id)))]);
+    $('#idleLogList').innerHTML = visible.length ? visible.map(row => {
+      const score = Number(row.idle_percent);
+      const tone = Number.isFinite(score) && score > 50 ? 'hot' : 'good';
+      const period = row.period_end ? new Date(row.period_end).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : null;
+      return `<button class="idle-log-entry open" data-id="${row.driver_id}" type="button">
+        <div class="idle-log-when"><time>${esc(displayDate(row.talked_at))}</time><small>${period ? `7D ending ${esc(period)}` : 'Idle snapshot unavailable'}</small></div>
+        <div class="idle-log-driver"><b>${esc(row.truck || 'No truck')} · ${esc(row.full_name)}</b><small>${esc(row.pta_code || 'No PTA code')}</small></div>
+        <div class="idle-log-score ${tone}"><b>${fmtPercent(row.idle_percent)}</b><span>7D idle</span></div>
+        <p class="idle-log-note">${esc(row.idle_plan)}</p>
+        <span class="idle-log-open">Open Driver →</span>
+      </button>`;
+    }).join('') : '<p class="empty-copy idle-log-empty">No idle coaching conversations match this search.</p>';
+  };
+
+  $('#idleLogSearch').addEventListener('input', debounce(draw));
+  draw();
+}
+
 async function organizer() {
   const data = await cachedApi('/api/organizer', 10000);
   const notes = data.items.filter(item => item.item_type === 'note');
@@ -942,7 +987,7 @@ function bindCardEvents(card) {
       await api(`/api/drivers/${finishedId}/conversation`, {
         method: 'POST', body: JSON.stringify({ field: 'completed_at', value: true })
       });
-      invalidate('/api/drivers', '/api/dashboard', '/api/activity', `/api/drivers/${finishedId}`);
+      invalidate('/api/drivers', '/api/dashboard', '/api/activity', '/api/idle-coaching', `/api/drivers/${finishedId}`);
       toast(nextId ? 'Call completed · loading next driver' : 'Call completed');
       if (nextId) await openCard(nextId);
       else {
@@ -1020,7 +1065,7 @@ function bindCardEvents(card) {
         await trackSave(api(`/api/drivers/${driverId}/conversation`, {
           method: 'POST', body: JSON.stringify({ field: element.dataset.conversation, value: element.value })
         }));
-        invalidate('/api/activity', `/api/drivers/${driverId}`);
+        invalidate('/api/activity', '/api/idle-coaching', `/api/drivers/${driverId}`);
         setSaved(element);
       } else if (element.matches('.item-action')) {
         await trackedAction(element.dataset.action, element.checked, { item_id: Number(element.dataset.item) });
@@ -1198,6 +1243,7 @@ const routes = {
   dashboard,
   pta: () => queue(true),
   workflow: () => queue(false),
+  idle: idleCoachingLog,
   bols,
   organizer,
   activity,
@@ -1244,7 +1290,7 @@ async function monitorHealth() {
     $('#health').textContent = 'LOOPBACK · SECURE';
     if (maintenanceWasRunning) {
       maintenanceWasRunning = false;
-      invalidate('/api/dashboard', '/api/drivers', '/api/bols', '/api/report-intake', '/api/data-quality');
+      invalidate('/api/dashboard', '/api/drivers', '/api/bols', '/api/idle-coaching', '/api/report-intake', '/api/data-quality');
       await route();
       toast('Reports and driver identities are current');
     }

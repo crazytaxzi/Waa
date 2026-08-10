@@ -764,6 +764,39 @@ function Save-DriverAction {
     return @{ok=$true}
 }
 
+function Get-IdleCoachingLog {
+    if(Test-WaaLiveStoreOnline){Invoke-WaaLiveCheckpoint -Force|Out-Null}
+    $sql=@'
+WITH coaching AS (
+  SELECT c.id,c.driver_id,c.cycle_key,
+         coalesce(c.completed_at,c.updated_at,c.opened_at) talked_at,
+         trim(c.idle_plan) idle_plan,
+         CASE WHEN instr(c.cycle_key,'|')>0 THEN substr(c.cycle_key,1,instr(c.cycle_key,'|')-1) ELSE '' END cycle_truck
+  FROM driver_call_sessions c
+  WHERE trim(coalesce(c.idle_plan,''))<>''
+)
+SELECT c.id,c.driver_id,d.full_name,d.pta_code,
+       CASE WHEN trim(coalesce(c.cycle_truck,''))='' OR c.cycle_truck='NO-TRUCK' THEN
+         coalesce((SELECT th.truck FROM truck_history th
+                   WHERE th.driver_id=c.driver_id AND th.observed_at<=c.talked_at
+                   ORDER BY th.observed_at DESC,th.id DESC LIMIT 1),'')
+       ELSE c.cycle_truck END truck,
+       c.talked_at,c.idle_plan,
+       (SELECT round(i.idle_hours*100.0/nullif(i.engine_hours,0),2)
+        FROM idle_periods i
+        WHERE i.driver_id=c.driver_id AND i.period_end<=substr(c.talked_at,1,10)
+        ORDER BY i.period_end DESC,i.id DESC LIMIT 1) idle_percent,
+       (SELECT i.period_end
+        FROM idle_periods i
+        WHERE i.driver_id=c.driver_id AND i.period_end<=substr(c.talked_at,1,10)
+        ORDER BY i.period_end DESC,i.id DESC LIMIT 1) period_end
+FROM coaching c
+JOIN drivers d ON d.id=c.driver_id
+ORDER BY c.talked_at DESC,c.id DESC;
+'@
+    return Invoke-Sql $sql -Json
+}
+
 function Get-Organizer {
     $driverSql=@'
 WITH latest_truck AS (
@@ -940,4 +973,4 @@ function Restore-Waa {
 
 . (Join-Path $PSScriptRoot 'LiveStore.ps1')
 
-Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,ConvertTo-SqlLiteral,Parse-Date,Split-ImportRows,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-CurrentDriver,Get-DriverCard,Save-DriverAction,Get-Organizer,Get-DailyActivity,Clear-DailyActivityNoise,Remove-DailyActivity,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa,Initialize-WaaLiveStore,Initialize-WaaLiveDomain,Invoke-WaaLiveCheckpoint,Invoke-WaaLiveCheckpointIfDue,Reset-WaaLiveDomainFromSqlite,Close-WaaLiveStore,Get-WaaLiveHealth,Get-WaaLiveCall,Get-WaaLivePrefix,Set-WaaLiveCallField
+Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,ConvertTo-SqlLiteral,Parse-Date,Split-ImportRows,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-CurrentDriver,Get-DriverCard,Get-IdleCoachingLog,Save-DriverAction,Get-Organizer,Get-DailyActivity,Clear-DailyActivityNoise,Remove-DailyActivity,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa,Initialize-WaaLiveStore,Initialize-WaaLiveDomain,Invoke-WaaLiveCheckpoint,Invoke-WaaLiveCheckpointIfDue,Reset-WaaLiveDomainFromSqlite,Close-WaaLiveStore,Get-WaaLiveHealth,Get-WaaLiveCall,Get-WaaLivePrefix,Set-WaaLiveCallField

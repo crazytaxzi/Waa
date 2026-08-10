@@ -285,6 +285,9 @@ try {
                     elseif ($method -eq 'GET' -and $path -eq '/api/data-quality') {
                         Send-Json $request.stream 200 (Get-DataQuality) | Out-Null
                     }
+                    elseif ($method -eq 'GET' -and $path -eq '/api/idle-coaching') {
+                        Send-JsonArray $request.stream 200 @(Get-IdleCoachingLog) | Out-Null
+                    }
                     elseif ($method -eq 'GET' -and $path -eq '/api/organizer') {
                         Send-Json $request.stream 200 (Get-Organizer) | Out-Null
                     }
