@@ -751,6 +751,19 @@ function timerList(timers) {
   return timers.length ? timers.map(timer => `<div class="follow-row ${!timer.completed_at && new Date(timer.target_at) < new Date() ? 'late' : ''}"><input class="item-action" data-action="complete_timer" data-item="${timer.id}" type="checkbox" ${timer.completed_at ? 'checked' : ''}><span>${esc(timer.label)}<small>${esc(displayDate(timer.target_at))}</small></span><button class="danger compact" data-delete-timer="${timer.id}" type="button">Delete</button></div>`).join('') : '<p class="empty-copy">No timers.</p>';
 }
 
+function idleCoachingHistory(items, currentCycle) {
+  const rows = (items || []).filter(item => item.idle_plan && item.cycle_key !== currentCycle);
+  return `
+    <section class="idle-history">
+      <div class="idle-history-title"><div><p class="eyebrow">Idle only</p><h4>Previous Idle Coaching</h4></div><span>${rows.length}</span></div>
+      ${rows.length ? rows.map(item => `
+        <article class="idle-history-row">
+          <div class="idle-history-stat"><b>${fmtPercent(item.idle_percent)}</b><small>${item.period_end ? `7D ending ${esc(new Date(item.period_end).toLocaleDateString([], { month: 'short', day: 'numeric' }))}` : 'Idle snapshot unavailable'}</small></div>
+          <div class="idle-history-copy"><time>${esc(displayDate(item.talked_at))}</time><p>${esc(item.idle_plan)}</p></div>
+        </article>`).join('') : '<p class="empty-copy">No previous idle coaching recorded for this driver.</p>'}
+    </section>`;
+}
+
 async function openCard(id) {
   if (!id) return;
   const requestedId = Number(id);
@@ -814,7 +827,8 @@ async function openCard(id) {
     callStep(3, 'Idle Coaching', idlePrompt, `
       <div class="idle-coach-head"><div><span>Latest 7D</span><b>${fmtPercent(latestIdle?.percent)}</b></div><div><span>Engine</span><b>${fmtHours(latestIdle?.engine_hours)}</b></div><div><span>Idle</span><b>${fmtHours(latestIdle?.idle_hours)}</b></div></div>
       ${chart([...(card.idle || [])].reverse(), { field: 'percent', tone: 'green', title: 'Driver rolling idle history', compact: true })}
-      ${conversationArea('What is their plan / what is working?', 'idle_plan', conversation.idle_plan, 'Keep it natural: “going to shut down during long waits”, “APU issue needs help”, “current routine is working”…')}`, 'purple-step'),
+      ${conversationArea('What is their plan / what is working?', 'idle_plan', conversation.idle_plan, 'Keep it natural: “going to shut down during long waits”, “APU issue needs help”, “current routine is working”…')}
+      ${idleCoachingHistory(card.idle_coaching || [], conversation.cycle_key)}`, 'purple-step'),
     callStep(4, 'Help on the Load', 'Ask what would make the load easier before you start checking boxes.', `
       <div class="field-grid">
         ${conversationSelect('Do they need help?', 'load_help_status', conversation.load_help_status, ['Unknown', 'No Help Needed', 'Needs Help', 'Follow Up'])}

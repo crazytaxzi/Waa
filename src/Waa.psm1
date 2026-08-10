@@ -659,6 +659,19 @@ SELECT json_object(
   'idle',json(coalesce((SELECT json_group_array(json_object('period_start',period_start,'period_end',period_end,'engine_hours',engine_hours,
     'idle_hours',idle_hours,'percent',percent)) FROM (SELECT period_start,period_end,engine_hours,idle_hours,
     round(idle_hours*100.0/nullif(engine_hours,0),2) percent FROM idle_periods WHERE driver_id=$Id ORDER BY period_end DESC LIMIT 12)),'[]')),
+  'idle_coaching',json(coalesce((SELECT json_group_array(json_object('cycle_key',cycle_key,'talked_at',talked_at,'idle_plan',idle_plan,
+    'idle_percent',idle_percent,'period_end',period_end)) FROM (
+      SELECT c.cycle_key,coalesce(c.completed_at,c.updated_at,c.opened_at) talked_at,c.idle_plan,
+        (SELECT round(i.idle_hours*100.0/nullif(i.engine_hours,0),2) FROM idle_periods i
+         WHERE i.driver_id=c.driver_id AND i.period_end<=substr(coalesce(c.completed_at,c.updated_at,c.opened_at),1,10)
+         ORDER BY i.period_end DESC,i.id DESC LIMIT 1) idle_percent,
+        (SELECT i.period_end FROM idle_periods i
+         WHERE i.driver_id=c.driver_id AND i.period_end<=substr(coalesce(c.completed_at,c.updated_at,c.opened_at),1,10)
+         ORDER BY i.period_end DESC,i.id DESC LIMIT 1) period_end
+      FROM driver_call_sessions c
+      WHERE c.driver_id=$Id AND trim(coalesce(c.idle_plan,''))<>''
+      ORDER BY coalesce(c.completed_at,c.updated_at,c.opened_at) DESC,c.id DESC LIMIT 12
+    )),'[]')),
   'bols',json(coalesce((SELECT json_group_array(json_object('id',id,'order_number',order_number,'empty_call_date',empty_call_date,
     'origin',origin,'destination',destination,'mileage',mileage,'bol_type',bol_type,'first_seen_at',first_seen_at,'last_seen_at',last_seen_at,
     'mentioned_at',mentioned_at)) FROM (SELECT * FROM missing_bols WHERE driver_id=$Id ORDER BY empty_call_date DESC)),'[]')),
