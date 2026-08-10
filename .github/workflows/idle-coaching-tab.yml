@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   integrate:
-    if: github.event.head_commit.message == 'Run Idle Coaching integration validation'
+    if: github.event.head_commit.message == 'Retry Idle Coaching integration validation'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +18,15 @@ jobs:
 
       - name: Integrate page into existing WAA architecture
         shell: pwsh
-        run: python .github/apply_idle_tab.py
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python .github/apply_idle_tab.py
+          $path = 'src/Waa.psm1'
+          $text = [IO.File]::ReadAllText((Resolve-Path $path))
+          $old = 'Get-DriverCard,Save-DriverAction'
+          $new = 'Get-DriverCard,Get-IdleCoachingLog,Save-DriverAction'
+          if (-not $text.Contains($old)) { throw 'Module export insertion point not found.' }
+          [IO.File]::WriteAllText((Resolve-Path $path),$text.Replace($old,$new),[Text.UTF8Encoding]::new($false))
 
       - name: Parse all PowerShell with Windows PowerShell 5.1
         shell: powershell
