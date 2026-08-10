@@ -20,7 +20,8 @@ const state = {
   cardStep: 1,
   pendingSaves: new Set(),
   saveFailed: false,
-  activityRowsByDriver: new Map()
+  activityRowsByDriver: new Map(),
+  idleRowsByDriver: new Map()
 };
 const cachedApi = async (path, maxAge = 20000) => {
   const hit = state.cache.get(path);
@@ -409,45 +410,86 @@ function reminderRow(item) {
   </div>`;
 }
 
+function openIdleCoachingSummary(driverId) {
+  const rows = state.idleRowsByDriver.get(Number(driverId)) || [];
+  if (!rows.length) return;
+  const driver = rows[0];
+  const scores = rows.map(row => Number(row.idle_percent)).filter(Number.isFinite);
+  const latestScore = Number(driver.idle_percent);
+  const highScore = scores.length ? Math.max(...scores) : null;
+  const over50 = scores.filter(score => score > 50).length;
+  $('#activityModalBody').innerHTML = `
+    <header class="activity-modal-head"><div><p class="eyebrow">Idle coaching history</p><h2 id="activityModalTitle">${esc(driver.truck || 'No truck')} · ${esc(driver.full_name)}</h2><p>${rows.length} idle conversation${rows.length === 1 ? '' : 's'} recorded for this driver</p></div><button class="open" data-id="${driver.driver_id}" type="button">Open Driver Work Card</button></header>
+    <div class="activity-summary-chips">
+      <span><b>${rows.length}</b> conversations</span>
+      <span><b>${fmtPercent(Number.isFinite(latestScore) ? latestScore : null)}</b> latest 7D</span>
+      <span><b>${fmtPercent(highScore)}</b> highest 7D</span>
+      <span><b>${over50}</b> over 50%</span>
+    </div>
+    <div class="activity-popup-list idle-popup-list">${rows.map(row => {
+      const score = Number(row.idle_percent);
+      const tone = Number.isFinite(score) && score > 50 ? 'hot' : 'good';
+      const period = row.period_end ? new Date(row.period_end).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : null;
+      return `<article class="activity-row idle-summary-row">
+        <time>${esc(displayDate(row.talked_at))}</time>
+        <div class="idle-summary-score ${tone}"><b>${fmtPercent(row.idle_percent)}</b><small>${period ? `7D ending ${esc(period)}` : 'No idle snapshot'}</small></div>
+        <div><b>${esc(row.idle_plan)}</b><small>${esc(row.truck || 'No truck')} · ${esc(row.pta_code || 'No PTA code')}</small></div>
+      </article>`;
+    }).join('')}</div>`;
+  $('#activityModal').classList.remove('hidden');
+  document.body.classList.add('modal-open');
+}
+
 async function idleCoachingLog() {
   const rows = await cachedApi('/api/idle-coaching', 5000);
-  rows.forEach(row => { row._search = `${row.full_name} ${row.truck} ${row.pta_code} ${row.idle_plan}`.toLowerCase(); });
-  const uniqueDrivers = new Set(rows.map(row => Number(row.driver_id)));
+  const groups = new Map();
+  rows.forEach(row => {
+    const id = Number(row.driver_id);
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(row);
+  });
+  state.idleRowsByDriver = groups;
+  const groupSearch = new Map([...groups].map(([id, conversations]) => [
+    id,
+    conversations.map(row => `${row.full_name} ${row.truck} ${row.pta_code} ${row.idle_plan}`).join(' ').toLowerCase()
+  ]));
   const above50 = rows.filter(row => Number.isFinite(Number(row.idle_percent)) && Number(row.idle_percent) > 50).length;
   const latest = rows[0];
 
-  $('#app').innerHTML = pageHead('Idle Coaching', 'Only the idle conversations you recorded with drivers. No fuel, ETA, BOL, wrap-up, or general-note noise.', 'WAA // Coaching Record') + `
+  $('#app').innerHTML = pageHead('Idle Coaching', 'One driver card for every driver you coached on idle. Open a card to review every idle conversation with that driver.', 'WAA // Coaching Record') + `
     <section class="idle-log-summary">
       <div class="idle-log-metric"><span>Conversations</span><b>${rows.length}</b><small>Idle discussions recorded</small></div>
-      <div class="idle-log-metric"><span>Drivers</span><b>${uniqueDrivers.size}</b><small>Drivers coached on idle</small></div>
-      <div class="idle-log-metric"><span>Over 50% at talk</span><b>${above50}</b><small>Coaching conversations above target</small></div>
+      <div class="idle-log-metric"><span>Drivers</span><b>${groups.size}</b><small>Driver coaching records</small></div>
+      <div class="idle-log-metric"><span>Over 50% at talk</span><b>${above50}</b><small>Conversations above target</small></div>
       <div class="idle-log-metric"><span>Most recent</span><b>${latest ? esc(displayDate(latest.talked_at)) : '—'}</b><small>${latest ? esc(latest.full_name) : 'No coaching recorded yet'}</small></div>
     </section>
     <section class="glass-panel idle-log-panel">
       <div class="table-toolbar">
-        <div class="searchbox"><span aria-hidden="true">⌕</span><input id="idleLogSearch" placeholder="Search driver, truck, or what you discussed"></div>
+        <div class="searchbox"><span aria-hidden="true">⌕</span><input id="idleLogSearch" placeholder="Search driver, truck, or anything discussed about idle"></div>
         <span id="idleLogCount" class="queue-count"></span>
       </div>
-      <div id="idleLogList" class="idle-log-list"></div>
+      <div class="panel-title idle-log-title"><div><p class="eyebrow">One coaching record per driver</p><h3>Driver Idle Conversations</h3></div></div>
+      <div id="idleLogList" class="activity-list idle-log-list"></div>
     </section>`;
 
   const draw = () => {
     const query = $('#idleLogSearch').value.trim().toLowerCase();
-    const visible = rows.filter(row => !query || row._search.includes(query));
-    $('#idleLogCount').textContent = `${visible.length} conversation${visible.length === 1 ? '' : 's'}`;
-    setCardQueue([...new Set(visible.map(row => Number(row.driver_id)))]);
-    $('#idleLogList').innerHTML = visible.length ? visible.map(row => {
-      const score = Number(row.idle_percent);
+    const visible = [...groups].filter(([id]) => !query || groupSearch.get(id).includes(query));
+    const conversationCount = visible.reduce((total, [, conversations]) => total + conversations.length, 0);
+    $('#idleLogCount').textContent = `${visible.length} driver${visible.length === 1 ? '' : 's'} · ${conversationCount} conversation${conversationCount === 1 ? '' : 's'}`;
+    setCardQueue(visible.map(([id]) => id));
+    $('#idleLogList').innerHTML = visible.length ? visible.map(([id, conversations]) => {
+      const latestConversation = conversations[0];
+      const score = Number(latestConversation.idle_percent);
       const tone = Number.isFinite(score) && score > 50 ? 'hot' : 'good';
-      const period = row.period_end ? new Date(row.period_end).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : null;
-      return `<button class="idle-log-entry open" data-id="${row.driver_id}" type="button">
-        <div class="idle-log-when"><time>${esc(displayDate(row.talked_at))}</time><small>${period ? `7D ending ${esc(period)}` : 'Idle snapshot unavailable'}</small></div>
-        <div class="idle-log-driver"><b>${esc(row.truck || 'No truck')} · ${esc(row.full_name)}</b><small>${esc(row.pta_code || 'No PTA code')}</small></div>
-        <div class="idle-log-score ${tone}"><b>${fmtPercent(row.idle_percent)}</b><span>7D idle</span></div>
-        <p class="idle-log-note">${esc(row.idle_plan)}</p>
-        <span class="idle-log-open">Open Driver →</span>
+      return `<button class="activity-driver-card idle-driver-card" data-review-idle-driver="${id}" type="button">
+        <span class="activity-driver-count">${conversations.length}</span>
+        <span class="idle-driver-identity"><b>${esc(latestConversation.truck || 'No truck')} · ${esc(latestConversation.full_name)}</b><small>${esc(latestConversation.pta_code || 'No PTA code')} · Last coached ${esc(displayDate(latestConversation.talked_at))}</small></span>
+        <span class="idle-driver-preview"><small>Latest idle conversation</small><b>${esc(latestConversation.idle_plan)}</b></span>
+        <span class="idle-driver-score ${tone}"><b>${fmtPercent(latestConversation.idle_percent)}</b><small>latest 7D</small></span>
+        <strong>Review Coaching →</strong>
       </button>`;
-    }).join('') : '<p class="empty-copy idle-log-empty">No idle coaching conversations match this search.</p>';
+    }).join('') : '<p class="empty-copy idle-log-empty">No driver idle coaching records match this search.</p>';
   };
 
   $('#idleLogSearch').addEventListener('input', debounce(draw));
@@ -1195,6 +1237,8 @@ document.addEventListener('click', async event => {
     } catch (error) { activityDelete.disabled = false; toast(error.message); }
     return;
   }
+  const idleReviewDriver = event.target.closest('[data-review-idle-driver]');
+  if (idleReviewDriver) { openIdleCoachingSummary(idleReviewDriver.dataset.reviewIdleDriver); return; }
   const reviewDriver = event.target.closest('[data-review-driver]');
   if (reviewDriver) { openActivitySummary(reviewDriver.dataset.reviewDriver); return; }
   const opener = event.target.closest('.open[data-id]');
