@@ -267,15 +267,31 @@ function Set-WaaLiveWorkField {
 }
 
 function Set-WaaLiveCallField {
-    param([int]$DriverId,[string]$CycleKey,[string]$Field,$Value,[switch]$NoAudit)
+    param(
+        [int]$DriverId,
+        [string]$CycleKey,
+        [string]$Field,
+        $Value,
+        [switch]$NoAudit,
+        [switch]$CaptureIdleSnapshot,
+        [AllowNull()]$IdlePercentSnapshot,
+        [AllowNull()][string]$IdlePeriodEndSnapshot
+    )
     $key = Get-WaaLiveCallKey $DriverId $CycleKey
     $call = Get-WaaLiveCall $DriverId $CycleKey
     if ($null -eq $call) {
         $now=(Get-Date).ToUniversalTime().ToString('s')
-        $call=[pscustomobject]@{id=$null;driver_id=$DriverId;cycle_key=$CycleKey;opened_at=$now;updated_at=$now;fuel_status='Unknown';fuel_note=$null;driver_eta=$null;eta_status='Unknown';eta_note=$null;idle_plan=$null;load_help_status='Unknown';load_help_note=$null;conversation_wrap=$null;completed_at=$null;_revision=0;_deleted=$false}
+        $call=[pscustomobject]@{id=$null;driver_id=$DriverId;cycle_key=$CycleKey;opened_at=$now;updated_at=$now;fuel_status='Unknown';fuel_note=$null;driver_eta=$null;eta_status='Unknown';eta_note=$null;idle_plan=$null;idle_percent_snapshot=$null;idle_period_end_snapshot=$null;load_help_status='Unknown';load_help_note=$null;conversation_wrap=$null;completed_at=$null;_revision=0;_deleted=$false}
+    }
+    foreach($property in @('idle_percent_snapshot','idle_period_end_snapshot')){
+        if($null-eq$call.PSObject.Properties[$property]){$call|Add-Member -NotePropertyName $property -NotePropertyValue $null}
     }
     if ($Field -eq 'completed_at') { $call.completed_at = if ([bool]$Value) { (Get-Date).ToUniversalTime().ToString('s') } else { $null } }
     else { $call.$Field = $Value }
+    if($Field-eq'idle_plan'-and$CaptureIdleSnapshot){
+        $call.idle_percent_snapshot=$IdlePercentSnapshot
+        $call.idle_period_end_snapshot=$IdlePeriodEndSnapshot
+    }
     $call.updated_at=(Get-Date).ToUniversalTime().ToString('s')
     $auditAction=if($NoAudit){$null}else{'call_flow_update'}
     [void](Set-WaaLiveEntity -EntityKey $key -Record $call -Action $auditAction -EntityId $DriverId -Detail @{field=$Field;cycle_key=$CycleKey;value=$Value})
@@ -358,7 +374,7 @@ function Add-WaaLiveCheckpointSql {
         [void]$Sql.AppendLine("INSERT INTO driver_work_items($($columns-join',')) VALUES($($values-join',')) ON CONFLICT(driver_id) DO UPDATE SET $($updates-join',');")
     }
     elseif($EntityKey.StartsWith('call:')){
-        $columns=@('driver_id','cycle_key','opened_at','updated_at','fuel_status','fuel_note','driver_eta','eta_status','eta_note','idle_plan','load_help_status','load_help_note','conversation_wrap','completed_at')
+        $columns=@('driver_id','cycle_key','opened_at','updated_at','fuel_status','fuel_note','driver_eta','eta_status','eta_note','idle_plan','idle_percent_snapshot','idle_period_end_snapshot','load_help_status','load_help_note','conversation_wrap','completed_at')
         $values=@($columns|ForEach-Object{Get-WaaLiveSqlValue $Record $_})
         $updates=@($columns|Where-Object{$_-notin@('driver_id','cycle_key','opened_at')}|ForEach-Object{"$_=excluded.$_"})
         [void]$Sql.AppendLine("INSERT INTO driver_call_sessions($($columns-join',')) VALUES($($values-join',')) ON CONFLICT(driver_id,cycle_key) DO UPDATE SET $($updates-join',');")

@@ -414,8 +414,8 @@ function openIdleCoachingSummary(driverId) {
   const rows = state.idleRowsByDriver.get(Number(driverId)) || [];
   if (!rows.length) return;
   const driver = rows[0];
-  const scores = rows.map(row => Number(row.idle_percent)).filter(Number.isFinite);
-  const latestScore = Number(driver.idle_percent);
+  const scores = rows.map(row => row.idle_percent == null ? null : Number(row.idle_percent)).filter(Number.isFinite);
+  const latestScore = driver.idle_percent == null ? null : Number(driver.idle_percent);
   const highScore = scores.length ? Math.max(...scores) : null;
   const over50 = scores.filter(score => score > 50).length;
   $('#activityModalBody').innerHTML = `
@@ -427,12 +427,12 @@ function openIdleCoachingSummary(driverId) {
       <span><b>${over50}</b> over 50%</span>
     </div>
     <div class="activity-popup-list idle-popup-list">${rows.map(row => {
-      const score = Number(row.idle_percent);
+      const score = row.idle_percent == null ? null : Number(row.idle_percent);
       const tone = Number.isFinite(score) && score > 50 ? 'hot' : 'good';
       const period = row.period_end ? new Date(row.period_end).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : null;
       return `<article class="activity-row idle-summary-row">
         <time>${esc(displayDate(row.talked_at))}</time>
-        <div class="idle-summary-score ${tone}"><b>${fmtPercent(row.idle_percent)}</b><small>${period ? `7D ending ${esc(period)}` : 'No idle snapshot'}</small></div>
+        <div class="idle-summary-score ${tone}"><b>${fmtPercent(row.idle_percent)}</b><small>${row.snapshot_captured ? (period ? `7D ending ${esc(period)}` : 'Snapshot captured · No Data') : 'Legacy · idle % was not stored'}</small></div>
         <div><b>${esc(row.idle_plan)}</b><small>${esc(row.truck || 'No truck')} · ${esc(row.pta_code || 'No PTA code')}</small></div>
       </article>`;
     }).join('')}</div>`;
@@ -507,7 +507,7 @@ async function idleCoachingLog() {
     $('#idleLogCount').textContent = `${visible.length} driver${visible.length === 1 ? '' : 's'} · ${conversationCount} conversation${conversationCount === 1 ? '' : 's'}`;
     $('#idleLogList').innerHTML = visible.length ? visible.map(([id, conversations]) => {
       const latestConversation = conversations[0];
-      const score = Number(latestConversation.idle_percent);
+      const score = latestConversation.idle_percent == null ? null : Number(latestConversation.idle_percent);
       const tone = Number.isFinite(score) && score > 50 ? 'hot' : 'good';
       return `<button class="activity-driver-card idle-driver-card" data-review-idle-driver="${id}" type="button">
         <span class="activity-driver-count">${conversations.length}</span>
@@ -804,6 +804,10 @@ function conversationArea(label, field, value, placeholder = '') {
   return `<label class="field"><span>${esc(label)}</span><textarea data-conversation="${esc(field)}" placeholder="${esc(placeholder)}">${esc(value ?? '')}</textarea></label>`;
 }
 
+function optionalDetail(summary, body, open = false) {
+  return `<details class="inline-detail optional-detail" ${open ? 'open' : ''}><summary>${esc(summary)}</summary><div class="optional-detail-body">${body}</div></details>`;
+}
+
 function checkField(label, action, checked) {
   return `<label class="toggle-row"><input data-action="${esc(action)}" type="checkbox" ${checked ? 'checked' : ''}><span class="toggle-ui"></span><b>${esc(label)}</b></label>`;
 }
@@ -812,10 +816,13 @@ function completedCallSteps(card, conversation) {
   const work = card.work || {};
   return new Set([
     (conversation.fuel_status && conversation.fuel_status !== 'Unknown') || conversation.fuel_note ? 1 : 0,
-    conversation.driver_eta || (conversation.eta_status && conversation.eta_status !== 'Unknown') || (work.ontime_status && work.ontime_status !== 'Unknown') ? 2 : 0,
+    conversation.driver_eta || (conversation.eta_status && conversation.eta_status !== 'Unknown') ? 2 : 0,
     conversation.idle_plan ? 3 : 0,
-    (conversation.load_help_status && conversation.load_help_status !== 'Unknown') || work.preplan_reviewed || work.routing_checked ? 4 : 0,
-    work.home_checked ? 5 : 0,
+    (conversation.load_help_status && conversation.load_help_status !== 'Unknown') ||
+      (work.preplan_response && work.preplan_response !== 'Unknown') ||
+      (work.routing_status && work.routing_status !== 'Unknown') ? 4 : 0,
+    (work.expected_work && work.expected_work !== 'Unknown') ||
+      (work.home_status && work.home_status !== 'Unknown') || work.home_reason ? 5 : 0,
     !card.bols?.length || card.bols.every(item => item.mentioned_at) ? 6 : 0,
     conversation.conversation_wrap || work.safety_mentioned_at || work.include_transition ? 7 : 0
   ].filter(Boolean));
@@ -872,7 +879,7 @@ function idleCoachingHistory(items, currentCycle) {
       <div class="idle-history-title"><div><p class="eyebrow">Idle only</p><h4>Previous Idle Coaching</h4></div><span>${rows.length}</span></div>
       ${rows.length ? rows.map(item => `
         <article class="idle-history-row">
-          <div class="idle-history-stat"><b>${fmtPercent(item.idle_percent)}</b><small>${item.period_end ? `7D ending ${esc(new Date(item.period_end).toLocaleDateString([], { month: 'short', day: 'numeric' }))}` : 'Idle snapshot unavailable'}</small></div>
+          <div class="idle-history-stat"><b>${fmtPercent(item.idle_percent)}</b><small>${item.snapshot_captured ? (item.period_end ? `7D ending ${esc(new Date(item.period_end).toLocaleDateString([], { month: 'short', day: 'numeric' }))}` : 'Snapshot captured · No Data') : 'Legacy · idle % was not stored'}</small></div>
           <div class="idle-history-copy"><time>${esc(displayDate(item.talked_at))}</time><p>${esc(item.idle_plan)}</p></div>
         </article>`).join('') : '<p class="empty-copy">No previous idle coaching recorded for this driver.</p>'}
     </section>`;
@@ -927,44 +934,42 @@ async function openCard(id) {
     callStep(1, 'Fuel & Immediate Needs', 'Start with the driver, not the paperwork.', `
       <div class="field-grid">
         ${conversationSelect('Fuel looks…', 'fuel_status', conversation.fuel_status, ['Unknown', 'Good', 'Needs Fuel', 'Concern'])}
-        ${conversationText('Anything to handle right now?', 'fuel_note', conversation.fuel_note, 'Fuel stop, card issue, mechanical concern…')}
-      </div>`, 'green-step'),
-    callStep(2, 'ETA & Timing', 'Now get the picture of where they are and when they expect to land.', `
+      </div>
+      ${optionalDetail('Add fuel detail only if something needs attention', conversationText('Fuel detail', 'fuel_note', conversation.fuel_note, 'Fuel stop, card issue, mechanical concern…'), !!conversation.fuel_note)}`, 'green-step'),
+    callStep(2, 'ETA & Timing', 'Get their ETA and whether the timing looks healthy. Extra explanation is optional.', `
       <div class="context-ribbon"><span>Current PTA</span><b>${esc(driver.pta_raw || 'N/A')}</b><small>${esc(relative(driver.pta_at))}</small></div>
-      <div class="field-grid three">
+      <div class="field-grid">
         ${conversationText('Driver says ETA is…', 'driver_eta', conversation.driver_eta, 'Example: 14:30, 2 hours out, after fuel')}
         ${conversationSelect('Timing looks…', 'eta_status', conversation.eta_status, ['Unknown', 'On Track', 'Tight', 'Late'])}
-        ${conversationText('What is affecting it?', 'eta_note', conversation.eta_note, 'Traffic, shipper delay, weather…')}
       </div>
-      <div class="field-grid">${selectField('On-time status', 'ontime_status', work.ontime_status, ['Unknown', 'On Time', 'At Risk', 'Late'])}${textField('On-time reason / action', 'ontime_reason', work.ontime_reason, 'Why, and what needs to happen next')}</div>
+      ${optionalDetail('Add ETA detail only if it matters', conversationText('What is affecting it?', 'eta_note', conversation.eta_note, 'Traffic, shipper delay, weather…'), !!conversation.eta_note)}
       <details class="inline-detail"><summary>Adjust imported PTA only if needed</summary><label class="field"><span>Manual PTA observation</span><input data-action="pta" type="datetime-local" value="${esc(driver.pta_at?.slice(0, 16) || '')}"></label></details>`, 'blue-step'),
     callStep(3, 'Idle Coaching', idlePrompt, `
       <div class="idle-coach-head"><div><span>Latest 7D</span><b>${fmtPercent(latestIdle?.percent)}</b></div><div><span>Engine</span><b>${fmtHours(latestIdle?.engine_hours)}</b></div><div><span>Idle</span><b>${fmtHours(latestIdle?.idle_hours)}</b></div></div>
       ${chart([...(card.idle || [])].reverse(), { field: 'percent', tone: 'green', title: 'Driver rolling idle history', compact: true })}
       ${conversationArea('What is their plan / what is working?', 'idle_plan', conversation.idle_plan, 'Keep it natural: “going to shut down during long waits”, “APU issue needs help”, “current routine is working”…')}
       ${idleCoachingHistory(card.idle_coaching || [], conversation.cycle_key)}`, 'purple-step'),
-    callStep(4, 'Help on the Load', 'Ask what would make the load easier before you start checking boxes.', `
+    callStep(4, 'Help on the Load', 'Keep the main answers quick. Open a detail only when there is actually something to explain.', `
       <div class="field-grid">
         ${conversationSelect('Do they need help?', 'load_help_status', conversation.load_help_status, ['Unknown', 'No Help Needed', 'Needs Help', 'Follow Up'])}
-        ${conversationText('What do they need from us?', 'load_help_note', conversation.load_help_note, 'Appointment, routing, customer, parking, equipment…')}
       </div>
+      ${optionalDetail('Add load-help detail', conversationText('What do they need from us?', 'load_help_note', conversation.load_help_note, 'Appointment, routing, customer, parking, equipment…'), !!conversation.load_help_note)}
       <div class="mini-workflow">
-        <div><p class="eyebrow">Preplan</p><b>Source: ${esc(driver.planning_status)}</b>${selectField('Driver response', 'preplan_response', work.preplan_response, ['Unknown', 'Accepted', 'Denied'])}${checkField('Reviewed together', 'preplan_reviewed', work.preplan_reviewed)}${textField('Anything to remember', 'preplan_note', work.preplan_note, 'Keep it short and useful')}</div>
-        <div><p class="eyebrow">Routing</p>${selectField('Routing looks…', 'routing_status', work.routing_status, ['Unknown', 'Accurate', 'Needs Correction'])}${checkField('Routing checked', 'routing_checked', work.routing_checked)}${textField('What changed / what is needed', 'routing_note', work.routing_note, 'Only if something matters')}</div>
+        <div><p class="eyebrow">Preplan</p><b>Source: ${esc(driver.planning_status)}</b>${selectField('Driver response', 'preplan_response', work.preplan_response, ['Unknown', 'Accepted', 'Denied'])}${optionalDetail('Add preplan note', textField('Anything to remember', 'preplan_note', work.preplan_note, 'Only if something matters'), !!work.preplan_note)}</div>
+        <div><p class="eyebrow">Routing</p>${selectField('Routing looks…', 'routing_status', work.routing_status, ['Unknown', 'Accurate', 'Needs Correction'])}${optionalDetail('Add routing note', textField('What changed / what is needed', 'routing_note', work.routing_note, 'Only if something matters'), !!work.routing_note)}</div>
       </div>`, 'green-step'),
-    callStep(5, 'Home Time & Schedule', 'Before the admin close-out, make sure nothing important is hiding behind the load.', `
-      <div class="field-grid three">
-        ${checkField('Home time checked', 'home_checked', work.home_checked)}
-        ${textField('Expected to work', 'expected_work', work.expected_work, 'Unknown / Yes / No')}
+    callStep(5, 'Home Time & Schedule', 'A couple of quick choices are enough unless something needs follow-up.', `
+      <div class="field-grid">
+        ${selectField('Expected to work?', 'expected_work', work.expected_work, ['Unknown', 'Yes', 'No'])}
         ${selectField('Home-time picture', 'home_status', work.home_status, ['Unknown', 'OK', 'Concern'])}
       </div>
-      ${textField('Anything that needs action', 'home_reason', work.home_reason, 'Only capture what someone needs to know or do')}`, 'blue-step'),
+      ${optionalDetail('Add home-time detail', textField('Anything that needs action', 'home_reason', work.home_reason, 'Only capture what someone needs to know or do'), !!work.home_reason)}`, 'blue-step'),
     callStep(6, 'Quick Admin Close-Out', 'Now is the right time for Missing BOLs—after the driver conversation has already happened.', `
       <div class="bol-call-list">${bolRows}</div>`, 'purple-step'),
-    callStep(7, 'Safety & Wrap', 'Finish like a human conversation: one useful reminder, anything else they need, then you are done.', `
+    callStep(7, 'Safety & Wrap', 'Finish like a human conversation: one useful reminder, then capture only what genuinely needs to survive the call.', `
       <div class="safety-box"><div><p class="eyebrow">Safety touch</p><p id="safety">Pick one useful note if it fits the conversation.</p></div><button id="random" type="button">New Safety Note</button></div>
       ${checkField('Safety note mentioned', 'safety_mentioned_at', work.safety_mentioned_at)}
-      ${conversationArea('Anything else worth remembering?', 'conversation_wrap', conversation.conversation_wrap, 'Record only information that will help with the next follow-up.')}
+      ${optionalDetail('Add a wrap-up note', conversationArea('Anything else worth remembering?', 'conversation_wrap', conversation.conversation_wrap, 'Only information that will help with the next follow-up.'), !!conversation.conversation_wrap)}
       <div class="wrap-grid">${checkField('Send to Transition', 'include_transition', work.include_transition)}${textField('Transition note', 'transition_note', work.transition_note, 'One concise handoff line')}</div>`, 'green-step')
   ].join('');
 
