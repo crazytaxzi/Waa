@@ -441,7 +441,10 @@ function openIdleCoachingSummary(driverId) {
 }
 
 async function idleCoachingLog() {
-  const rows = await cachedApi('/api/idle-coaching', 5000);
+  const [rows, dashboardData] = await Promise.all([
+    cachedApi('/api/idle-coaching', 5000),
+    cachedApi('/api/dashboard', 5000)
+  ]);
   const groups = new Map();
   rows.forEach(row => {
     const id = Number(row.driver_id);
@@ -449,19 +452,39 @@ async function idleCoachingLog() {
     groups.get(id).push(row);
   });
   state.idleRowsByDriver = groups;
+  const currentOver50 = (dashboardData.drivers || [])
+    .filter(driver => Number.isFinite(Number(driver.p7)) && Number(driver.p7) > 50)
+    .sort((a, b) => Number(b.p7) - Number(a.p7) || String(a.full_name).localeCompare(String(b.full_name)));
   const groupSearch = new Map([...groups].map(([id, conversations]) => [
     id,
     conversations.map(row => `${row.full_name} ${row.truck} ${row.pta_code} ${row.idle_plan}`).join(' ').toLowerCase()
   ]));
-  const above50 = rows.filter(row => Number.isFinite(Number(row.idle_percent)) && Number(row.idle_percent) > 50).length;
   const latest = rows[0];
 
-  $('#app').innerHTML = pageHead('Idle Coaching', 'One driver card for every driver you coached on idle. Open a card to review every idle conversation with that driver.', 'WAA // Coaching Record') + `
+  $('#app').innerHTML = pageHead('Idle Coaching', 'Current drivers above 50% first, followed by one coaching-history card per driver.', 'WAA // Coaching Record') + `
     <section class="idle-log-summary">
+      <div class="idle-log-metric"><span>Current over 50%</span><b>${currentOver50.length}</b><small>Latest Rolling 7-Day report</small></div>
       <div class="idle-log-metric"><span>Conversations</span><b>${rows.length}</b><small>Idle discussions recorded</small></div>
-      <div class="idle-log-metric"><span>Drivers</span><b>${groups.size}</b><small>Driver coaching records</small></div>
-      <div class="idle-log-metric"><span>Over 50% at talk</span><b>${above50}</b><small>Conversations above target</small></div>
-      <div class="idle-log-metric"><span>Most recent</span><b>${latest ? esc(displayDate(latest.talked_at)) : '—'}</b><small>${latest ? esc(latest.full_name) : 'No coaching recorded yet'}</small></div>
+      <div class="idle-log-metric"><span>Drivers coached</span><b>${groups.size}</b><small>Drivers with idle history</small></div>
+      <div class="idle-log-metric"><span>Most recent coaching</span><b>${latest ? esc(displayDate(latest.talked_at)) : '—'}</b><small>${latest ? esc(latest.full_name) : 'No coaching recorded yet'}</small></div>
+    </section>
+    <section class="glass-panel idle-attention-panel">
+      <div class="panel-title"><div><p class="eyebrow">Current Rolling 7-Day attention</p><h3>Drivers Above 50%</h3></div><span>${currentOver50.length}</span></div>
+      <p class="idle-attention-copy">Highest idle percentage first. Previous and Next in the Work Card will stay inside this current over-50 list.</p>
+      <div class="idle-attention-list">${currentOver50.length ? currentOver50.map((driver, index) => {
+        const history = groups.get(Number(driver.id)) || [];
+        const lastTalk = history[0];
+        const historyCopy = history.length
+          ? `${history.length} prior conversation${history.length === 1 ? '' : 's'} · last ${displayDate(lastTalk.talked_at)}`
+          : 'No idle coaching history yet';
+        return `<button class="idle-attention-row" data-idle-attention-driver="${driver.id}" type="button">
+          <span class="idle-attention-rank">${index + 1}</span>
+          <span class="idle-attention-driver"><b>${esc(driver.truck || 'No truck')} · ${esc(driver.full_name)}</b><small>${esc(driver.pta_code || 'No PTA code')}</small></span>
+          <span class="idle-attention-history ${history.length ? 'coached' : 'new'}"><b>${history.length ? 'History on file' : 'Needs first idle talk'}</b><small>${esc(historyCopy)}</small></span>
+          <span class="idle-attention-score"><b>${fmtPercent(driver.p7)}</b><small>${driver.p28 == null ? '28D No Data' : `${fmtPercent(driver.p28)} 28D`}</small></span>
+          <strong>Open Work Card →</strong>
+        </button>`;
+      }).join('') : '<p class="empty-copy idle-attention-empty">Nobody is above 50% on the latest Rolling 7-Day report.</p>'}</div>
     </section>
     <section class="glass-panel idle-log-panel">
       <div class="table-toolbar">
@@ -477,7 +500,6 @@ async function idleCoachingLog() {
     const visible = [...groups].filter(([id]) => !query || groupSearch.get(id).includes(query));
     const conversationCount = visible.reduce((total, [, conversations]) => total + conversations.length, 0);
     $('#idleLogCount').textContent = `${visible.length} driver${visible.length === 1 ? '' : 's'} · ${conversationCount} conversation${conversationCount === 1 ? '' : 's'}`;
-    setCardQueue(visible.map(([id]) => id));
     $('#idleLogList').innerHTML = visible.length ? visible.map(([id, conversations]) => {
       const latestConversation = conversations[0];
       const score = Number(latestConversation.idle_percent);
@@ -486,7 +508,7 @@ async function idleCoachingLog() {
         <span class="activity-driver-count">${conversations.length}</span>
         <span class="idle-driver-identity"><b>${esc(latestConversation.truck || 'No truck')} · ${esc(latestConversation.full_name)}</b><small>${esc(latestConversation.pta_code || 'No PTA code')} · Last coached ${esc(displayDate(latestConversation.talked_at))}</small></span>
         <span class="idle-driver-preview"><small>Latest idle conversation</small><b>${esc(latestConversation.idle_plan)}</b></span>
-        <span class="idle-driver-score ${tone}"><b>${fmtPercent(latestConversation.idle_percent)}</b><small>latest 7D</small></span>
+        <span class="idle-driver-score ${tone}"><b>${fmtPercent(latestConversation.idle_percent)}</b><small>latest 7D at talk</small></span>
         <strong>Review Coaching →</strong>
       </button>`;
     }).join('') : '<p class="empty-copy idle-log-empty">No driver idle coaching records match this search.</p>';
@@ -1235,6 +1257,13 @@ document.addEventListener('click', async event => {
       closeActivitySummary();
       await activity();
     } catch (error) { activityDelete.disabled = false; toast(error.message); }
+    return;
+  }
+  const idleAttentionDriver = event.target.closest('[data-idle-attention-driver]');
+  if (idleAttentionDriver) {
+    const queue = $$('[data-idle-attention-driver]').map(node => Number(node.dataset.idleAttentionDriver)).filter(Boolean);
+    setCardQueue(queue);
+    openCard(Number(idleAttentionDriver.dataset.idleAttentionDriver));
     return;
   }
   const idleReviewDriver = event.target.closest('[data-review-idle-driver]');
