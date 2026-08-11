@@ -16,9 +16,7 @@ def replace_once(text, old, new, label):
     return text.replace(old, new, 1)
 
 
-# ---------------------------------------------------------------------------
-# Dashboard coaching freshness belongs to the current Rolling 7-Day period.
-# ---------------------------------------------------------------------------
+# Dashboard: a coaching note counts as current only for the same Rolling 7-Day period.
 p = 'src/Waa.psm1'
 s = read(p)
 s = replace_once(
@@ -36,9 +34,7 @@ s = replace_once(
 write(p, s)
 
 
-# ---------------------------------------------------------------------------
-# Frontend: distinguish UTC system timestamps from local operational dates.
-# ---------------------------------------------------------------------------
+# Frontend: system-generated timestamps are UTC in storage, but display in workstation local time.
 p = 'web/app.js'
 s = read(p)
 old_helper = """const displayDate = value => {
@@ -59,22 +55,20 @@ const displayUtcDate = value => {
 """
 s = replace_once(s, old_helper, new_helper, 'UTC display helper')
 
-# System-generated UTC timestamps: convert to the browser/workstation local zone.
-for old, new, label in [
-    ("displayDate(item.source_modified_utc)", "displayUtcDate(item.source_modified_utc)", 'report source modified display'),
-    ("displayDate(item.imported_at)", "displayUtcDate(item.imported_at)", 'report imported display'),
-    ("displayDate(row.talked_at)", "displayUtcDate(row.talked_at)", 'idle popup talked display'),
-    ("displayDate(lastTalk.talked_at)", "displayUtcDate(lastTalk.talked_at)", 'idle attention talked display'),
-    ("displayDate(latest.talked_at)", "displayUtcDate(latest.talked_at)", 'idle latest talked display'),
-    ("displayDate(latestConversation.talked_at)", "displayUtcDate(latestConversation.talked_at)", 'idle card talked display'),
-    ("displayDate(item.talked_at)", "displayUtcDate(item.talked_at)", 'driver card idle history talked display'),
-    ("displayDate(item.occurred_at)", "displayUtcDate(item.occurred_at)", 'daily activity timestamp display'),
-    ("displayDate(note.created_at)", "displayUtcDate(note.created_at)", 'driver note timestamp display'),
-    ("displayDate(driver.observed_at)", "displayUtcDate(driver.observed_at)", 'driver snapshot freshness display'),
-    ("displayDate(data.updated_at)", "displayUtcDate(data.updated_at)", 'transition updated display'),
+for old, new in [
+    ("displayDate(item.source_modified_utc)", "displayUtcDate(item.source_modified_utc)"),
+    ("displayDate(item.imported_at)", "displayUtcDate(item.imported_at)"),
+    ("displayDate(row.talked_at)", "displayUtcDate(row.talked_at)"),
+    ("displayDate(lastTalk.talked_at)", "displayUtcDate(lastTalk.talked_at)"),
+    ("displayDate(latest.talked_at)", "displayUtcDate(latest.talked_at)"),
+    ("displayDate(latestConversation.talked_at)", "displayUtcDate(latestConversation.talked_at)"),
+    ("displayDate(item.talked_at)", "displayUtcDate(item.talked_at)"),
+    ("displayDate(item.occurred_at)", "displayUtcDate(item.occurred_at)"),
+    ("displayDate(note.created_at)", "displayUtcDate(note.created_at)"),
+    ("displayDate(driver.observed_at)", "displayUtcDate(driver.observed_at)"),
+    ("displayDate(data.updated_at)", "displayUtcDate(data.updated_at)"),
 ]:
-    if old in s:
-        s = s.replace(old, new)
+    s = s.replace(old, new)
 
 old_attention = """        const history = groups.get(Number(driver.id)) || [];
         const lastTalk = history[0];
@@ -111,33 +105,25 @@ new_attention = """        const history = groups.get(Number(driver.id)) || [];
           <strong>Open Work Card →</strong>
         </button>`;
 """
-s = replace_once(s, old_attention, new_attention, 'current-week idle attention history')
+s = replace_once(s, old_attention, new_attention, 'current-period idle attention history')
 write(p, s)
 
 
-# ---------------------------------------------------------------------------
-# Asset version forces browsers to load the new JS after a source refresh.
-# ---------------------------------------------------------------------------
+# Force the updated frontend to load after replacing the app folder.
 p = 'web/index.html'
 s = read(p)
-s = s.replace('styles.css?v=20260811.17', 'styles.css?v=20260811.18')
-s = s.replace('app.js?v=20260811.17', 'app.js?v=20260811.18')
+s = replace_once(s, 'styles.css?v=20260811.17', 'styles.css?v=20260811.18', 'CSS asset version')
+s = replace_once(s, 'app.js?v=20260811.17', 'app.js?v=20260811.18', 'JS asset version')
 write(p, s)
 
 
-# ---------------------------------------------------------------------------
-# Regression coverage: current-period coaching expires when the 7D period changes,
-# and UI uses explicit local conversion for stored UTC system/report timestamps.
-# ---------------------------------------------------------------------------
+# Regression: the existing test already saves an exact 7D snapshot through Save-WaaConversation.
+# After the next 7D period is added, it must remain historical but stop counting as current coaching.
 p = 'tests/Run-Tests.ps1'
 s = read(p)
-old_insert = "INSERT INTO drivers(full_name,pta_code) VALUES('Coached Driver','COACHEDD');INSERT INTO idle_periods(driver_id,truck,period_start,period_end,engine_hours,idle_hours) VALUES(last_insert_rowid(),'COACHED','2026-08-03','2026-08-09',10,8);INSERT INTO driver_call_sessions(driver_id,cycle_key,idle_plan) VALUES((SELECT id FROM drivers WHERE pta_code='COACHEDD'),'COACHED|2026-08-09','Reduce long-wait idling');"
-new_insert = "INSERT INTO drivers(full_name,pta_code) VALUES('Coached Driver','COACHEDD');INSERT INTO idle_periods(driver_id,truck,period_start,period_end,engine_hours,idle_hours) VALUES(last_insert_rowid(),'COACHED','2026-08-03','2026-08-09',10,8);INSERT INTO driver_call_sessions(driver_id,cycle_key,idle_plan,idle_percent_snapshot,idle_period_end_snapshot) VALUES((SELECT id FROM drivers WHERE pta_code='COACHEDD'),'COACHED|2026-08-09','Reduce long-wait idling',80,'2026-08-09');"
-s = replace_once(s, old_insert, new_insert, 'coached driver current-period fixture')
-
-old_assert = "Assert ($coachingDash.coaching.eligible-eq2-and$coachingDash.coaching.coached-eq1-and[double]$coachingDash.coaching.percent-eq50) 'dashboard reports coached share of drivers currently above 50% weekly idle';"
-new_assert = old_assert + "$expiredCoachId=[int](Invoke-Sql \"SELECT id FROM drivers WHERE pta_code='COACHEDD';\");Invoke-Sql \"UPDATE driver_call_sessions SET idle_period_end_snapshot='2026-08-02' WHERE driver_id=$expiredCoachId AND trim(coalesce(idle_plan,''))<>'';\" -AllowWrite|Out-Null;$expiredDash=Get-Dashboard;$expiredRow=@($expiredDash.drivers|Where-Object{$_.id-eq$expiredCoachId})[0];Assert ([int]$expiredRow.coached-eq0) 'above-50 coaching falls out when its stored 7-day period is no longer current';Invoke-Sql \"UPDATE driver_call_sessions SET idle_period_end_snapshot='2026-08-09' WHERE driver_id=$expiredCoachId AND trim(coalesce(idle_plan,''))<>'';\" -AllowWrite|Out-Null;"
-s = replace_once(s, old_assert, new_assert, 'current-period coaching expiry regression')
+old_after_report = "Assert ([double]$afterNewReport.idle_percent-eq80-and[string]$afterNewReport.period_end-eq'2026-08-09') 'stored idle coaching percentage does not drift when a newer idle report arrives';"
+new_after_report = old_after_report + "$periodDash=Get-Dashboard;$periodDriver=@($periodDash.drivers|Where-Object{$_.id-eq$coachedId})[0];Assert ([int]$periodDriver.coached-eq0-and[string]$periodDriver.period_end7-eq'2026-08-16') 'above-50 coaching falls out when a newer Rolling 7-Day period becomes current';"
+s = replace_once(s, old_after_report, new_after_report, 'current-period coaching expiry regression')
 
 old_static = "Assert ($serverSource.Contains('/api/idle-coaching')-and$appSource.Contains('idleCoachingLog')) 'Idle Coaching tab is integrated through the normal server and client routing';"
 new_static = old_static + "Assert ($appSource.Contains('displayUtcDate')-and$appSource.Contains('currentHistory')-and$appSource.Contains('period_end7')) 'system report timestamps display in workstation local time and idle attention is scoped to the current 7-day period';"
