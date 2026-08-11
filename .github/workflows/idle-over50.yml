@@ -1,0 +1,50 @@
+name: Idle Coaching Over 50
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply Idle Coaching over-50 integration
+        shell: pwsh
+        run: python .github/apply_idle_over50.py
+      - name: Windows PowerShell 5.1 parse gate
+        shell: powershell
+        run: |
+          $bad = @()
+          Get-ChildItem -Recurse -File -Include *.ps1,*.psm1 | ForEach-Object {
+            $tokens=$null; $errors=$null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName,[ref]$tokens,[ref]$errors) | Out-Null
+            if($errors.Count){ $bad += "$($_.FullName): $($errors -join '; ')" }
+          }
+          if($bad.Count){ $bad | ForEach-Object { Write-Error $_ }; exit 1 }
+      - name: JavaScript syntax
+        shell: pwsh
+        run: node --check web/app.js
+      - name: Core regression suite
+        shell: pwsh
+        run: ./tests/Run-Tests.ps1 -SqlitePath ./runtime/sqlite/sqlite3.exe
+      - name: Identity regression suite
+        shell: pwsh
+        run: ./tests/Identity.Tests.ps1 -SqlitePath ./runtime/sqlite/sqlite3.exe
+      - name: Commit production integration and remove temporary harness
+        shell: pwsh
+        run: |
+          Remove-Item .github/apply_idle_over50.py -Force
+          Remove-Item .github/workflows/idle-over50.yml -Force
+          git config user.name "Sentionce"
+          git config user.email "crazytaxzi@gmail.com"
+          git add -A
+          git commit -m "Add current over-50 idle coaching queue"
+          git push origin HEAD:main
