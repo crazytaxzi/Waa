@@ -18,7 +18,9 @@ jobs:
           fetch-depth: 0
       - name: Apply integrated changes
         shell: pwsh
-        run: python .github/apply_idle_snapshot_simplify.py
+        run: |
+          python .github/apply_idle_snapshot_simplify.py
+          python .github/fix_simplified_call_test.py
       - name: Windows PowerShell 5.1 parse gate
         shell: powershell
         run: |
@@ -42,6 +44,7 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item .github/apply_idle_snapshot_simplify.py -Force
+          Remove-Item .github/fix_simplified_call_test.py -Force
           Remove-Item .github/workflows/idle-snapshot-simplify.yml -Force
           git config user.name "Sentionce"
           git config user.email "crazytaxzi@gmail.com"
