@@ -363,7 +363,7 @@ async function queue(isPta) {
 async function bols() {
   const list = await cachedApi('/api/bols');
   list.forEach(item => { item._search = Object.values(item).join(' ').toLowerCase(); });
-  $('#app').innerHTML = pageHead('Missing BOLs', 'Persistent driver-specific items for call close-out and follow-up.') + `
+  $('#app').innerHTML = pageHead('Missing BOLs', 'Current report only. Historical Missing BOL evidence stays preserved without cluttering today’s call work.') + `
     <section class="glass-panel table-panel">
       <div class="table-toolbar">
         <div class="searchbox"><span aria-hidden="true">⌕</span><input id="search" placeholder="Search driver, truck, order, lane"></div>

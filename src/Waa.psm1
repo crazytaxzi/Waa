@@ -637,6 +637,30 @@ WHERE d.id=$Id;
     return $rows[0]
 }
 
+function Get-CurrentMissingBols {
+    param([int]$DriverId=0)
+    $driverFilter=if($DriverId-gt0){"AND b.driver_id=$DriverId"}else{''}
+    $sql=@"
+WITH latest_bol AS (
+  SELECT id FROM import_batches
+  WHERE import_type='bol'
+  ORDER BY imported_at DESC,id DESC
+  LIMIT 1
+), t AS (
+  SELECT *,row_number() OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC) rn
+  FROM truck_history
+)
+SELECT b.*,d.full_name,t.truck
+FROM missing_bols b
+JOIN latest_bol lb ON lb.id=b.import_batch_id
+LEFT JOIN drivers d ON d.id=b.driver_id
+LEFT JOIN t ON t.driver_id=b.driver_id AND t.rn=1
+WHERE 1=1 $driverFilter
+ORDER BY b.mentioned_at,b.empty_call_date,b.id;
+"@
+    return Invoke-Sql $sql -Json
+}
+
 function Get-DriverCard {
     param([int]$Id)
     $sql=@"
@@ -674,7 +698,7 @@ SELECT json_object(
     )),'[]')),
   'bols',json(coalesce((SELECT json_group_array(json_object('id',id,'order_number',order_number,'empty_call_date',empty_call_date,
     'origin',origin,'destination',destination,'mileage',mileage,'bol_type',bol_type,'first_seen_at',first_seen_at,'last_seen_at',last_seen_at,
-    'mentioned_at',mentioned_at)) FROM (SELECT * FROM missing_bols WHERE driver_id=$Id ORDER BY empty_call_date DESC)),'[]')),
+    'mentioned_at',mentioned_at)) FROM (SELECT * FROM missing_bols WHERE driver_id=$Id AND import_batch_id=(SELECT id FROM import_batches WHERE import_type='bol' ORDER BY imported_at DESC,id DESC LIMIT 1) ORDER BY empty_call_date DESC)),'[]')),
   'work',json(coalesce((SELECT json_object('driver_id',driver_id,'cycle_key',cycle_key,'home_checked',home_checked,'expected_work',expected_work,
     'home_status',home_status,'home_reason',home_reason,'ontime_status',ontime_status,'ontime_reason',ontime_reason,'ontime_checked_at',ontime_checked_at,
     'preplan_reviewed',preplan_reviewed,'preplan_response',preplan_response,'preplan_note',preplan_note,'routing_checked',routing_checked,
@@ -973,4 +997,4 @@ function Restore-Waa {
 
 . (Join-Path $PSScriptRoot 'LiveStore.ps1')
 
-Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,ConvertTo-SqlLiteral,Parse-Date,Split-ImportRows,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-CurrentDriver,Get-DriverCard,Get-IdleCoachingLog,Save-DriverAction,Get-Organizer,Get-DailyActivity,Clear-DailyActivityNoise,Remove-DailyActivity,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa,Initialize-WaaLiveStore,Initialize-WaaLiveDomain,Invoke-WaaLiveCheckpoint,Invoke-WaaLiveCheckpointIfDue,Reset-WaaLiveDomainFromSqlite,Close-WaaLiveStore,Get-WaaLiveHealth,Get-WaaLiveCall,Get-WaaLivePrefix,Set-WaaLiveCallField
+Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,ConvertTo-SqlLiteral,Parse-Date,Split-ImportRows,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-CurrentDriver,Get-CurrentMissingBols,Get-DriverCard,Get-IdleCoachingLog,Save-DriverAction,Get-Organizer,Get-DailyActivity,Clear-DailyActivityNoise,Remove-DailyActivity,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa,Initialize-WaaLiveStore,Initialize-WaaLiveDomain,Invoke-WaaLiveCheckpoint,Invoke-WaaLiveCheckpointIfDue,Reset-WaaLiveDomainFromSqlite,Close-WaaLiveStore,Get-WaaLiveHealth,Get-WaaLiveCall,Get-WaaLivePrefix,Set-WaaLiveCallField

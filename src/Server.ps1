@@ -345,8 +345,7 @@ try {
                         Send-Json $request.stream 200 $restored | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/bols') {
-                        $bolSql = "WITH t AS(SELECT *,row_number()OVER(PARTITION BY driver_id ORDER BY observed_at DESC,id DESC)rn FROM truck_history) SELECT b.*,d.full_name,t.truck FROM missing_bols b LEFT JOIN drivers d ON d.id=b.driver_id LEFT JOIN t ON t.driver_id=b.driver_id AND t.rn=1 ORDER BY b.mentioned_at,b.empty_call_date;"
-                        Send-JsonArray $request.stream 200 @(Invoke-Sql $bolSql -Json) | Out-Null
+                        Send-JsonArray $request.stream 200 @(Get-CurrentMissingBols) | Out-Null
                     }
                     else {
                         Send-Json $request.stream 404 @{error='API route not found'} | Out-Null
