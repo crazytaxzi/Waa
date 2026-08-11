@@ -74,6 +74,15 @@ const displayDate = value => {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
 
+const displayUtcDate = value => {
+  if (!value) return '—';
+  const text = String(value).trim();
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(text);
+  const utcText = hasZone ? text : `${text.replace(' ', 'T')}Z`;
+  const date = new Date(utcText);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+};
+
 const toast = message => {
   const node = $('#toast');
   node.textContent = message;
@@ -431,7 +440,7 @@ function openIdleCoachingSummary(driverId) {
       const tone = Number.isFinite(score) && score > 50 ? 'hot' : 'good';
       const period = row.period_end ? new Date(row.period_end).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : null;
       return `<article class="activity-row idle-summary-row">
-        <time>${esc(displayDate(row.talked_at))}</time>
+        <time>${esc(displayUtcDate(row.talked_at))}</time>
         <div class="idle-summary-score ${tone}"><b>${fmtPercent(row.idle_percent)}</b><small>${row.snapshot_captured ? (period ? `7D ending ${esc(period)}` : 'Snapshot captured · No Data') : 'Legacy · idle % was not stored'}</small></div>
         <div><b>${esc(row.idle_plan)}</b><small>${esc(row.truck || 'No truck')} · ${esc(row.pta_code || 'No PTA code')}</small></div>
       </article>`;
@@ -466,7 +475,7 @@ async function idleCoachingLog() {
       <div class="idle-log-metric"><span>Current over 50%</span><b>${currentOver50.length}</b><small>Latest Rolling 7-Day report</small></div>
       <div class="idle-log-metric"><span>Conversations</span><b>${rows.length}</b><small>Idle discussions recorded</small></div>
       <div class="idle-log-metric"><span>Drivers coached</span><b>${groups.size}</b><small>Drivers with idle history</small></div>
-      <div class="idle-log-metric"><span>Most recent coaching</span><b>${latest ? esc(displayDate(latest.talked_at)) : '—'}</b><small>${latest ? esc(latest.full_name) : 'No coaching recorded yet'}</small></div>
+      <div class="idle-log-metric"><span>Most recent coaching</span><b>${latest ? esc(displayUtcDate(latest.talked_at)) : '—'}</b><small>${latest ? esc(latest.full_name) : 'No coaching recorded yet'}</small></div>
     </section>
     <details class="glass-panel idle-attention-panel idle-attention-details" open>
       <summary class="idle-attention-toggle">
@@ -477,14 +486,23 @@ async function idleCoachingLog() {
         <p class="idle-attention-copy">Highest idle percentage first. Previous and Next in the Work Card will stay inside this current over-50 list.</p>
         <div class="idle-attention-list">${currentOver50.length ? currentOver50.map((driver, index) => {
         const history = groups.get(Number(driver.id)) || [];
-        const lastTalk = history[0];
-        const historyCopy = history.length
-          ? `${history.length} prior conversation${history.length === 1 ? '' : 's'} · last ${displayDate(lastTalk.talked_at)}`
-          : 'No idle coaching history yet';
+        const currentPeriod = String(driver.period_end7 || '').slice(0, 10);
+        const currentHistory = currentPeriod
+          ? history.filter(row => String(row.period_end || '').slice(0, 10) === currentPeriod)
+          : [];
+        const lastTalk = currentHistory[0];
+        const periodLabel = currentPeriod
+          ? new Date(`${currentPeriod}T00:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric' })
+          : null;
+        const historyCopy = currentHistory.length
+          ? `${currentHistory.length} conversation${currentHistory.length === 1 ? '' : 's'} for 7D ending ${periodLabel} · last ${displayUtcDate(lastTalk.talked_at)}`
+          : history.length
+            ? `Previous coaching is history · current 7D${periodLabel ? ` ends ${periodLabel}` : ''}`
+            : `No coaching yet for current 7D${periodLabel ? ` ending ${periodLabel}` : ''}`;
         return `<button class="idle-attention-row" data-idle-attention-driver="${driver.id}" type="button">
           <span class="idle-attention-rank">${index + 1}</span>
           <span class="idle-attention-driver"><b>${esc(driver.truck || 'No truck')} · ${esc(driver.full_name)}</b><small>${esc(driver.pta_code || 'No PTA code')}</small></span>
-          <span class="idle-attention-history ${history.length ? 'coached' : 'new'}"><b>${history.length ? 'History on file' : 'Needs first idle talk'}</b><small>${esc(historyCopy)}</small></span>
+          <span class="idle-attention-history ${currentHistory.length ? 'coached' : 'new'}"><b>${currentHistory.length ? 'Coached for current 7D' : 'Needs idle talk this 7D'}</b><small>${esc(historyCopy)}</small></span>
           <span class="idle-attention-score"><b>${fmtPercent(driver.p7)}</b><small>${driver.p28 == null ? '28D No Data' : `${fmtPercent(driver.p28)} 28D`}</small></span>
           <strong>Open Work Card →</strong>
         </button>`;
@@ -511,7 +529,7 @@ async function idleCoachingLog() {
       const tone = Number.isFinite(score) && score > 50 ? 'hot' : 'good';
       return `<button class="activity-driver-card idle-driver-card" data-review-idle-driver="${id}" type="button">
         <span class="activity-driver-count">${conversations.length}</span>
-        <span class="idle-driver-identity"><b>${esc(latestConversation.truck || 'No truck')} · ${esc(latestConversation.full_name)}</b><small>${esc(latestConversation.pta_code || 'No PTA code')} · Last coached ${esc(displayDate(latestConversation.talked_at))}</small></span>
+        <span class="idle-driver-identity"><b>${esc(latestConversation.truck || 'No truck')} · ${esc(latestConversation.full_name)}</b><small>${esc(latestConversation.pta_code || 'No PTA code')} · Last coached ${esc(displayUtcDate(latestConversation.talked_at))}</small></span>
         <span class="idle-driver-preview"><small>Latest idle conversation</small><b>${esc(latestConversation.idle_plan)}</b></span>
         <span class="idle-driver-score ${tone}"><b>${fmtPercent(latestConversation.idle_percent)}</b><small>latest 7D at talk</small></span>
         <strong>Review Coaching →</strong>
@@ -690,7 +708,7 @@ async function transition() {
   const data = await api('/api/transition');
   $('#app').innerHTML = pageHead('Transition Draft', 'Edit the handoff as plain text, then copy it when complete.') + `
     <section class="glass-panel transition-panel">
-      <div class="panel-title"><div><p class="eyebrow">Current handoff</p><h3>${data.is_manual ? 'Manual Draft' : 'Generated Draft'}</h3></div><small>${esc(displayDate(data.updated_at))}</small></div>
+      <div class="panel-title"><div><p class="eyebrow">Current handoff</p><h3>${data.is_manual ? 'Manual Draft' : 'Generated Draft'}</h3></div><small>${esc(displayUtcDate(data.updated_at))}</small></div>
       <textarea id="draft" class="transition-editor" spellcheck="true">${esc(data.body)}</textarea>
       <div class="action-row"><button id="regen">Regenerate</button><button class="secondary" id="copy">Copy All</button></div>
     </section>`;
@@ -720,7 +738,7 @@ async function imports() {
   const reportCard = (title, item, tone) => `
     <div class="intake-card ${tone}">
       <div class="intake-icon" aria-hidden="true"></div>
-      <div><p class="eyebrow">Automatic intake</p><h3>${esc(title)}</h3><b>${esc(item?.source_name || 'Waiting for report')}</b><small>${esc(item?.source_modified_utc ? displayDate(item.source_modified_utc) : 'No matching download yet')}</small><p>${esc(item?.detail || 'WAA is watching Downloads for matching reports.')}</p></div>
+      <div><p class="eyebrow">Automatic intake</p><h3>${esc(title)}</h3><b>${esc(item?.source_name || 'Waiting for report')}</b><small>${esc(item?.source_modified_utc ? displayUtcDate(item.source_modified_utc) : 'No matching download yet')}</small><p>${esc(item?.detail || 'WAA is watching Downloads for matching reports.')}</p></div>
       <span class="status-pill ${item?.status === 'Error' ? 'alert' : item?.status === 'Imported' || item?.status === 'Current' ? 'good' : ''}">${esc(item?.status || 'Waiting')}</span>
     </div>`;
 
@@ -740,7 +758,7 @@ async function imports() {
       <div class="glass-panel"><div class="panel-title"><div><p class="eyebrow">Resolve only when needed</p><h3>Identity Issues</h3></div><span>${quality.issues.length}</span></div>${quality.issues.map(issue => `<div class="notice identity-issue">${esc(issue.issue_type)} · ${esc(issue.alias_type)}: <b>${esc(issue.alias_value)}</b></div>`).join('') || '<p class="empty-copy">No open identity issues.</p>'}</div>
       <div class="glass-panel"><div class="panel-title"><div><p class="eyebrow">Local database</p><h3>Integrity & Backups</h3></div><span class="status-pill good">${esc(quality.integrity)}</span></div><button id="backup">Backup Now</button><div class="backup-list">${quality.backups.slice(0, 6).map(item => `<button class="backup-row" data-backup="${esc(item.name)}"><span>${esc(item.name)}</span><small>${Math.round(item.size / 1024)} KB</small></button>`).join('')}</div></div>
     </section>
-    <section class="glass-panel table-panel"><div class="panel-title"><div><p class="eyebrow">Evidence trail</p><h3>Import History</h3></div></div><div class="table-scroll"><table><thead><tr><th>Time</th><th>Type</th><th>File</th><th>Rows</th><th>Warnings</th><th>Hash</th></tr></thead><tbody>${quality.imports.map(item => `<tr><td>${esc(displayDate(item.imported_at))}</td><td>${esc(item.import_type)}</td><td>${esc(item.filename)}</td><td>${item.row_count}</td><td>${item.warning_count}</td><td>${esc(item.source_hash).slice(0, 12)}…</td></tr>`).join('')}</tbody></table></div></section>`;
+    <section class="glass-panel table-panel"><div class="panel-title"><div><p class="eyebrow">Evidence trail</p><h3>Import History</h3></div></div><div class="table-scroll"><table><thead><tr><th>Time</th><th>Type</th><th>File</th><th>Rows</th><th>Warnings</th><th>Hash</th></tr></thead><tbody>${quality.imports.map(item => `<tr><td>${esc(displayUtcDate(item.imported_at))}</td><td>${esc(item.import_type)}</td><td>${esc(item.filename)}</td><td>${item.row_count}</td><td>${item.warning_count}</td><td>${esc(item.source_hash).slice(0, 12)}…</td></tr>`).join('')}</tbody></table></div></section>`;
 
   let preview = null;
   $('#scan').addEventListener('click', async () => {
@@ -860,7 +878,7 @@ function callStep(number, title, prompt, body, tone = '') {
 
 function noteList(notes) {
   return notes.length
-    ? notes.slice(0, 8).map(note => `<div class="note-chip"><p>${esc(note.note)}</p><small>${esc(displayDate(note.created_at))}</small><button class="danger compact" data-delete-note="${note.id}" type="button">Delete</button></div>`).join('')
+    ? notes.slice(0, 8).map(note => `<div class="note-chip"><p>${esc(note.note)}</p><small>${esc(displayUtcDate(note.created_at))}</small><button class="danger compact" data-delete-note="${note.id}" type="button">Delete</button></div>`).join('')
     : '<p class="empty-copy">Nothing captured yet. Keep this conversational—only save what will actually help later.</p>';
 }
 
@@ -880,7 +898,7 @@ function idleCoachingHistory(items, currentCycle) {
       ${rows.length ? rows.map(item => `
         <article class="idle-history-row">
           <div class="idle-history-stat"><b>${fmtPercent(item.idle_percent)}</b><small>${item.snapshot_captured ? (item.period_end ? `7D ending ${esc(new Date(item.period_end).toLocaleDateString([], { month: 'short', day: 'numeric' }))}` : 'Snapshot captured · No Data') : 'Legacy · idle % was not stored'}</small></div>
-          <div class="idle-history-copy"><time>${esc(displayDate(item.talked_at))}</time><p>${esc(item.idle_plan)}</p></div>
+          <div class="idle-history-copy"><time>${esc(displayUtcDate(item.talked_at))}</time><p>${esc(item.idle_plan)}</p></div>
         </article>`).join('') : '<p class="empty-copy">No previous idle coaching recorded for this driver.</p>'}
     </section>`;
 }
@@ -991,7 +1009,7 @@ async function openCard(id) {
     <div class="call-layout">
       <main class="call-main">${flow}</main>
       <aside class="call-side">
-        <section class="side-card snapshot"><p class="eyebrow">Driver snapshot</p><dl><div><dt>Truck</dt><dd>${esc(driver.truck)}</dd></div><div><dt>Location</dt><dd>${esc(driver.location)}</dd></div><div><dt>Status</dt><dd>${esc(driver.operational_status)}</dd></div><div><dt>Planning</dt><dd>${esc(driver.planning_status)}</dd></div><div><dt>Freshness</dt><dd>${esc(displayDate(driver.observed_at))}</dd></div></dl><div class="unassigned-truck"><p>${hasTruck(driver) ? `Assign a different truck. Current truck ${esc(driver.truck)} remains in history.` : 'No truck association is on record.'}</p><form class="quick-truck-form" data-driver-id="${driver.id}" data-current-truck="${esc(driver.truck || '')}"><input name="truck" aria-label="${hasTruck(driver) ? 'New truck number' : 'Truck number'}" placeholder="${hasTruck(driver) ? 'New truck #' : 'Enter truck #'}" maxlength="24" required><button type="submit">${hasTruck(driver) ? 'Change Truck' : 'Assign Truck'}</button></form></div></section>
+        <section class="side-card snapshot"><p class="eyebrow">Driver snapshot</p><dl><div><dt>Truck</dt><dd>${esc(driver.truck)}</dd></div><div><dt>Location</dt><dd>${esc(driver.location)}</dd></div><div><dt>Status</dt><dd>${esc(driver.operational_status)}</dd></div><div><dt>Planning</dt><dd>${esc(driver.planning_status)}</dd></div><div><dt>Freshness</dt><dd>${esc(displayUtcDate(driver.observed_at))}</dd></div></dl><div class="unassigned-truck"><p>${hasTruck(driver) ? `Assign a different truck. Current truck ${esc(driver.truck)} remains in history.` : 'No truck association is on record.'}</p><form class="quick-truck-form" data-driver-id="${driver.id}" data-current-truck="${esc(driver.truck || '')}"><input name="truck" aria-label="${hasTruck(driver) ? 'New truck number' : 'Truck number'}" placeholder="${hasTruck(driver) ? 'New truck #' : 'Enter truck #'}" maxlength="24" required><button type="submit">${hasTruck(driver) ? 'Change Truck' : 'Assign Truck'}</button></form></div></section>
         <section class="side-card notes-rail"><div class="side-title"><div><p class="eyebrow">Remember this</p><h3>Call Notes</h3></div><span>Alt+N</span></div><p class="rail-copy">Use this like a scratchpad, not a form. Save the sentence you would tell yourself later.</p><div class="quick-note"><textarea id="quickNote" placeholder="Driver mentioned…"></textarea><button id="saveNote" type="button">Save Note</button></div><div id="noteList">${noteList(card.notes || [])}</div></section>
         <section class="side-card followups"><p class="eyebrow">After the call</p><h3>Reminders</h3><div class="follow-add"><input id="remtext" placeholder="Reminder"><input id="remdue" type="datetime-local"><button id="addReminder" type="button">Add Reminder</button></div><div id="followupList">${followupList(card.reminders || [])}</div><h3 class="follow-heading">Timers</h3><div class="follow-add"><input id="timertext" placeholder="Timer label"><input id="timerdue" type="datetime-local"><button id="addTimer" type="button">Start Timer</button></div><div id="timerList">${timerList(card.timers || [])}</div></section>
       </aside>

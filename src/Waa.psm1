@@ -557,14 +557,14 @@ d28 AS (SELECT driver_id,sum(engine_hours) e,sum(idle_hours) i,count(*) n,
   sum(CASE WHEN previous_end IS NOT NULL AND julianday(period_start)-julianday(previous_end)<>1 THEN 1 ELSE 0 END) gaps,
   sum(CASE WHEN julianday(period_end)-julianday(period_start)=6 THEN 1 ELSE 0 END) valid_weeks
   FROM recent GROUP BY driver_id)
-SELECT d.id,d.full_name,d.pta_code,s.truck,s.engine_hours engine7,s.idle_hours idle7,s.p p7,
+SELECT d.id,d.full_name,d.pta_code,s.truck,s.period_start period_start7,s.period_end period_end7,s.engine_hours engine7,s.idle_hours idle7,s.p p7,
 CASE WHEN d28.e=0 OR d28.n<4 OR d28.gaps>0 OR d28.valid_weeks<4 THEN NULL ELSE round(d28.i*100.0/d28.e,2) END p28,
 d28.e engine28,d28.n weeks28,CASE WHEN d28.n=4 AND d28.gaps=0 AND d28.valid_weeks=4 THEN 'Complete' ELSE 'Partial Data' END coverage28,
 CASE WHEN d28.n<4 THEN CAST(d28.n AS TEXT)||'/4 weekly reports'
      WHEN d28.valid_weeks<4 THEN 'A source period is not seven days'
      WHEN d28.gaps>0 THEN 'Weekly reports are not consecutive'
      WHEN d28.e=0 THEN 'No engine-hour data' ELSE 'Four consecutive weekly reports' END coverage28_detail,
-EXISTS(SELECT 1 FROM driver_call_sessions c WHERE c.driver_id=d.id AND trim(coalesce(c.idle_plan,''))<>'') coached
+EXISTS(SELECT 1 FROM driver_call_sessions c WHERE c.driver_id=d.id AND trim(coalesce(c.idle_plan,''))<>'' AND c.idle_period_end_snapshot=s.period_end) coached
 FROM drivers d JOIN s ON s.driver_id=d.id LEFT JOIN d28 ON d28.driver_id=d.id;
 '@
     $drivers=@(Invoke-Sql $sql -Json)
