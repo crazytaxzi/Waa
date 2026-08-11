@@ -468,10 +468,14 @@ async function idleCoachingLog() {
       <div class="idle-log-metric"><span>Drivers coached</span><b>${groups.size}</b><small>Drivers with idle history</small></div>
       <div class="idle-log-metric"><span>Most recent coaching</span><b>${latest ? esc(displayDate(latest.talked_at)) : '—'}</b><small>${latest ? esc(latest.full_name) : 'No coaching recorded yet'}</small></div>
     </section>
-    <section class="glass-panel idle-attention-panel">
-      <div class="panel-title"><div><p class="eyebrow">Current Rolling 7-Day attention</p><h3>Drivers Above 50%</h3></div><span>${currentOver50.length}</span></div>
-      <p class="idle-attention-copy">Highest idle percentage first. Previous and Next in the Work Card will stay inside this current over-50 list.</p>
-      <div class="idle-attention-list">${currentOver50.length ? currentOver50.map((driver, index) => {
+    <details class="glass-panel idle-attention-panel idle-attention-details" open>
+      <summary class="idle-attention-toggle">
+        <span class="idle-attention-toggle-title"><span class="eyebrow">Current Rolling 7-Day attention</span><b>Drivers Above 50%</b></span>
+        <span class="idle-attention-toggle-meta"><strong>${currentOver50.length}</strong><em aria-hidden="true"></em></span>
+      </summary>
+      <div class="idle-attention-body">
+        <p class="idle-attention-copy">Highest idle percentage first. Previous and Next in the Work Card will stay inside this current over-50 list.</p>
+        <div class="idle-attention-list">${currentOver50.length ? currentOver50.map((driver, index) => {
         const history = groups.get(Number(driver.id)) || [];
         const lastTalk = history[0];
         const historyCopy = history.length
@@ -485,7 +489,8 @@ async function idleCoachingLog() {
           <strong>Open Work Card →</strong>
         </button>`;
       }).join('') : '<p class="empty-copy idle-attention-empty">Nobody is above 50% on the latest Rolling 7-Day report.</p>'}</div>
-    </section>
+      </div>
+    </details>
     <section class="glass-panel idle-log-panel">
       <div class="table-toolbar">
         <div class="searchbox"><span aria-hidden="true">⌕</span><input id="idleLogSearch" placeholder="Search driver, truck, or anything discussed about idle"></div>
