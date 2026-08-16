@@ -50,6 +50,7 @@ try {
     }
 }
 finally {
-    if (Test-Path -LiteralPath $dataRoot) { Remove-Item $dataRoot -Recurse -Force }
+    Remove-Module Waa -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $dataRoot) { Remove-Item $dataRoot -Recurse -Force -ErrorAction SilentlyContinue }
     Remove-Item Env:WAA_SQLITE_TEST -ErrorAction SilentlyContinue
 }

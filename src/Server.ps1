@@ -10,6 +10,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Waa.psm1') -Force
 . (Join-Path $PSScriptRoot 'ReportParsing.ps1')
 . (Join-Path $PSScriptRoot 'ReportIntake.ps1')
+. (Join-Path $PSScriptRoot 'DotTracking.ps1')
 . (Join-Path $PSScriptRoot 'Conversation.ps1')
 
 $startupDatabase = Join-Path $DataRoot 'waa.db'
@@ -26,7 +27,7 @@ $script:MaintenanceDetail = 'Startup report scan is queued.'
 $script:MaintenanceGeneration = 0
 $web = [IO.Path]::GetFullPath((Join-Path $Root 'web'))
 $script:StaticCache = @{}
-foreach ($asset in @('index.html','styles.css','app.js')) {
+foreach ($asset in @('index.html','styles.css','app.js','dot.js')) {
     $assetPath = Join-Path $web $asset
     if (Test-Path -LiteralPath $assetPath) { $script:StaticCache[$assetPath] = [IO.File]::ReadAllBytes($assetPath) }
 }
@@ -67,6 +68,7 @@ $ErrorActionPreference='Stop'
 Import-Module (Join-Path $ScanRoot 'src/Waa.psm1') -Force
 . (Join-Path $ScanRoot 'src/ReportParsing.ps1')
 . (Join-Path $ScanRoot 'src/ReportIntake.ps1')
+. (Join-Path $ScanRoot 'src/DotTracking.ps1')
 Initialize-Waa $ScanRoot $ScanDataRoot -SkipStartupBackup | Out-Null
 Initialize-WaaReportIntake $ScanDataRoot
 if($CreateStartupBackup){Backup-Waa 'startup'|Out-Null}
@@ -343,6 +345,15 @@ try {
                         $restored=Restore-Waa $body.name
                         Reset-WaaLiveDomainFromSqlite | Out-Null
                         Send-Json $request.stream 200 $restored | Out-Null
+                    }
+                    elseif ($method -eq 'GET' -and $path -eq '/api/dot') {
+                        Send-Json $request.stream 200 (Get-WaaDotTracking) | Out-Null
+                    }
+                    elseif ($method -eq 'POST' -and $path -eq '/api/dot/visibility') {
+                        Send-Json $request.stream 200 (Set-WaaDotHidden -Trailer ([string]$body.trailer) -Hidden ([bool]$body.hidden)) | Out-Null
+                    }
+                    elseif ($method -eq 'POST' -and $path -eq '/api/dot/location') {
+                        Send-Json $request.stream 200 (Set-WaaDotLocation -CustomerKey ([string]$body.customer_key) -Customer ([string]$body.customer) -LocationLabel ([string]$body.location_label) -MilesFrom83501 $body.miles_from_83501) | Out-Null
                     }
                     elseif ($method -eq 'GET' -and $path -eq '/api/bols') {
                         Send-JsonArray $request.stream 200 @(Get-CurrentMissingBols) | Out-Null

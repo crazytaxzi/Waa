@@ -1,6 +1,6 @@
 # WAA — Driver Operations Console
 
-WAA is a fully local, driver-centered operations console for PTA, workflow, rolling idle, Missing BOL, transition, reminders, notes, safety coaching, audit history, imports, data quality, and backups.
+WAA is a fully local, driver-centered operations console for PTA, workflow, rolling idle, Missing BOL, DOT trailer accountability, transition, reminders, notes, safety coaching, audit history, imports, data quality, and backups.
 
 The **Notes & Reminders** tab is a separate driver-specific organizer: choose the canonical driver, capture or delete a note or dated reminder, search across the fleet, and complete reminders without opening the call flow. The same items can be deleted from the Driver Work Card. The **Daily Review** tab shows one summary card per driver for the selected day instead of flooding the page with every field save. Opening a summary shows that driver's chronological actions, concise action counts, individual delete controls, and a direct link to the Driver Work Card. Automatic identity reconciliation never appears as driver work, and exact duplicate card events are collapsed. **Clean Up Review** removes old identity-system noise and duplicate audit copies across all dates without deleting notes, reminders, imports, driver work, or unique actions. Deleting an individual review record removes only that history entry; it does not reverse the underlying operational action.
 
@@ -15,18 +15,25 @@ No installation, administrator access, Internet, Python, Node, Java, module down
 
 ## Report intake
 
-WAA treats the Windows **Downloads** folder as the automatic intake location for two report families only:
+WAA treats the Windows **Downloads** folder as the automatic intake location for three report families:
 
 - up to eight recent **Rolling 7-Day** idle reports, enough to backfill 28-day history
 - the newest **Missing BOL / Order Details Missing BOL** report
+- the newest **DOT trailer** CSV/text export, such as `DOT Table.csv`
 
-WAA resolves the real Windows Downloads known folder when possible, including redirected corporate profiles. The loopback server and browser now start before automatic report maintenance. While the app is open, WAA checks the eight most recent idle reports oldest-first so an existing four-week history becomes usable immediately. Missing BOL still uses only its newest report. Valid sources are copied into `%LOCALAPPDATA%\Waa\reports`; originals remain untouched. A lightweight file signature skips unchanged history scans, and SHA-256 content checks prevent duplicate imports.
+WAA resolves the real Windows Downloads known folder when possible, including redirected corporate profiles. The loopback server and browser now start before automatic report maintenance. While the app is open, WAA checks the eight most recent idle reports oldest-first so an existing four-week history becomes usable immediately. Missing BOL and DOT each use only their newest matching report. Valid sources are copied into `%LOCALAPPDATA%\Waa\reports`; originals remain untouched. A lightweight file signature skips unchanged idle-history scans, and SHA-256 content checks prevent duplicate imports.
 
 Startup backups, periodic scans, and identity reconciliation run in a background PowerShell runspace so they cannot delay opening the console or stall normal browser requests. The header briefly shows **LOOPBACK · SYNCING** and the active view refreshes when maintenance finishes. Identity repair is versioned and change-driven: unchanged launches skip it entirely, normal imports use normalized SQLite evidence, and historical raw reports are replayed only once when a new repair migration requires them. Manual scans remain explicit and report their result immediately.
 
-Supported automatic file forms are `.csv`, `.txt`, and `.xlsx`. XLSX support is native: PowerShell reads the OpenXML ZIP/XML package directly using built-in .NET classes. Excel does not need to be installed or running. The reader searches worksheets for the expected report headers rather than assuming the first worksheet or trusting the filename.
+Rolling Idle and Missing BOL automatic intake support `.csv`, `.txt`, and `.xlsx`. XLSX support is native: PowerShell reads the OpenXML ZIP/XML package directly using built-in .NET classes. Excel does not need to be installed or running. DOT automatic intake currently accepts `.csv` and `.txt` exports.
 
 Missing BOL intake accepts report headers such as `Order #`, `Empty Call Date`, `Origin City St`, `Destination City St`, `Rev Type`, `Loaded Miles`, `Last Dispatch Driver cd`, and `Last Dispatch Driver nm`. Excel serial dates are normalized before import. Rolling 7-Day intake likewise normalizes workbook dates and stores the base engine/idle hours used for dashboard calculations.
+
+## DOT trailer sheet
+
+The **DOT Trailers** page is intentionally a dense spreadsheet-style work surface instead of a card selector. Tableau-style exports that repeat each trailer for `Trailer Count` and `Days Since Last DOT` are collapsed into one trailer row while the original source measure remains preserved in the import evidence. WAA recalculates age from `Last DOT Date` each day and defaults to oldest first, so stale or negative exported day counts cannot corrupt priority order. Search, status/KMA filters, sortable headers, and persistent Hide/Unhide controls all operate without deleting source history.
+
+Distance is tracked from origin ZIP **83501** by customer mapping. The supplied DOT export contains customer names and KMA but no trustworthy facility address or ZIP, so WAA deliberately does not invent a mileage from KMA. Set a customer site's label and miles once in the Distance cell; every current and future trailer for that customer inherits the mapping and can be sorted by distance.
 
 **PTA is deliberately different:** it is copy/paste only. Open **Imports / Data Quality**, paste the 11-column PTA/fleet-state table, preview it, then commit the snapshot. WAA never scans Downloads for PTA files.
 
@@ -72,9 +79,11 @@ Daily Review is intentionally driver-specific. System-level audit events such as
 - `src/LiveStore.ps1` — bundled LMDB interop, live domain state, recovery, and atomic SQLite checkpoints
 - `src/Conversation.ps1` — persisted driver call-flow sessions and call-cycle state
 - `src/ReportParsing.ps1` — shared tab/CSV row parsing and date normalization
-- `src/ReportIntake.ps1` — Downloads discovery, native XLSX/OpenXML reading, report adapters, managed copies, Rolling 7-Day and Missing BOL ingestion
-- `web/` — vanilla HTML/CSS/ES-module client and interactive SVG chart system
+- `src/ReportIntake.ps1` — Downloads discovery, native XLSX/OpenXML reading, report adapters, managed copies, Rolling 7-Day, Missing BOL, and DOT intake coordination
+- `src/DotTracking.ps1` — DOT export normalization, historical snapshots, age queries, customer-distance mapping, and hide/unhide preferences
+- `web/` — vanilla HTML/CSS/ES-module client and interactive SVG chart system; DOT lives in its own `dot.js` module instead of expanding the main client monolith
 - `tests/Run-Tests.ps1` — standalone PowerShell assertion suite including XLSX intake coverage
+- `tests/Dot.Tests.ps1` — real-export DOT parser, persistence, distance mapping, visibility, and automatic intake coverage
 
 The server binds `System.Net.IPAddress.Loopback` only. Static paths are canonicalized, imported content is data only, SQL values are escaped before statement construction, CORS is loopback-only, and a strict CSP blocks outside scripts, styles, frames, and connections. SQLite enables foreign keys, WAL, busy timeout, indexes and transactions. Startup performs an integrity check and enters read-only recovery mode on failure.
 
@@ -92,9 +101,10 @@ On Windows, from a PowerShell prompt in the repository:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Run-Tests.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\Dot.Tests.ps1
 ```
 
-The suite uses no external test framework and creates its database under the temporary directory.
+The suites use no external test framework and create their databases under the temporary directory.
 
 The repository also includes `tests/Identity.Tests.ps1` for cross-report canonical identity behavior and `tests/Measure-PtaPerformance.ps1` for the bulk PTA pipeline.
 

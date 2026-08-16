@@ -10,7 +10,7 @@ function Initialize-WaaLmdbInterop {
     if ('Waa.Native.LmdbStore' -as [type]) { return }
 
     $runtime = Join-Path $Root 'runtime/lmdb'
-    $runningOnWindows = $env:OS -eq 'Windows_NT'
+    $runningOnWindows = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
     $library = if ($runningOnWindows) { Join-Path $runtime 'lmdb.dll' } else { Join-Path $runtime 'liblmdb.so' }
     if (-not (Test-Path -LiteralPath $library)) { throw "Bundled LMDB runtime missing: $library" }
     $env:PATH = $runtime + [IO.Path]::PathSeparator + $env:PATH

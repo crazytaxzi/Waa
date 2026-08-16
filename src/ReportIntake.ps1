@@ -33,6 +33,7 @@ function Get-WaaReportRoot {
     $root = Join-Path $base 'reports'
     [IO.Directory]::CreateDirectory((Join-Path $root 'idle')) | Out-Null
     [IO.Directory]::CreateDirectory((Join-Path $root 'missing-bol')) | Out-Null
+    [IO.Directory]::CreateDirectory((Join-Path $root 'dot')) | Out-Null
     return $root
 }
 
@@ -54,7 +55,7 @@ CREATE TABLE IF NOT EXISTS report_intake_status(
   detail TEXT,
   scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-INSERT OR IGNORE INTO report_intake_status(report_type,status) VALUES('idle','Waiting'),('bol','Waiting');
+INSERT OR IGNORE INTO report_intake_status(report_type,status) VALUES('idle','Waiting'),('bol','Waiting'),('dot','Waiting');
 '@
     Invoke-Sql $schema -AllowWrite | Out-Null
 }
@@ -506,7 +507,7 @@ ON CONFLICT(report_type) DO UPDATE SET
 function Get-WaaNewestDownload {
     param(
         [Parameter(Mandatory = $true)][string]$Downloads,
-        [Parameter(Mandatory = $true)][ValidateSet('idle','bol')][string]$Type
+        [Parameter(Mandatory = $true)][ValidateSet('idle','bol','dot')][string]$Type
     )
     $candidates = @(Get-WaaDownloadCandidates -Downloads $Downloads -Type $Type)
     if ($candidates.Count -eq 0) { return $null }
@@ -516,19 +517,23 @@ function Get-WaaNewestDownload {
 function Get-WaaDownloadCandidates {
     param(
         [Parameter(Mandatory = $true)][string]$Downloads,
-        [Parameter(Mandatory = $true)][ValidateSet('idle','bol')][string]$Type
+        [Parameter(Mandatory = $true)][ValidateSet('idle','bol','dot')][string]$Type
     )
     if (-not (Test-Path -LiteralPath $Downloads)) { return @() }
     $namePattern = if ($Type -eq 'bol') {
         '(?i)(missing.*bol|bol.*missing|order.*details.*bol)'
     }
+    elseif ($Type -eq 'dot') {
+        '(?i)(dot.*table|dot.*trailer|trailer.*dot|dot.*report)'
+    }
     else {
         '(?i)(rolling\s*7|rolling7|7\s*day.*idle|idle.*7\s*day)'
     }
+    $extensions = if ($Type -eq 'dot') { @('.csv','.txt') } else { @('.xlsx','.csv','.txt') }
     $candidates = @(
         Get-ChildItem -LiteralPath $Downloads -File -ErrorAction SilentlyContinue |
             Where-Object {
-                $_.Extension.ToLowerInvariant() -in @('.xlsx','.csv','.txt') -and
+                $_.Extension.ToLowerInvariant() -in $extensions -and
                 $_.BaseName -match $namePattern
             } |
             Sort-Object LastWriteTimeUtc -Descending
@@ -543,7 +548,7 @@ function Invoke-WaaDownloadsScan {
     $reportRoot = Get-WaaReportRoot
     $results = @{}
 
-    foreach ($type in @('idle','bol')) {
+    foreach ($type in @('idle','bol','dot')) {
         $candidates = @(Get-WaaDownloadCandidates -Downloads $downloads -Type $type)
         $file = if ($candidates.Count) { $candidates[0] } else { $null }
         if ($null -eq $file) {
@@ -606,6 +611,17 @@ function Invoke-WaaDownloadsScan {
                 continue
             }
 
+            if ($type -eq 'dot') {
+                $folder = Join-Path $reportRoot 'dot'
+                $stamp = $file.LastWriteTimeUtc.ToString('yyyyMMdd-HHmmss')
+                $managedPath = Join-Path $folder ($stamp + '_' + $file.Name)
+                if (-not (Test-Path -LiteralPath $managedPath)) { Copy-Item -LiteralPath $file.FullName -Destination $managedPath -Force }
+                $import = Import-WaaDotFile -Path $file.FullName -Filename $file.Name
+                Set-WaaIntakeStatus -Type dot -Downloads $downloads -File $file -Status $import.status -Detail $import.detail -Managed $managedPath -Hash $fileHash -ImportId $import.import_batch_id
+                $results[$type] = @{ status=$import.status; file=$file.Name; managed=$managedPath; imported=$import.imported; detail=$import.detail }
+                continue
+            }
+
             $canonical = Get-WaaCanonicalReportText -Path $file.FullName -Type $type
             $folderName = if ($type -eq 'bol') { 'missing-bol' } else { 'idle' }
             $folder = Join-Path $reportRoot $folderName
@@ -633,5 +649,5 @@ function Get-WaaReportIntakeStatus {
     $rows = @(Invoke-Sql 'SELECT * FROM report_intake_status ORDER BY report_type;' -Json)
     $map = @{}
     foreach ($row in $rows) { $map[[string]$row.report_type] = $row }
-    return @{ downloads_path=Get-WaaDownloadsPath; reports_root=Get-WaaReportRoot; idle=$map['idle']; bol=$map['bol'] }
+    return @{ downloads_path=Get-WaaDownloadsPath; reports_root=Get-WaaReportRoot; idle=$map['idle']; bol=$map['bol']; dot=$map['dot'] }
 }

@@ -6,6 +6,7 @@ function Assert($Condition,[string]$Message){if(!$Condition){throw "ASSERTION FA
 function Get-Col([int]$Index){$n=$Index+1;$s='';while($n-gt0){$n--; $s=[char](65+($n%26))+$s;$n=[math]::Floor($n/26)};return $s}
 function Xml-Escape([string]$s){return [Security.SecurityElement]::Escape($s)}
 function New-TestXlsx([string]$Path,[object[]]$Headers,[object[]]$Values){
+  Add-Type -AssemblyName System.IO.Compression
   Add-Type -AssemblyName System.IO.Compression.FileSystem
   $fs=[IO.File]::Open($Path,[IO.FileMode]::Create);$zip=[IO.Compression.ZipArchive]::new($fs,[IO.Compression.ZipArchiveMode]::Create,$false)
   try{

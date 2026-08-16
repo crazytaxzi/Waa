@@ -2,6 +2,10 @@
 
 ## Delivered
 
+The 2026-08-16 optimization pass adds first-class **DOT trailer accountability**. `DOT Table` CSV/text exports are detected in Downloads, source-preserved in import batches, and normalized from repeated Tableau `Measure Names` rows into one trailer record per import. The new DOT page is a dense sortable spreadsheet rather than a card/radio workflow: it defaults to oldest Last DOT first, recalculates age from the actual date instead of trusting stale exported day counts, supports search plus status/KMA filters, and keeps persistent per-trailer Hide/Unhide preferences outside source evidence. Customer-site distance from ZIP 83501 is stored once and inherited by every current/future trailer at that customer; the app deliberately leaves mileage unresolved when the report provides no trustworthy address/ZIP instead of fabricating distance from KMA.
+
+This pass also fixed two target-Windows reliability defects discovered during clean validation. LMDB platform selection no longer trusts the optional `$env:OS` variable; it uses .NET's actual OS platform, preventing Windows PowerShell launched without that environment variable from trying to load `liblmdb.so`. The native XLSX test harness now explicitly loads both `System.IO.Compression` and `System.IO.Compression.FileSystem`, making its `ZipArchive` fixture generator portable on Windows PowerShell 5.1.
+
 WAA now runs a fully integrated LMDB + SQLite hybrid persistence core. Bundled LMDB is the authoritative low-latency store for Driver Work Card state, call sessions, notes, reminders, timers, and transition drafts; SQLite remains the durable authority for imported evidence, identity, idle/BOL history, audit, reports, and backups. Live mutations use atomic revisioned LMDB transactions and leave the UI request path without a SQLite round trip. Batched SQLite checkpoints are idempotent, forced before backup/restore and identity repair, and replayed automatically on restart. A recovery test confirmed an uncheckpointed LMDB note moved from SQLite count 0 to 1 during restart recovery with no remaining dirty state.
 
 Daily Review is grouped by driver and day. Its main page renders one compact summary card per driver with total actions and the leading action categories. The summary popup provides the full chronological detail only when requested, preserves per-record deletion, and links directly into that driver's Work Card. This keeps high-volume field autosaves auditable without letting them overwhelm the daily workflow.
@@ -10,7 +14,7 @@ Identity migration version 4 reconciles unique, structurally compatible PTA-code
 
 Driver navigation is consistent across the application. Dashboard rank buttons and the best-idle metric, Workflow/PTA rows, Missing BOL rows, organizer driver labels, and Daily Review buttons all open the same Driver Work Card. The delegated click guard now accepts an interactive element when that element is itself the driver opener. Driver-card **Next Step** advances immediately after focus queues the LMDB autosave, so a slow or stale request cannot trap the operator on the current task; changing drivers and finishing a call still drain pending saves.
 
-WAA is a complete local Windows driver-operations application with eight hash-routed pages: Dashboard, PTA Tracking, Workflow, Missing BOLs, Notes & Reminders, Daily Review, Transition, and Imports/Data Quality. The shared Driver Work Card centralizes PTA history/editing, weighted idle history, BOL mentions, home-time review, on-time state, preplan review/response, routing, randomized safety coaching, chronological notes, restart-safe reminders/timers, transition selection, and activity history.
+WAA is a complete local Windows driver-operations application with ten hash-routed pages: Dashboard, PTA Tracking, Workflow, Idle Coaching, Missing BOLs, DOT Trailers, Notes & Reminders, Daily Review, Transition, and Imports/Data Quality. The shared Driver Work Card centralizes PTA history/editing, weighted idle history, BOL mentions, home-time review, on-time state, preplan review/response, routing, randomized safety coaching, chronological notes, restart-safe reminders/timers, transition selection, and activity history.
 
 The application now also includes two first-class pages. **Notes & Reminders** is a fleet-wide organizer that requires a canonical driver for every item and supports capture, search, filtering, due-state display, and completion. **Daily Review** presents the activity trail as a local-day chronological record, keeps driver actions attributed to the canonical driver/current truck, supports driver filtering, and opens the shared Driver Work Card directly.
 
@@ -50,7 +54,8 @@ Rendering was simplified for low-end PCs: continuous ambient/signal/pulse animat
 - `src/Server.ps1`: `TcpListener` HTTP server bound only to `127.0.0.1`, static-root confinement, strict response headers, and JSON API routing.
 - `src/Waa.psm1`: the single database layer, schema/migration bootstrap, SQLite safety settings, parsers, identity handling, operational queries/actions, audit, transition, and backup/restore.
 - `src/LiveStore.ps1`: LMDB native interop, live entity model, revisions, checkpointing, hydration, health, and restart recovery.
-- `web/index.html`, `web/styles.css`, `web/app.js`: accessible vanilla browser client, reusable work-card renderer, filtering/sorting, and SVG visualization.
+- `src/DotTracking.ps1`: DOT source normalization, historical trailer snapshots, Last-DOT age queries, distance mappings, and persistent visibility preferences.
+- `web/index.html`, `web/styles.css`, `web/app.js`, `web/dot.js`: accessible vanilla browser client; DOT is isolated as its own spreadsheet module instead of further enlarging the main application file.
 - `runtime/sqlite/sqlite3.exe`: official portable SQLite 3.53.4 Windows x64 shell; archive SHA3-256 was verified against sqlite.org.
 - `runtime/lmdb/lmdb.dll`: pinned LMDB 1.0.1 Windows x64 runtime, with license, provenance, and a Linux validation build.
 - `tests/Run-Tests.ps1`: dependency-free assertion and persistence suite.
@@ -62,8 +67,17 @@ Operational SQLite lives only at `%LOCALAPPDATA%\Waa\waa.db`. The schema covers 
 - PTA/fleet-state: 11 columns in tabular or Markdown-pipe form, blank cells, escaped underscores/pipes, alphanumeric/unknown codes, exact raw PTA and unknown numeric preservation, equipment-sentinel handling, historical snapshots, and the legitimate-driver 23:57 priority rule.
 - Rolling idle: base period/truck/driver/engine/idle measurements; percentages are derived and fleet values are weighted. Zero engine hours stays No Data and period counts expose incomplete 28-day coverage.
 - Missing BOL: content-based 29-column tab detection, including browser decoding of UTF-16 LE BOM input; all fields are preserved and driver code/name are used as identity evidence rather than truck.
+- DOT trailers: CSV/tab export detection, repeated Tableau measure-row collapse, leading-zero trailer preservation, normalized Last DOT/T2 dates, preserved source day-count evidence, and customer-key normalization for persistent distance mapping.
 
 Preview never writes. Commit reparses the supplied raw source, validates rows, records parser/source metadata and the exact source, and rejects exact duplicates by SHA-256. Ambiguous or unmatched identity evidence remains visible for explicit alias resolution.
+
+## Validation completed — 2026-08-16 DOT / Windows reliability revision
+
+- `tests/Run-Tests.ps1`: **99/99 assertions passed** on the target GamePC under Windows PowerShell 5.1 after correcting LMDB platform detection and explicit ZIP assembly loading.
+- DOT parsing was validated locally against the supplied real export: 30 Tableau measure rows collapsed to 15 unique trailers without losing leading-zero IDs. The committed `tests/Dot.Tests.ps1` regression fixture is deliberately synthetic because the repository is public; it verifies the same measure-row collapse, Last-DOT age recalculation, visibility persistence, customer distance fan-out, and Downloads intake behavior without publishing operational data.
+- Real loopback server smoke test passed on `127.0.0.1:8765`: startup integrity was `ok`; DOT automatic scan, `/api/dot`, `dot.js` static delivery, Hide/Unhide, and customer-distance persistence all completed successfully with 15 rows.
+- `tests/Identity.Tests.ps1`: **18/18 assertions passed** on GamePC. `tests/Measure-PtaPerformance.ps1`: **500 rows in 210.8 ms total** (16.5 ms parse, 6.8 ms database), result `responsive`; its teardown was also corrected to close the persistent SQLite module before removing the temporary database.
+- JavaScript syntax checks, PowerShell parser checks, and `git diff --check` were run on the final revision before publication.
 
 ## Validation completed — 2026-08-09 LMDB hybrid revision
 

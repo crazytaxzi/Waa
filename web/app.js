@@ -1,3 +1,5 @@
+import { renderDotTracking } from './dot.js?v=20260816.1';
+
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
@@ -742,12 +744,12 @@ async function imports() {
       <span class="status-pill ${item?.status === 'Error' ? 'alert' : item?.status === 'Imported' || item?.status === 'Current' ? 'good' : ''}">${esc(item?.status || 'Waiting')}</span>
     </div>`;
 
-  $('#app').innerHTML = pageHead('Imports / Data Quality', 'Downloads feeds idle and Missing BOL automatically. PTA stays intentional: copy, preview, commit.') + `
+  $('#app').innerHTML = pageHead('Imports / Data Quality', 'Downloads feeds idle, Missing BOL, and DOT automatically. PTA stays intentional: copy, preview, commit.') + `
     <section class="intake-header glass-panel">
-      <div><p class="eyebrow">Downloads watcher</p><h3>${esc(intake.downloads_path)}</h3><p>Idle intake checks up to eight recent weekly reports for 28-day history. Missing BOL uses the newest report. Originals remain untouched.</p></div>
+      <div><p class="eyebrow">Downloads watcher</p><h3>${esc(intake.downloads_path)}</h3><p>Idle intake checks up to eight recent weekly reports. Missing BOL and DOT use the newest matching report. Originals remain untouched.</p></div>
       <button id="scan">Scan Downloads Now</button>
     </section>
-    <section class="intake-grid">${reportCard('Rolling 7-Day Idle', intake.idle, 'green')}${reportCard('Missing BOL', intake.bol, 'purple')}</section>
+    <section class="intake-grid">${reportCard('Rolling 7-Day Idle', intake.idle, 'green')}${reportCard('Missing BOL', intake.bol, 'purple')}${reportCard('DOT Trailers', intake.dot, 'blue')}</section>
     <section class="glass-panel pta-paste">
       <div class="panel-title"><div><p class="eyebrow">Intentional input</p><h3>PTA / Fleet State · Paste Only</h3></div><span class="status-pill">11 columns</span></div>
       <textarea id="raw" placeholder="Paste PTA / fleet-state table here..."></textarea>
@@ -763,8 +765,8 @@ async function imports() {
   let preview = null;
   $('#scan').addEventListener('click', async () => {
     const result = await api('/api/report-intake/scan', { method: 'POST', body: '{}' });
-    const changed = result.results?.idle?.imported || result.results?.bol?.imported;
-    if (changed) invalidate('/api/dashboard', '/api/drivers', '/api/bols', '/api/data-quality');
+    const changed = result.results?.idle?.imported || result.results?.bol?.imported || result.results?.dot?.imported;
+    if (changed) invalidate('/api/dashboard', '/api/drivers', '/api/bols', '/api/dot', '/api/data-quality');
     toast(changed ? 'Report history imported' : 'Downloads already current');
     imports();
   });
@@ -1346,6 +1348,7 @@ const routes = {
   workflow: () => queue(false),
   idle: idleCoachingLog,
   bols,
+  dot: () => renderDotTracking({ api, esc, pageHead, toast, invalidate }),
   organizer,
   activity,
   transition,
@@ -1391,7 +1394,7 @@ async function monitorHealth() {
     $('#health').textContent = 'LOOPBACK · SECURE';
     if (maintenanceWasRunning) {
       maintenanceWasRunning = false;
-      invalidate('/api/dashboard', '/api/drivers', '/api/bols', '/api/idle-coaching', '/api/report-intake', '/api/data-quality');
+      invalidate('/api/dashboard', '/api/drivers', '/api/bols', '/api/dot', '/api/idle-coaching', '/api/report-intake', '/api/data-quality');
       await route();
       toast('Reports and driver identities are current');
     }
