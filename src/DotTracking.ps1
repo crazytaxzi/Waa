@@ -189,7 +189,9 @@ function Get-WaaDotTracking {
 SELECT d.trailer,d.status,d.description,d.last_dot_date,d.responsible_csr,d.responsible_csr_supervisor,d.t2_date,
        d.customer,d.customer_key,d.kma,d.source_days_since_last_dot,
        COALESCE(p.hidden,0) hidden,l.location_label,l.miles_from_83501,
-       CASE WHEN d.last_dot_date IS NULL THEN NULL ELSE CAST(julianday(date('now','localtime'))-julianday(d.last_dot_date) AS INTEGER) END age_days
+       CASE WHEN d.last_dot_date IS NULL THEN NULL ELSE date(d.last_dot_date,'+365 days') END due_date,
+       CASE WHEN d.last_dot_date IS NULL THEN NULL ELSE CAST(julianday(date('now','localtime'))-julianday(d.last_dot_date) AS INTEGER) END age_days,
+       CASE WHEN d.last_dot_date IS NULL THEN NULL ELSE CAST(julianday(date('now','localtime'))-julianday(d.last_dot_date)-365 AS INTEGER) END days_overdue
 FROM dot_snapshots d
 LEFT JOIN dot_preferences p ON p.trailer=d.trailer
 LEFT JOIN dot_location_map l ON l.customer_key=d.customer_key

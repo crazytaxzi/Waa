@@ -26,7 +26,9 @@ try {
     $current = Get-WaaDotTracking
     Assert-Dot ($current.rows.Count -eq 4) 'current DOT view should contain 4 trailers'
     Assert-Dot ($current.rows[0].trailer -eq '001001') 'default server order should be oldest Last DOT first'
-    Assert-Dot ([int]$current.rows[0].age_days -gt 1200) 'age must be recalculated from Last DOT Date, not stale source measure'
+    Assert-Dot ([string]$current.rows[0].due_date -eq '2024-01-31') 'DOT due date should be inspection date plus 365 days'
+    $expectedOverdue = [int](([datetime]::Today - [datetime]'2023-01-31').TotalDays) - 365
+    Assert-Dot ([int]$current.rows[0].days_overdue -eq $expectedOverdue) 'days overdue must equal days since inspection minus 365'
 
     Set-WaaDotHidden -Trailer '001001' -Hidden $true | Out-Null
     $current = Get-WaaDotTracking

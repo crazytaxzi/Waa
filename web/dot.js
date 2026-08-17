@@ -2,7 +2,7 @@ export async function renderDotTracking(context) {
   const { api, esc, pageHead, toast, invalidate } = context;
   const data = await api('/api/dot');
   const rows = data.rows || [];
-  let sortKey = 'age_days';
+  let sortKey = 'days_overdue';
   let sortDir = 'desc';
 
   const options = (values, label) => {
@@ -26,7 +26,7 @@ export async function renderDotTracking(context) {
   const header = (key, label) => `<button type="button" class="sheet-sort" data-sort="${key}">${esc(label)}<span data-sort-mark="${key}"></span></button>`;
   document.querySelector('#app').innerHTML = pageHead(
     'DOT Trailers',
-    `One row per trailer. Age is recalculated from Last DOT Date; distance is stored by customer from ZIP ${data.origin_zip}.`,
+    `One row per trailer. Last DOT is the inspection date; due is 365 days later, and overdue is days past that due point. Distance is stored by customer from ZIP ${data.origin_zip}.`,
     'WAA // DOT Accountability'
   ) + `
     <section class="sheet-panel">
@@ -45,7 +45,7 @@ export async function renderDotTracking(context) {
       </div>
       <div class="table-scroll dot-sheet-scroll"><table class="dot-sheet">
         <thead><tr>
-          <th>${header('trailer','Trailer')}</th><th>${header('age_days','Age')}</th><th>${header('last_dot_date','Last DOT')}</th>
+          <th>${header('trailer','Trailer')}</th><th>${header('days_overdue','Due Status')}</th><th>${header('last_dot_date','Inspection')}</th><th>${header('due_date','Due')}</th>
           <th>${header('miles_from_83501',`Miles from ${data.origin_zip}`)}</th><th>${header('status','Status')}</th><th>${header('customer','Customer')}</th>
           <th>${header('kma','KMA')}</th><th>${header('responsible_csr','CSR')}</th><th>${header('responsible_csr_supervisor','Supervisor')}</th><th>Visibility</th>
         </tr></thead><tbody id="dotBody"></tbody>
@@ -53,7 +53,7 @@ export async function renderDotTracking(context) {
     </section>`;
   const valueOf = (row, key) => {
     const value = row[key];
-    if (key === 'age_days' || key === 'miles_from_83501') return value == null || value === '' ? null : Number(value);
+    if (key === 'days_overdue' || key === 'miles_from_83501') return value == null || value === '' ? null : Number(value);
     return String(value || '').toLowerCase();
   };
   const compare = (a, b) => {
@@ -76,12 +76,12 @@ export async function renderDotTracking(context) {
     document.querySelector('#dotBody').innerHTML = visible.map(row => `
       <tr class="${Number(row.hidden) ? 'dot-hidden-row' : ''}">
         <td><b class="truck-no">${esc(row.trailer)}</b></td>
-        <td class="dot-age"><b>${row.age_days == null ? 'Unknown' : `${Number(row.age_days).toLocaleString()}d`}</b></td>
-        <td>${esc(row.last_dot_date || 'Unknown')}</td>
+        <td class="dot-age"><b>${row.days_overdue == null ? 'Unknown' : Number(row.days_overdue) > 0 ? `${Number(row.days_overdue).toLocaleString()}d overdue` : Number(row.days_overdue) === 0 ? 'Due today' : `${Math.abs(Number(row.days_overdue)).toLocaleString()}d left`}</b></td>
+        <td>${esc(row.last_dot_date || 'Unknown')}</td><td>${esc(row.due_date || 'Unknown')}</td>
         <td>${distanceCell(row)}</td><td>${esc(row.status || 'Unknown')}</td><td>${esc(row.customer || 'Unknown')}</td>
         <td>${esc(row.kma || 'Unknown')}</td><td>${esc(row.responsible_csr || 'Unknown')}</td><td>${esc(row.responsible_csr_supervisor || 'Unknown')}</td>
         <td><button class="compact ${Number(row.hidden) ? '' : 'secondary'}" type="button" data-dot-hide="${esc(row.trailer)}" data-hidden="${Number(row.hidden) ? 'false' : 'true'}">${Number(row.hidden) ? 'Unhide' : 'Hide'}</button></td>
-      </tr>`).join('') || '<tr><td colspan="10" class="sheet-empty">No trailers match this view.</td></tr>';
+      </tr>`).join('') || '<tr><td colspan="11" class="sheet-empty">No trailers match this view.</td></tr>';
     document.querySelector('#dotCount').textContent = `${visible.length} shown`;
     document.querySelector('#dotHiddenCount').textContent = rows.filter(row => Number(row.hidden)).length;
     document.querySelector('#dotUnresolvedCount').textContent = rows.filter(row => row.miles_from_83501 == null || row.miles_from_83501 === '').length;
@@ -94,7 +94,7 @@ export async function renderDotTracking(context) {
   document.querySelectorAll('[data-sort]').forEach(button => button.addEventListener('click', () => {
     const key = button.dataset.sort;
     if (sortKey === key) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
-    else { sortKey = key; sortDir = key === 'age_days' ? 'desc' : 'asc'; }
+    else { sortKey = key; sortDir = key === 'days_overdue' ? 'desc' : 'asc'; }
     draw();
   }));
   document.querySelector('#dotBody').addEventListener('click', async event => {
