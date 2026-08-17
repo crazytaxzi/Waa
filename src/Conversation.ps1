@@ -35,17 +35,7 @@ function Get-WaaConversation {
 
 function Get-WaaIdleSnapshot {
     param([Parameter(Mandatory = $true)][int]$DriverId)
-
-    $rows = @(Invoke-Sql @"
-SELECT period_end,
-       CASE WHEN engine_hours=0 THEN NULL ELSE round(idle_hours*100.0/engine_hours,2) END idle_percent
-FROM idle_periods
-WHERE driver_id=$DriverId
-ORDER BY period_end DESC,id DESC
-LIMIT 1;
-"@ -Json)
-    if (-not $rows.Count) { return @{ percent=$null; period_end=$null } }
-    return @{ percent=$rows[0].idle_percent; period_end=$rows[0].period_end }
+    return Get-WaaWeighted28Snapshot -DriverId $DriverId
 }
 
 function Save-WaaConversation {
@@ -72,10 +62,11 @@ function Save-WaaConversation {
     $cycle = Get-WaaConversationCycle -DriverId $DriverId
     if ($field -eq 'idle_plan') {
         if ([string]::IsNullOrWhiteSpace([string]$Body.value)) {
-            return Set-WaaLiveCallField -DriverId $DriverId -CycleKey $cycle -Field $field -Value $Body.value -CaptureIdleSnapshot -IdlePercentSnapshot $null -IdlePeriodEndSnapshot $null
+            return Set-WaaLiveCallField -DriverId $DriverId -CycleKey $cycle -Field $field -Value $Body.value -CaptureIdleSnapshot -IdlePercentSnapshot $null -IdlePeriodEndSnapshot $null -IdleSnapshotBasis $null
         }
         $snapshot = Get-WaaIdleSnapshot -DriverId $DriverId
-        return Set-WaaLiveCallField -DriverId $DriverId -CycleKey $cycle -Field $field -Value $Body.value -CaptureIdleSnapshot -IdlePercentSnapshot $snapshot.percent -IdlePeriodEndSnapshot $snapshot.period_end
+        if($null-eq$snapshot.percent -or [double]$snapshot.percent -le 50){throw 'Idle coaching is only required when weighted 28-day idle exceeds 50%.'}
+        return Set-WaaLiveCallField -DriverId $DriverId -CycleKey $cycle -Field $field -Value $Body.value -CaptureIdleSnapshot -IdlePercentSnapshot $snapshot.percent -IdlePeriodEndSnapshot $snapshot.period_end -IdleSnapshotBasis 'weighted_28d'
     }
     return Set-WaaLiveCallField -DriverId $DriverId -CycleKey $cycle -Field $field -Value $Body.value
 }

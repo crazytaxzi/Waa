@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS pta_observations(id INTEGER PRIMARY KEY, driver_id IN
 CREATE TABLE IF NOT EXISTS idle_periods(id INTEGER PRIMARY KEY, driver_id INTEGER REFERENCES drivers(id), truck TEXT, period_start TEXT NOT NULL, period_end TEXT NOT NULL, engine_hours REAL NOT NULL, idle_hours REAL NOT NULL, import_batch_id INTEGER REFERENCES import_batches(id), UNIQUE(driver_id,period_start,period_end));
 CREATE TABLE IF NOT EXISTS missing_bols(id INTEGER PRIMARY KEY, driver_id INTEGER REFERENCES drivers(id), order_number TEXT, empty_call_date TEXT, origin TEXT, destination TEXT, mileage TEXT, bol_type TEXT, raw_fields_json TEXT NOT NULL, first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, mentioned_at TEXT, import_batch_id INTEGER REFERENCES import_batches(id));
 CREATE TABLE IF NOT EXISTS driver_work_items(driver_id INTEGER PRIMARY KEY REFERENCES drivers(id), cycle_key TEXT, home_checked INTEGER NOT NULL DEFAULT 0, expected_work TEXT NOT NULL DEFAULT 'Unknown', home_status TEXT NOT NULL DEFAULT 'Unknown', home_reason TEXT, ontime_status TEXT NOT NULL DEFAULT 'Unknown', ontime_reason TEXT, ontime_checked_at TEXT, preplan_reviewed INTEGER NOT NULL DEFAULT 0, preplan_response TEXT NOT NULL DEFAULT 'Unknown', preplan_note TEXT, routing_checked INTEGER NOT NULL DEFAULT 0, routing_status TEXT NOT NULL DEFAULT 'Unknown', routing_note TEXT, safety_note_id INTEGER, safety_mentioned_at TEXT, include_transition INTEGER NOT NULL DEFAULT 0, transition_note TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE IF NOT EXISTS driver_call_sessions(id INTEGER PRIMARY KEY, driver_id INTEGER NOT NULL REFERENCES drivers(id), cycle_key TEXT NOT NULL, opened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, fuel_status TEXT NOT NULL DEFAULT 'Unknown', fuel_note TEXT, driver_eta TEXT, eta_status TEXT NOT NULL DEFAULT 'Unknown', eta_note TEXT, idle_plan TEXT, idle_percent_snapshot REAL, idle_period_end_snapshot TEXT, load_help_status TEXT NOT NULL DEFAULT 'Unknown', load_help_note TEXT, conversation_wrap TEXT, completed_at TEXT, UNIQUE(driver_id,cycle_key));
+CREATE TABLE IF NOT EXISTS driver_call_sessions(id INTEGER PRIMARY KEY, driver_id INTEGER NOT NULL REFERENCES drivers(id), cycle_key TEXT NOT NULL, opened_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, fuel_status TEXT NOT NULL DEFAULT 'Unknown', fuel_note TEXT, driver_eta TEXT, eta_status TEXT NOT NULL DEFAULT 'Unknown', eta_note TEXT, idle_plan TEXT, idle_percent_snapshot REAL, idle_period_end_snapshot TEXT, idle_snapshot_basis TEXT, load_help_status TEXT NOT NULL DEFAULT 'Unknown', load_help_note TEXT, conversation_wrap TEXT, completed_at TEXT, UNIQUE(driver_id,cycle_key));
 CREATE TABLE IF NOT EXISTS driver_notes(id INTEGER PRIMARY KEY, driver_id INTEGER NOT NULL REFERENCES drivers(id), note TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS reminders(id INTEGER PRIMARY KEY, driver_id INTEGER NOT NULL REFERENCES drivers(id), text TEXT NOT NULL, due_at TEXT NOT NULL, completed_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS timers(id INTEGER PRIMARY KEY, driver_id INTEGER NOT NULL REFERENCES drivers(id), label TEXT NOT NULL, target_at TEXT NOT NULL, completed_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
@@ -195,6 +195,9 @@ COMMIT;
     if (@($callSessionColumns | Where-Object { $_.name -eq 'idle_period_end_snapshot' }).Count -eq 0) {
         Invoke-Sql 'ALTER TABLE driver_call_sessions ADD COLUMN idle_period_end_snapshot TEXT;' -AllowWrite | Out-Null
     }
+    if (@($callSessionColumns | Where-Object { $_.name -eq 'idle_snapshot_basis' }).Count -eq 0) {
+        Invoke-Sql 'ALTER TABLE driver_call_sessions ADD COLUMN idle_snapshot_basis TEXT;' -AllowWrite | Out-Null
+    }
     # Older PowerShell JSON conversion could turn ISO PTA text into a DateTime and
     # produce culture-formatted MM/dd/yyyy cycle suffixes. Canonicalize those keys
     # once so database and UI queue queries use the same stable yyyy-MM-dd identity.
@@ -206,6 +209,7 @@ WHERE substr(cycle_key,-10) GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]';
     Invoke-Sql 'INSERT OR IGNORE INTO schema_version(version) VALUES(2);' -AllowWrite | Out-Null
     Invoke-Sql 'INSERT OR IGNORE INTO schema_version(version) VALUES(3);' -AllowWrite | Out-Null
     Invoke-Sql 'INSERT OR IGNORE INTO schema_version(version) VALUES(4);' -AllowWrite | Out-Null
+    Invoke-Sql 'INSERT OR IGNORE INTO schema_version(version) VALUES(5);' -AllowWrite | Out-Null
     $integrity = (Invoke-Sql 'PRAGMA integrity_check;').Trim()
     if ($integrity -ne 'ok') { $script:ReadOnly = $true }
     return @{ db = $script:Db; integrity = $integrity; read_only = $script:ReadOnly }
@@ -548,6 +552,31 @@ function Import-WaaData {
     return @{id=$batchId;type=$preview.type;rows=$preview.valid_rows;warnings=$preview.warnings}
 }
 
+function Get-WaaWeighted28Snapshot {
+    param([Parameter(Mandatory = $true)][int]$DriverId)
+    $rows=@(Invoke-Sql @"
+WITH ranked AS (
+  SELECT i.*,row_number() OVER(ORDER BY period_end DESC,id DESC) rn
+  FROM idle_periods i WHERE driver_id=$DriverId
+), recent AS (
+  SELECT *,lag(period_end) OVER(ORDER BY period_start) previous_end
+  FROM ranked WHERE rn<=4
+), aggregate AS (
+  SELECT count(*) weeks,sum(engine_hours) engine_hours,sum(idle_hours) idle_hours,max(period_end) period_end,
+         sum(CASE WHEN julianday(period_end)-julianday(period_start)=6 THEN 1 ELSE 0 END) valid_weeks,
+         sum(CASE WHEN previous_end IS NOT NULL AND julianday(period_start)-julianday(previous_end)<>1 THEN 1 ELSE 0 END) gaps
+  FROM recent
+)
+SELECT period_end,weeks,engine_hours,idle_hours,
+       CASE WHEN weeks=4 AND valid_weeks=4 AND gaps=0 AND engine_hours>0
+            THEN round(idle_hours*100.0/engine_hours,2) ELSE NULL END percent,
+       CASE WHEN weeks=4 AND valid_weeks=4 AND gaps=0 AND engine_hours>0 THEN 'Complete' ELSE 'Partial Data' END coverage
+FROM aggregate;
+"@ -Json)
+    if(-not$rows.Count){return @{percent=$null;period_end=$null;weeks=0;engine_hours=$null;idle_hours=$null;coverage='Partial Data'}}
+    return $rows[0]
+}
+
 function Get-Dashboard {
     $sql = @'
 WITH ranked AS (SELECT i.*,row_number() OVER(PARTITION BY driver_id ORDER BY period_end DESC,id DESC) rn FROM idle_periods i),
@@ -564,7 +593,7 @@ CASE WHEN d28.n<4 THEN CAST(d28.n AS TEXT)||'/4 weekly reports'
      WHEN d28.valid_weeks<4 THEN 'A source period is not seven days'
      WHEN d28.gaps>0 THEN 'Weekly reports are not consecutive'
      WHEN d28.e=0 THEN 'No engine-hour data' ELSE 'Four consecutive weekly reports' END coverage28_detail,
-EXISTS(SELECT 1 FROM driver_call_sessions c WHERE c.driver_id=d.id AND trim(coalesce(c.idle_plan,''))<>'' AND c.idle_period_end_snapshot=s.period_end) coached
+EXISTS(SELECT 1 FROM driver_call_sessions c WHERE c.driver_id=d.id AND trim(coalesce(c.idle_plan,''))<>'' AND c.idle_snapshot_basis='weighted_28d' AND c.idle_percent_snapshot>50 AND c.idle_period_end_snapshot=s.period_end) coached
 FROM drivers d JOIN s ON s.driver_id=d.id LEFT JOIN d28 ON d28.driver_id=d.id;
 '@
     $drivers=@(Invoke-Sql $sql -Json)
@@ -587,8 +616,8 @@ WITH fleet_week AS (
 SELECT period_end,weeks,gaps,CASE WHEN weeks=4 AND gaps=0 THEN round(idle28*100.0/nullif(engine28,0),2) END p28
 FROM rolling ORDER BY period_end;
 '@ -Json)
-    $over=@($drivers | Where-Object {$null -ne $_.p7 -and [double]$_.p7 -gt 50}).Count
-    $coachedOver=@($drivers | Where-Object {$null -ne $_.p7 -and [double]$_.p7 -gt 50 -and [int]$_.coached-eq1}).Count
+    $over=@($drivers | Where-Object {$null -ne $_.p28 -and [double]$_.p28 -gt 50}).Count
+    $coachedOver=@($drivers | Where-Object {$null -ne $_.p28 -and [double]$_.p28 -gt 50 -and [int]$_.coached-eq1}).Count
     $coachedPercent=if($over-gt0){[math]::Round($coachedOver*100.0/$over,1)}else{$null}
     # Exact 0% and 100% weekly values are retained as source data but excluded from
     # comparative Top 5 rankings as likely telemetry/reporting edge cases. This guard
@@ -691,9 +720,10 @@ SELECT json_object(
     'idle_hours',idle_hours,'percent',percent)) FROM (SELECT period_start,period_end,engine_hours,idle_hours,
     round(idle_hours*100.0/nullif(engine_hours,0),2) percent FROM idle_periods WHERE driver_id=$Id ORDER BY period_end DESC LIMIT 12)),'[]')),
   'idle_coaching',json(coalesce((SELECT json_group_array(json_object('cycle_key',cycle_key,'talked_at',talked_at,'idle_plan',idle_plan,
-    'idle_percent',idle_percent,'period_end',period_end,'snapshot_captured',snapshot_captured)) FROM (
+    'idle_percent',idle_percent,'period_end',period_end,'snapshot_basis',snapshot_basis,'snapshot_captured',snapshot_captured)) FROM (
       SELECT c.cycle_key,coalesce(c.completed_at,c.updated_at,c.opened_at) talked_at,c.idle_plan,
         c.idle_percent_snapshot idle_percent,c.idle_period_end_snapshot period_end,
+        coalesce(c.idle_snapshot_basis,'rolling_7d_legacy') snapshot_basis,
         CASE WHEN c.idle_percent_snapshot IS NOT NULL OR c.idle_period_end_snapshot IS NOT NULL THEN 1 ELSE 0 END snapshot_captured
       FROM driver_call_sessions c
       WHERE c.driver_id=$Id AND trim(coalesce(c.idle_plan,''))<>''
@@ -719,6 +749,7 @@ SELECT json_object(
     if([string]::IsNullOrWhiteSpace($json)){throw 'Driver not found'}
     $card=ConvertFrom-Json -InputObject $json
     if($null -eq $card.driver){throw 'Driver not found'}
+    $card|Add-Member -NotePropertyName idle28 -NotePropertyValue (Get-WaaWeighted28Snapshot -DriverId $Id) -Force
     if(Test-WaaLiveStoreOnline){
         $card.work=Get-WaaLiveWork $Id
         $followups=Get-WaaLiveFollowups $Id
@@ -800,6 +831,7 @@ WITH coaching AS (
          trim(c.idle_plan) idle_plan,
          c.idle_percent_snapshot idle_percent,
          c.idle_period_end_snapshot period_end,
+         coalesce(c.idle_snapshot_basis,'rolling_7d_legacy') snapshot_basis,
          CASE WHEN c.idle_percent_snapshot IS NOT NULL OR c.idle_period_end_snapshot IS NOT NULL THEN 1 ELSE 0 END snapshot_captured,
          CASE WHEN instr(c.cycle_key,'|')>0 THEN substr(c.cycle_key,1,instr(c.cycle_key,'|')-1) ELSE '' END cycle_truck
   FROM driver_call_sessions c
@@ -811,7 +843,7 @@ SELECT c.id,c.driver_id,d.full_name,d.pta_code,
                    WHERE th.driver_id=c.driver_id AND th.observed_at<=c.talked_at
                    ORDER BY th.observed_at DESC,th.id DESC LIMIT 1),'')
        ELSE c.cycle_truck END truck,
-       c.talked_at,c.idle_plan,c.idle_percent,c.period_end,c.snapshot_captured
+       c.talked_at,c.idle_plan,c.idle_percent,c.period_end,c.snapshot_basis,c.snapshot_captured
 FROM coaching c
 JOIN drivers d ON d.id=c.driver_id
 ORDER BY c.talked_at DESC,c.id DESC;
@@ -995,4 +1027,4 @@ function Restore-Waa {
 
 . (Join-Path $PSScriptRoot 'LiveStore.ps1')
 
-Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,ConvertTo-SqlLiteral,Parse-Date,Split-ImportRows,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-Dashboard,Get-CurrentDrivers,Get-CurrentDriver,Get-CurrentMissingBols,Get-DriverCard,Get-IdleCoachingLog,Save-DriverAction,Get-Organizer,Get-DailyActivity,Clear-DailyActivityNoise,Remove-DailyActivity,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa,Initialize-WaaLiveStore,Initialize-WaaLiveDomain,Invoke-WaaLiveCheckpoint,Invoke-WaaLiveCheckpointIfDue,Reset-WaaLiveDomainFromSqlite,Close-WaaLiveStore,Get-WaaLiveHealth,Get-WaaLiveCall,Get-WaaLivePrefix,Set-WaaLiveCallField
+Export-ModuleMember -Function Initialize-Waa,Invoke-Sql,ConvertTo-SqlLiteral,Parse-Date,Split-ImportRows,Convert-DriverCode,Get-ImportPreview,Import-WaaData,Get-WaaWeighted28Snapshot,Get-Dashboard,Get-CurrentDrivers,Get-CurrentDriver,Get-CurrentMissingBols,Get-DriverCard,Get-IdleCoachingLog,Save-DriverAction,Get-Organizer,Get-DailyActivity,Clear-DailyActivityNoise,Remove-DailyActivity,Get-Transition,Save-Transition,Get-DataQuality,Resolve-Identity,Get-SafetyNote,Backup-Waa,Restore-Waa,Initialize-WaaLiveStore,Initialize-WaaLiveDomain,Invoke-WaaLiveCheckpoint,Invoke-WaaLiveCheckpointIfDue,Reset-WaaLiveDomainFromSqlite,Close-WaaLiveStore,Get-WaaLiveHealth,Get-WaaLiveCall,Get-WaaLivePrefix,Set-WaaLiveCallField

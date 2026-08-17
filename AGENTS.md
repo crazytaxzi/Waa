@@ -91,7 +91,7 @@ Use only HTML/CSS/vanilla JS/ES modules/SVG. No frontend framework, third-party 
 Show:
 - interactive neon-green SVG fleet 7-day rolling idle graph for all valid history
 - interactive neon-purple SVG fleet 28-day graph
-- count of drivers above 50% latest valid 7-day idle
+- count of drivers above 50% weighted 28-day idle; only those drivers are eligible for idle coaching
 - `Heroes`: five lowest valid idle drivers
 - `Heroes in Training`: five highest valid idle drivers
 

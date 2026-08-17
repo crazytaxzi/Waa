@@ -43,7 +43,7 @@ The Driver Work Card is designed to follow a real phone conversation rather than
 
 1. Fuel and immediate needs
 2. ETA and timing
-3. Idle coaching
+3. Idle coaching only when weighted 28-day idle is above 50%
 4. Help on the load, including preplan/routing
 5. Home time and schedule
 6. Missing BOL/admin close-out
@@ -67,7 +67,7 @@ The UI uses the same neon operations-console design throughout the dashboard, qu
 
 The two 7-day Top 5 lists exclude exact 0% and 100% readings as likely telemetry/reporting edge cases. Those records remain stored and visible, and the safeguard does not filter, clamp, or otherwise alter the fleet or driver weighted 28-day calculations.
 
-The **Above 50% Coached** dashboard card measures drivers whose latest Rolling 7-Day idle is above 50% and who have a non-empty Idle Coaching plan saved in any Driver Card call session. It shows the coached percentage plus the exact coached/eligible driver counts. This coaching metric does not change idle measurements or Top 5 membership.
+The **28D >50% Coached** dashboard card measures only drivers whose complete weighted 28-day idle is above 50%. The Idle Coaching queue uses that same criterion, ordered by highest weighted 28-day percentage. The Driver Work Card treats idle as informational and automatically skips coaching when 28-day coverage is incomplete or the weighted result is 50% or lower; the server also rejects a new non-empty idle coaching plan unless the weighted 28-day result exceeds 50%. New coaching records snapshot the weighted 28-day percentage, period end, and basis so they remain auditable without rewriting older 7-day coaching history. This rule does not change the separate 7-day Top 5 rankings.
 
 Daily Review is intentionally driver-specific. System-level audit events such as imports, backups, transition regeneration, automatic identity evidence/merges, and other non-driver messages remain outside the review list. Repeated identity scans no longer create driver audit events.
 

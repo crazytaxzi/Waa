@@ -2,6 +2,8 @@
 
 ## Delivered
 
+The 2026-08-17 idle-coaching correction changes the coaching threshold to the actual operating rule: **coach only when complete weighted 28-day idle exceeds 50%**. Dashboard eligibility, the Idle Coaching attention queue, Driver Work Card step behavior, and server-side conversation writes all use the weighted 28-day result. Drivers at 50% or lower, or without four consecutive valid weekly reports, are not coaching targets. New coaching records persist the weighted percentage, period end, and `weighted_28d` basis; legacy snapshot rows remain distinguishable as prior 7-day history.
+
 The 2026-08-16 optimization pass adds first-class **DOT trailer accountability**. `DOT Table` CSV/text exports are detected in Downloads, source-preserved in import batches, and normalized from repeated Tableau `Measure Names` rows into one trailer record per import. The new DOT page is a dense sortable spreadsheet rather than a card/radio workflow: it defaults to oldest Last DOT first, recalculates age from the actual date instead of trusting stale exported day counts, supports search plus status/KMA filters, and keeps persistent per-trailer Hide/Unhide preferences outside source evidence. Customer-site distance from ZIP 83501 is stored once and inherited by every current/future trailer at that customer; the app deliberately leaves mileage unresolved when the report provides no trustworthy address/ZIP instead of fabricating distance from KMA.
 
 This pass also fixed two target-Windows reliability defects discovered during clean validation. LMDB platform selection no longer trusts the optional `$env:OS` variable; it uses .NET's actual OS platform, preventing Windows PowerShell launched without that environment variable from trying to load `liblmdb.so`. The native XLSX test harness now explicitly loads both `System.IO.Compression` and `System.IO.Compression.FileSystem`, making its `ZipArchive` fixture generator portable on Windows PowerShell 5.1.
@@ -40,7 +42,7 @@ The main dashboard 28-day chart now explicitly binds the shared chart renderer t
 
 Driver Card transition selection now synchronizes the persisted transition draft immediately. Generated drafts use `<truck> - <driver name> : <transition note>` lines in truck order. For manually edited drafts, synchronization surgically replaces only the affected driver's generated line, preserving unrelated manual content instead of requiring Regenerate or overwriting the draft.
 
-The dashboard includes **Above 50% Coached**: the percentage of drivers whose latest Rolling 7-Day idle exceeds 50% and who have a non-empty Idle Coaching plan saved in a Driver Card call session. The card also exposes the exact coached/eligible counts, keeping the result auditable.
+The dashboard includes **28D >50% Coached**: the percentage of drivers whose complete weighted 28-day idle exceeds 50% and who have a coaching plan captured against that same current weighted period. The Idle Coaching page uses the identical eligibility rule and sorts by weighted 28-day percentage. New coaching snapshots explicitly store their basis so historical 7-day conversations cannot be mistaken for current 28-day coaching evidence.
 
 Daily Review now returns only audit events attached to a valid canonical driver. System/import/backup and other non-driver audit messages remain persisted but no longer clutter the driver activity review.
 
@@ -70,6 +72,13 @@ Operational SQLite lives only at `%LOCALAPPDATA%\Waa\waa.db`. The schema covers 
 - DOT trailers: CSV/tab export detection, repeated Tableau measure-row collapse, leading-zero trailer preservation, normalized Last DOT/T2 dates, preserved source day-count evidence, and customer-key normalization for persistent distance mapping.
 
 Preview never writes. Commit reparses the supplied raw source, validates rows, records parser/source metadata and the exact source, and rejects exact duplicates by SHA-256. Ambiguous or unmatched identity evidence remains visible for explicit alias resolution.
+
+## Validation completed - 2026-08-17 weighted 28-day coaching correction
+
+- `tests/Run-Tests.ps1`: **101/101 assertions passed**, including a regression where latest 7-day idle is 20% but weighted 28-day idle is 65%; that driver remains coaching-eligible because the 28-day result is the source of truth.
+- The same regression verifies coaching falls out at exactly 50% weighted 28-day and the backend refuses a new idle plan at or below the threshold.
+- New coaching snapshots persist `idle_percent_snapshot`, `idle_period_end_snapshot`, and `idle_snapshot_basis=weighted_28d`; legacy rows remain explicitly labeled as prior 7-day basis instead of being reinterpreted.
+- Browser and PowerShell syntax checks pass. `tests/Dot.Tests.ps1` passed, `tests/Identity.Tests.ps1` passed 18/18, and the 500-row PTA pipeline remained `responsive` at 202.0 ms total (15.5 ms parse, 7.0 ms database).
 
 ## Validation completed — 2026-08-16 DOT / Windows reliability revision
 

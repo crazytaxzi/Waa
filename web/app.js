@@ -1,4 +1,4 @@
-import { renderDotTracking } from './dot.js?v=20260816.1';
+import { renderDotTracking } from './dot.js?v=20260817.1';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -277,11 +277,11 @@ async function dashboard() {
 
   $('#app').innerHTML = pageHead('Fleet Pulse', 'Current idle performance, coaching priorities, and 28-day data coverage.') + `
     <section class="metrics-strip">
-      ${metricCard('Over 50% idle', String(data.over50), 'Latest valid rolling 7-day', data.over50 ? 'red' : 'green')}
+      ${metricCard('Over 50% 28D idle', String(data.over50), 'Weighted 28-day above coaching threshold', data.over50 ? 'red' : 'green')}
       ${metricCard('Tracked drivers', String(data.drivers.length), 'Drivers with current idle data', 'blue')}
       ${metricCard('28-day ready', `${data.coverage28?.complete_drivers || 0}/${data.coverage28?.tracked_drivers || 0}`, `Fleet history ${data.coverage28?.fleet_weeks || 0}/4 weeks`, data.coverage28?.fleet_ready ? 'green' : 'purple')}
       ${metricCard('Best current idle', data.heroes?.[0] ? fmtPercent(data.heroes[0].p7) : '—', data.heroes?.[0]?.full_name || 'Awaiting data', 'green', data.heroes?.[0]?.id)}
-      ${metricCard('Above 50% coached', data.coaching?.percent == null ? '—' : fmtPercent(data.coaching.percent), `${data.coaching?.coached || 0} of ${data.coaching?.eligible || 0} drivers coached`, data.coaching?.eligible && data.coaching.coached === data.coaching.eligible ? 'green' : 'purple')}
+      ${metricCard('28D >50% coached', data.coaching?.percent == null ? '—' : fmtPercent(data.coaching.percent), `${data.coaching?.coached || 0} of ${data.coaching?.eligible || 0} eligible drivers coached`, data.coaching?.eligible && data.coaching.coached === data.coaching.eligible ? 'green' : 'purple')}
     </section>
     <section class="dashboard-grid">
       <div class="glass-panel chart-panel green-edge">
@@ -433,8 +433,8 @@ function openIdleCoachingSummary(driverId) {
     <header class="activity-modal-head"><div><p class="eyebrow">Idle coaching history</p><h2 id="activityModalTitle">${esc(driver.truck || 'No truck')} · ${esc(driver.full_name)}</h2><p>${rows.length} idle conversation${rows.length === 1 ? '' : 's'} recorded for this driver</p></div><button class="open" data-id="${driver.driver_id}" type="button">Open Driver Work Card</button></header>
     <div class="activity-summary-chips">
       <span><b>${rows.length}</b> conversations</span>
-      <span><b>${fmtPercent(Number.isFinite(latestScore) ? latestScore : null)}</b> latest 7D</span>
-      <span><b>${fmtPercent(highScore)}</b> highest 7D</span>
+      <span><b>${fmtPercent(Number.isFinite(latestScore) ? latestScore : null)}</b> latest captured</span>
+      <span><b>${fmtPercent(highScore)}</b> highest captured</span>
       <span><b>${over50}</b> over 50%</span>
     </div>
     <div class="activity-popup-list idle-popup-list">${rows.map(row => {
@@ -443,7 +443,7 @@ function openIdleCoachingSummary(driverId) {
       const period = row.period_end ? new Date(row.period_end).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : null;
       return `<article class="activity-row idle-summary-row">
         <time>${esc(displayUtcDate(row.talked_at))}</time>
-        <div class="idle-summary-score ${tone}"><b>${fmtPercent(row.idle_percent)}</b><small>${row.snapshot_captured ? (period ? `7D ending ${esc(period)}` : 'Snapshot captured · No Data') : 'Legacy · idle % was not stored'}</small></div>
+        <div class="idle-summary-score ${tone}"><b>${fmtPercent(row.idle_percent)}</b><small>${row.snapshot_captured ? (period ? `${row.snapshot_basis === 'weighted_28d' ? 'Weighted 28D' : 'Legacy 7D'} ending ${esc(period)}` : 'Snapshot captured - No Data') : 'Legacy - idle % was not stored'}</small></div>
         <div><b>${esc(row.idle_plan)}</b><small>${esc(row.truck || 'No truck')} · ${esc(row.pta_code || 'No PTA code')}</small></div>
       </article>`;
     }).join('')}</div>`;
@@ -464,51 +464,51 @@ async function idleCoachingLog() {
   });
   state.idleRowsByDriver = groups;
   const currentOver50 = (dashboardData.drivers || [])
-    .filter(driver => Number.isFinite(Number(driver.p7)) && Number(driver.p7) > 50)
-    .sort((a, b) => Number(b.p7) - Number(a.p7) || String(a.full_name).localeCompare(String(b.full_name)));
+    .filter(driver => Number.isFinite(Number(driver.p28)) && Number(driver.p28) > 50)
+    .sort((a, b) => Number(b.p28) - Number(a.p28) || String(a.full_name).localeCompare(String(b.full_name)));
   const groupSearch = new Map([...groups].map(([id, conversations]) => [
     id,
     conversations.map(row => `${row.full_name} ${row.truck} ${row.pta_code} ${row.idle_plan}`).join(' ').toLowerCase()
   ]));
   const latest = rows[0];
 
-  $('#app').innerHTML = pageHead('Idle Coaching', 'Current drivers above 50% first, followed by one coaching-history card per driver.', 'WAA // Coaching Record') + `
+  $('#app').innerHTML = pageHead('Idle Coaching', 'Only drivers above 50% on weighted 28-day idle require coaching; history remains available below.', 'WAA // Coaching Record') + `
     <section class="idle-log-summary">
-      <div class="idle-log-metric"><span>Current over 50%</span><b>${currentOver50.length}</b><small>Latest Rolling 7-Day report</small></div>
+      <div class="idle-log-metric"><span>Current 28D over 50%</span><b>${currentOver50.length}</b><small>Weighted 28-day coaching threshold</small></div>
       <div class="idle-log-metric"><span>Conversations</span><b>${rows.length}</b><small>Idle discussions recorded</small></div>
       <div class="idle-log-metric"><span>Drivers coached</span><b>${groups.size}</b><small>Drivers with idle history</small></div>
       <div class="idle-log-metric"><span>Most recent coaching</span><b>${latest ? esc(displayUtcDate(latest.talked_at)) : '—'}</b><small>${latest ? esc(latest.full_name) : 'No coaching recorded yet'}</small></div>
     </section>
     <details class="glass-panel idle-attention-panel idle-attention-details" open>
       <summary class="idle-attention-toggle">
-        <span class="idle-attention-toggle-title"><span class="eyebrow">Current Rolling 7-Day attention</span><b>Drivers Above 50%</b></span>
+        <span class="idle-attention-toggle-title"><span class="eyebrow">Weighted 28-Day attention</span><b>Drivers Above 50%</b></span>
         <span class="idle-attention-toggle-meta"><strong>${currentOver50.length}</strong><em aria-hidden="true"></em></span>
       </summary>
       <div class="idle-attention-body">
-        <p class="idle-attention-copy">Highest idle percentage first. Previous and Next in the Work Card will stay inside this current over-50 list.</p>
+        <p class="idle-attention-copy">Highest weighted 28-day idle first. Previous and Next in the Work Card stay inside this coaching-required list.</p>
         <div class="idle-attention-list">${currentOver50.length ? currentOver50.map((driver, index) => {
         const history = groups.get(Number(driver.id)) || [];
         const currentPeriod = String(driver.period_end7 || '').slice(0, 10);
         const currentHistory = currentPeriod
-          ? history.filter(row => String(row.period_end || '').slice(0, 10) === currentPeriod)
+          ? history.filter(row => row.snapshot_basis === 'weighted_28d' && String(row.period_end || '').slice(0, 10) === currentPeriod)
           : [];
         const lastTalk = currentHistory[0];
         const periodLabel = currentPeriod
           ? new Date(`${currentPeriod}T00:00:00`).toLocaleDateString([], { month: 'short', day: 'numeric' })
           : null;
         const historyCopy = currentHistory.length
-          ? `${currentHistory.length} conversation${currentHistory.length === 1 ? '' : 's'} for 7D ending ${periodLabel} · last ${displayUtcDate(lastTalk.talked_at)}`
+          ? `${currentHistory.length} conversation${currentHistory.length === 1 ? '' : 's'} for weighted 28D ending ${periodLabel} - last ${displayUtcDate(lastTalk.talked_at)}`
           : history.length
-            ? `Previous coaching is history · current 7D${periodLabel ? ` ends ${periodLabel}` : ''}`
-            : `No coaching yet for current 7D${periodLabel ? ` ending ${periodLabel}` : ''}`;
+            ? `Previous coaching is history - current weighted 28D${periodLabel ? ` ends ${periodLabel}` : ''}`
+            : `No coaching yet for current weighted 28D${periodLabel ? ` ending ${periodLabel}` : ''}`;
         return `<button class="idle-attention-row" data-idle-attention-driver="${driver.id}" type="button">
           <span class="idle-attention-rank">${index + 1}</span>
           <span class="idle-attention-driver"><b>${esc(driver.truck || 'No truck')} · ${esc(driver.full_name)}</b><small>${esc(driver.pta_code || 'No PTA code')}</small></span>
-          <span class="idle-attention-history ${currentHistory.length ? 'coached' : 'new'}"><b>${currentHistory.length ? 'Coached for current 7D' : 'Needs idle talk this 7D'}</b><small>${esc(historyCopy)}</small></span>
-          <span class="idle-attention-score"><b>${fmtPercent(driver.p7)}</b><small>${driver.p28 == null ? '28D No Data' : `${fmtPercent(driver.p28)} 28D`}</small></span>
+          <span class="idle-attention-history ${currentHistory.length ? 'coached' : 'new'}"><b>${currentHistory.length ? 'Coached for current 28D' : 'Needs idle coaching'}</b><small>${esc(historyCopy)}</small></span>
+          <span class="idle-attention-score"><b>${fmtPercent(driver.p28)}</b><small>${driver.p7 == null ? '7D No Data' : `${fmtPercent(driver.p7)} latest 7D`}</small></span>
           <strong>Open Work Card →</strong>
         </button>`;
-      }).join('') : '<p class="empty-copy idle-attention-empty">Nobody is above 50% on the latest Rolling 7-Day report.</p>'}</div>
+      }).join('') : '<p class="empty-copy idle-attention-empty">Nobody is above 50% on weighted 28-day idle.</p>'}</div>
       </div>
     </details>
     <section class="glass-panel idle-log-panel">
@@ -533,7 +533,7 @@ async function idleCoachingLog() {
         <span class="activity-driver-count">${conversations.length}</span>
         <span class="idle-driver-identity"><b>${esc(latestConversation.truck || 'No truck')} · ${esc(latestConversation.full_name)}</b><small>${esc(latestConversation.pta_code || 'No PTA code')} · Last coached ${esc(displayUtcDate(latestConversation.talked_at))}</small></span>
         <span class="idle-driver-preview"><small>Latest idle conversation</small><b>${esc(latestConversation.idle_plan)}</b></span>
-        <span class="idle-driver-score ${tone}"><b>${fmtPercent(latestConversation.idle_percent)}</b><small>latest 7D at talk</small></span>
+        <span class="idle-driver-score ${tone}"><b>${fmtPercent(latestConversation.idle_percent)}</b><small>${latestConversation.snapshot_basis === 'weighted_28d' ? 'weighted 28D at talk' : 'legacy 7D at talk'}</small></span>
         <strong>Review Coaching →</strong>
       </button>`;
     }).join('') : '<p class="empty-copy idle-log-empty">No driver idle coaching records match this search.</p>';
@@ -837,7 +837,7 @@ function completedCallSteps(card, conversation) {
   return new Set([
     (conversation.fuel_status && conversation.fuel_status !== 'Unknown') || conversation.fuel_note ? 1 : 0,
     conversation.driver_eta || (conversation.eta_status && conversation.eta_status !== 'Unknown') ? 2 : 0,
-    conversation.idle_plan ? 3 : 0,
+    (!(Number.isFinite(Number(card.idle28?.percent)) && Number(card.idle28.percent) > 50) || conversation.idle_plan) ? 3 : 0,
     (conversation.load_help_status && conversation.load_help_status !== 'Unknown') ||
       (work.preplan_response && work.preplan_response !== 'Unknown') ||
       (work.routing_status && work.routing_status !== 'Unknown') ? 4 : 0,
@@ -899,7 +899,7 @@ function idleCoachingHistory(items, currentCycle) {
       <div class="idle-history-title"><div><p class="eyebrow">Idle only</p><h4>Previous Idle Coaching</h4></div><span>${rows.length}</span></div>
       ${rows.length ? rows.map(item => `
         <article class="idle-history-row">
-          <div class="idle-history-stat"><b>${fmtPercent(item.idle_percent)}</b><small>${item.snapshot_captured ? (item.period_end ? `7D ending ${esc(new Date(item.period_end).toLocaleDateString([], { month: 'short', day: 'numeric' }))}` : 'Snapshot captured · No Data') : 'Legacy · idle % was not stored'}</small></div>
+          <div class="idle-history-stat"><b>${fmtPercent(item.idle_percent)}</b><small>${item.snapshot_captured ? (item.period_end ? `${item.snapshot_basis === 'weighted_28d' ? 'Weighted 28D' : 'Legacy 7D'} ending ${esc(new Date(item.period_end).toLocaleDateString([], { month: 'short', day: 'numeric' }))}` : 'Snapshot captured - No Data') : 'Legacy - idle % was not stored'}</small></div>
           <div class="idle-history-copy"><time>${esc(displayUtcDate(item.talked_at))}</time><p>${esc(item.idle_plan)}</p></div>
         </article>`).join('') : '<p class="empty-copy">No previous idle coaching recorded for this driver.</p>'}
     </section>`;
@@ -934,9 +934,13 @@ async function openCard(id) {
   const driver = card.driver;
   const work = card.work || {};
   const latestIdle = card.idle?.[0];
-  const idlePrompt = Number(latestIdle?.percent) > 50
-    ? 'What can we change together to pull that idle number down?'
-    : 'What is working well that is keeping idle under control?';
+  const weighted28 = card.idle28 || {};
+  const idleEligible = Number.isFinite(Number(weighted28.percent)) && Number(weighted28.percent) > 50;
+  const idlePrompt = idleEligible
+    ? `Weighted 28-day idle is ${fmtPercent(weighted28.percent)}. What can we change together to pull that number down?`
+    : weighted28.percent == null
+      ? 'No idle coaching required: a complete weighted 28-day value is not available.'
+      : `No idle coaching required: weighted 28-day idle is ${fmtPercent(weighted28.percent)}, at or below 50%.`;
   const completedSteps = completedCallSteps(card, conversation);
   const initialStep = conversation.completed_at ? 7 : ([1, 2, 3, 4, 5, 6, 7].find(step => !completedSteps.has(step)) || 7);
   const queueIndex = state.cardQueue.indexOf(requestedId);
@@ -965,9 +969,9 @@ async function openCard(id) {
       ${optionalDetail('Add ETA detail only if it matters', conversationText('What is affecting it?', 'eta_note', conversation.eta_note, 'Traffic, shipper delay, weather…'), !!conversation.eta_note)}
       <details class="inline-detail"><summary>Adjust imported PTA only if needed</summary><label class="field"><span>Manual PTA observation</span><input data-action="pta" type="datetime-local" value="${esc(driver.pta_at?.slice(0, 16) || '')}"></label></details>`, 'blue-step'),
     callStep(3, 'Idle Coaching', idlePrompt, `
-      <div class="idle-coach-head"><div><span>Latest 7D</span><b>${fmtPercent(latestIdle?.percent)}</b></div><div><span>Engine</span><b>${fmtHours(latestIdle?.engine_hours)}</b></div><div><span>Idle</span><b>${fmtHours(latestIdle?.idle_hours)}</b></div></div>
+      <div class="idle-coach-head"><div><span>Weighted 28D</span><b>${fmtPercent(weighted28.percent)}</b></div><div><span>Latest 7D</span><b>${fmtPercent(latestIdle?.percent)}</b></div><div><span>28D Engine</span><b>${fmtHours(weighted28.engine_hours)}</b></div></div>
       ${chart([...(card.idle || [])].reverse(), { field: 'percent', tone: 'green', title: 'Driver rolling idle history', compact: true })}
-      ${conversationArea('What is their plan / what is working?', 'idle_plan', conversation.idle_plan, 'Keep it natural: “going to shut down during long waits”, “APU issue needs help”, “current routine is working”…')}
+      ${idleEligible ? conversationArea('What is their plan to reduce idle?', 'idle_plan', conversation.idle_plan, 'Keep it natural: shut down during long waits, address an APU issue, change break routine...') : '<p class="empty-copy">This step is informational only. Do not coach idle unless weighted 28-day idle is above 50%.</p>'}
       ${idleCoachingHistory(card.idle_coaching || [], conversation.cycle_key)}`, 'purple-step'),
     callStep(4, 'Help on the Load', 'Keep the main answers quick. Open a detail only when there is actually something to explain.', `
       <div class="field-grid">
