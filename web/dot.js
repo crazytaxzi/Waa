@@ -26,7 +26,7 @@ export async function renderDotTracking(context) {
   const header = (key, label) => `<button type="button" class="sheet-sort" data-sort="${key}">${esc(label)}<span data-sort-mark="${key}"></span></button>`;
   document.querySelector('#app').innerHTML = pageHead(
     'DOT Trailers',
-    `One row per trailer. Last DOT is the inspection date; due is 365 days later, and overdue is days past that due point. Distance is stored by customer from ZIP ${data.origin_zip}.`,
+    `One row per trailer. Last DOT is the inspection date; due is 365 days later, overdue is days past that due point, and Last Ping comes from T2 Date. Distance is stored by customer from ZIP ${data.origin_zip}.`,
     'WAA // DOT Accountability'
   ) + `
     <section class="sheet-panel">
@@ -45,7 +45,7 @@ export async function renderDotTracking(context) {
       </div>
       <div class="table-scroll dot-sheet-scroll"><table class="dot-sheet">
         <thead><tr>
-          <th>${header('trailer','Trailer')}</th><th>${header('days_overdue','Due Status')}</th><th>${header('last_dot_date','Inspection')}</th><th>${header('due_date','Due')}</th>
+          <th>${header('trailer','Trailer')}</th><th>${header('days_overdue','Due Status')}</th><th>${header('last_dot_date','Inspection')}</th><th>${header('due_date','Due')}</th><th>${header('t2_date','Last Ping')}</th>
           <th>${header('miles_from_83501',`Miles from ${data.origin_zip}`)}</th><th>${header('status','Status')}</th><th>${header('customer','Customer')}</th>
           <th>${header('kma','KMA')}</th><th>${header('responsible_csr','CSR')}</th><th>${header('responsible_csr_supervisor','Supervisor')}</th><th>Visibility</th>
         </tr></thead><tbody id="dotBody"></tbody>
@@ -77,11 +77,11 @@ export async function renderDotTracking(context) {
       <tr class="${Number(row.hidden) ? 'dot-hidden-row' : ''}">
         <td><b class="truck-no">${esc(row.trailer)}</b></td>
         <td class="dot-age"><b>${row.days_overdue == null ? 'Unknown' : Number(row.days_overdue) > 0 ? `${Number(row.days_overdue).toLocaleString()}d overdue` : Number(row.days_overdue) === 0 ? 'Due today' : `${Math.abs(Number(row.days_overdue)).toLocaleString()}d left`}</b></td>
-        <td>${esc(row.last_dot_date || 'Unknown')}</td><td>${esc(row.due_date || 'Unknown')}</td>
+        <td>${esc(row.last_dot_date || 'Unknown')}</td><td>${esc(row.due_date || 'Unknown')}</td><td>${esc(row.t2_date || 'Unknown')}</td>
         <td>${distanceCell(row)}</td><td>${esc(row.status || 'Unknown')}</td><td>${esc(row.customer || 'Unknown')}</td>
         <td>${esc(row.kma || 'Unknown')}</td><td>${esc(row.responsible_csr || 'Unknown')}</td><td>${esc(row.responsible_csr_supervisor || 'Unknown')}</td>
         <td><button class="compact ${Number(row.hidden) ? '' : 'secondary'}" type="button" data-dot-hide="${esc(row.trailer)}" data-hidden="${Number(row.hidden) ? 'false' : 'true'}">${Number(row.hidden) ? 'Unhide' : 'Hide'}</button></td>
-      </tr>`).join('') || '<tr><td colspan="11" class="sheet-empty">No trailers match this view.</td></tr>';
+      </tr>`).join('') || '<tr><td colspan="12" class="sheet-empty">No trailers match this view.</td></tr>';
     document.querySelector('#dotCount').textContent = `${visible.length} shown`;
     document.querySelector('#dotHiddenCount').textContent = rows.filter(row => Number(row.hidden)).length;
     document.querySelector('#dotUnresolvedCount').textContent = rows.filter(row => row.miles_from_83501 == null || row.miles_from_83501 === '').length;

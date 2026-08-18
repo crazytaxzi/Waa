@@ -2,6 +2,8 @@
 
 ## Delivered
 
+The 2026-08-18 DOT follow-up exposes the already-normalized T2 Date field as a sortable **Last Ping** column in the DOT spreadsheet. The source value remains unchanged in storage/API; this is a presentation and accountability correction only.
+
 The 2026-08-17 DOT correction fixes the inspection-date interpretation. `Last DOT Date` is the date the inspection was completed, not its due date. WAA calculates due date as inspection + 365 days and priority as days since inspection minus 365: positive values are days overdue, zero is due today, and negative values are days remaining. Default DOT sorting is most overdue first. Source dates and exported `Days Since Last DOT` values remain preserved unchanged as evidence.
 
 The 2026-08-17 idle-coaching correction changes the coaching threshold to the actual operating rule: **coach only when complete weighted 28-day idle exceeds 50%**. Dashboard eligibility, the Idle Coaching attention queue, Driver Work Card step behavior, and server-side conversation writes all use the weighted 28-day result. Drivers at 50% or lower, or without four consecutive valid weekly reports, are not coaching targets. New coaching records persist the weighted percentage, period end, and `weighted_28d` basis; legacy snapshot rows remain distinguishable as prior 7-day history.

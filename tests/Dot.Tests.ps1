@@ -20,6 +20,7 @@ try {
     Assert-Dot ($parsed.rows.Count -eq 4) '8 Tableau measure rows must collapse to 4 trailers'
     $oldest = @($parsed.rows | Where-Object { $_.trailer -eq '001001' })[0]
     Assert-Dot ($oldest.last_dot_date -eq '2023-01-31') 'Last DOT date should normalize'
+    Assert-Dot ($oldest.t2_date -eq '2026-08-16') 'T2 Date should normalize as Last Ping'
     Assert-Dot ($oldest.source_days_since_last_dot -eq -928) 'source measure should be preserved as evidence'
     $import = Import-WaaDotReport -Raw $raw -Filename 'DOT Table_data.csv'
     Assert-Dot $import.imported 'first DOT import should insert data'

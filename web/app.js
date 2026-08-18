@@ -1,4 +1,4 @@
-import { renderDotTracking } from './dot.js?v=20260817.2';
+import { renderDotTracking } from './dot.js?v=20260818.1';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
