@@ -92,10 +92,10 @@ Show:
 - interactive neon-green SVG fleet 7-day rolling idle graph for all valid history
 - interactive neon-purple SVG fleet 28-day graph
 - count of drivers above 50% weighted 28-day idle; only those drivers are eligible for idle coaching
-- `Heroes`: five lowest valid idle drivers
-- `Heroes in Training`: five highest valid idle drivers
+- `Heroes`: five lowest valid current 7-day idle drivers
+- `Heroes in Training` / Coaching Priority: up to five drivers with complete weighted 28-day idle strictly above 50%, sorted by weighted 28-day idle descending
 
-Hero cards show rank, driver, current truck, 7D %, 28D %, engine hours, and trend. Purpose is to learn from low idlers and coach high idlers.
+Hero cards show rank, driver, current truck, 7D %, 28D %, engine hours, and trend. Strong Performers use current 7D as their primary ranking value; Coaching Priority uses weighted 28D as its primary ranking value and shows 7D only as context.
 
 ## PTA Tracking
 

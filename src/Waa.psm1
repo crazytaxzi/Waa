@@ -645,12 +645,14 @@ FROM rolling ORDER BY period_end;
     $coachedOver=@($drivers | Where-Object {$null -ne $_.p28 -and [double]$_.p28 -gt 50 -and [int]$_.coached-eq1}).Count
     $coachedPercent=if($over-gt0){[math]::Round($coachedOver*100.0/$over,1)}else{$null}
     # Exact 0% and 100% weekly values are retained as source data but excluded from
-    # comparative Top 5 rankings as likely telemetry/reporting edge cases. This guard
-    # intentionally does not alter fleet history or any weighted 28-day calculation.
-    $valid=@($drivers | Where-Object {$null -ne $_.p7 -and [double]$_.p7 -gt 0 -and [double]$_.p7 -lt 100} | Sort-Object {[double]$_.p7})
+    # the low-idle 7-day Heroes ranking as likely telemetry/reporting edge cases.
+    $valid7=@($drivers | Where-Object {$null -ne $_.p7 -and [double]$_.p7 -gt 0 -and [double]$_.p7 -lt 100} | Sort-Object {[double]$_.p7})
+    # Coaching Priority must use the same business rule as idle coaching itself:
+    # complete weighted 28-day data, strictly above 50%, highest weighted 28D first.
+    $training=@($drivers | Where-Object {$_.coverage28 -eq 'Complete' -and $null -ne $_.p28 -and [double]$_.p28 -gt 50} | Sort-Object {[double]$_.p28} -Descending | Select-Object -First 5)
     $complete28=@($drivers|Where-Object{$_.coverage28-eq'Complete'}).Count
     $latestFleet28=if($history28.Count){$history28[-1]}else{$null}
-    return @{drivers=$drivers;heroes=@($valid|Select-Object -First 5);training=@($valid|Sort-Object {[double]$_.p7} -Descending|Select-Object -First 5);over50=$over;coaching=@{coached=$coachedOver;eligible=$over;percent=$coachedPercent};history7=$history;history28=$history28;coverage28=@{complete_drivers=$complete28;tracked_drivers=$drivers.Count;fleet_weeks=$(if($null-ne$latestFleet28){[int]$latestFleet28.weeks}else{0});fleet_ready=($null-ne$latestFleet28-and$null-ne$latestFleet28.p28)}}
+    return @{drivers=$drivers;heroes=@($valid7|Select-Object -First 5);training=$training;over50=$over;coaching=@{coached=$coachedOver;eligible=$over;percent=$coachedPercent};history7=$history;history28=$history28;coverage28=@{complete_drivers=$complete28;tracked_drivers=$drivers.Count;fleet_weeks=$(if($null-ne$latestFleet28){[int]$latestFleet28.weeks}else{0});fleet_ready=($null-ne$latestFleet28-and$null-ne$latestFleet28.p28)}}
 }
 
 function Get-CurrentDrivers {

@@ -2,6 +2,8 @@
 
 ## Delivered
 
+The 2026-08-18 dashboard coaching-priority correction removes the remaining 7-day ranking mismatch. **Coaching Priority** now includes only drivers with complete weighted 28-day idle strictly above 50%, sorts them by weighted 28-day idle descending, and displays 28D as the primary rank value with 7D only as context. The low-idle **Strong Performers** comparison remains current-7D based.
+
 The 2026-08-18 driver-card idle chart correction replaces the weekly 7-day plot with a dedicated weighted rolling 28-day series. Each point uses SUM(idle hours)/SUM(engine hours) across four consecutive valid 7-day periods; incomplete windows are excluded, while the latest 7-day number remains visible only as context.
 
 The 2026-08-18 DOT follow-up exposes the already-normalized T2 Date field as a sortable **Last Ping** column in the DOT spreadsheet. The source value remains unchanged in storage/API; this is a presentation and accountability correction only.
@@ -78,6 +80,13 @@ Operational SQLite lives only at `%LOCALAPPDATA%\Waa\waa.db`. The schema covers 
 - DOT trailers: CSV/tab export detection, repeated Tableau measure-row collapse, leading-zero trailer preservation, normalized Last DOT/T2 dates, preserved source day-count evidence, and customer-key normalization for persistent distance mapping.
 
 Preview never writes. Commit reparses the supplied raw source, validates rows, records parser/source metadata and the exact source, and rejects exact duplicates by SHA-256. Ambiguous or unmatched identity evidence remains visible for explicit alias resolution.
+
+## Validation completed - 2026-08-18 weighted 28-day dashboard alignment
+
+- `tests/Run-Tests.ps1`: **105/105 assertions passed**.
+- A direct ranking regression proves a 65% weighted-28D / 20% 7D driver ranks ahead of a 55% weighted-28D / 90% 7D driver in Coaching Priority; drivers at or below 50% weighted 28D are excluded.
+- Coaching Priority renders weighted 28D as its primary value and keeps 7D secondary; Strong Performers remains the separate current-7D low-idle comparison.
+- PowerShell parser, JavaScript syntax, and `git diff --check` pass. `tests/Dot.Tests.ps1` passed, `tests/Identity.Tests.ps1` passed 18/18, and the 500-row PTA pipeline remained `responsive` at 135.1 ms total (13.4 ms parse, 6.7 ms database).
 
 ## Validation completed - 2026-08-17 weighted 28-day coaching correction
 

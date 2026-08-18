@@ -262,18 +262,21 @@ function metricCard(label, value, detail, tone = 'green', driverId = null) {
 
 async function dashboard() {
   const data = await cachedApi('/api/dashboard');
-  const heroList = (items, kind) => `
+  const heroList = (items, kind) => {
+    const coachingPriority = kind === 'training';
+    return `
     <section class="rank-panel ${kind}">
-      <div class="panel-title"><div><p class="eyebrow">${kind === 'heroes' ? 'Lowest current idle' : 'Highest current idle'}</p><h3>${kind === 'heroes' ? 'Strong Performers' : 'Coaching Priority'}</h3></div><span>${items.length}</span></div>
+      <div class="panel-title"><div><p class="eyebrow">${coachingPriority ? 'Highest weighted 28D idle' : 'Lowest current 7D idle'}</p><h3>${coachingPriority ? 'Coaching Priority' : 'Strong Performers'}</h3></div><span>${items.length}</span></div>
       <div class="rank-list">
         ${items.map((item, index) => `
           <button class="rank-row open" data-id="${item.id}">
             <span class="rank-number">0${index + 1}</span>
             <span class="rank-driver"><b>${esc(item.full_name)}</b><small>Truck ${esc(item.truck)} · ${esc(item.pta_code)}</small></span>
-            <span class="rank-value"><b>${fmtPercent(item.p7)}</b><small>${item.p28 == null ? `28D ${esc(item.coverage28_detail)}` : `28D ${fmtPercent(item.p28)}`} · ${fmtHours(item.engine7)}</small></span>
-          </button>`).join('') || '<p class="empty-copy">Waiting for idle history.</p>'}
+            <span class="rank-value"><b>${fmtPercent(coachingPriority ? item.p28 : item.p7)}</b><small>${coachingPriority ? `7D ${fmtPercent(item.p7)} · 28D ${fmtHours(item.engine28)}` : `${item.p28 == null ? `28D ${esc(item.coverage28_detail)}` : `28D ${fmtPercent(item.p28)}`} · ${fmtHours(item.engine7)}`}</small></span>
+          </button>`).join('') || `<p class="empty-copy">${coachingPriority ? 'No drivers are above 50% weighted 28-day idle.' : 'Waiting for idle history.'}</p>`}
       </div>
     </section>`;
+  };
 
   $('#app').innerHTML = pageHead('Fleet Pulse', 'Current idle performance, coaching priorities, and 28-day data coverage.') + `
     <section class="metrics-strip">
