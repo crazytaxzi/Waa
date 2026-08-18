@@ -2,6 +2,8 @@
 
 ## Delivered
 
+The 2026-08-18 driver-card idle chart correction replaces the weekly 7-day plot with a dedicated weighted rolling 28-day series. Each point uses SUM(idle hours)/SUM(engine hours) across four consecutive valid 7-day periods; incomplete windows are excluded, while the latest 7-day number remains visible only as context.
+
 The 2026-08-18 DOT follow-up exposes the already-normalized T2 Date field as a sortable **Last Ping** column in the DOT spreadsheet. The source value remains unchanged in storage/API; this is a presentation and accountability correction only.
 
 The 2026-08-17 DOT correction fixes the inspection-date interpretation. `Last DOT Date` is the date the inspection was completed, not its due date. WAA calculates due date as inspection + 365 days and priority as days since inspection minus 365: positive values are days overdue, zero is due today, and negative values are days remaining. Default DOT sorting is most overdue first. Source dates and exported `Days Since Last DOT` values remain preserved unchanged as evidence.

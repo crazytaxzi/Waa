@@ -39,7 +39,7 @@ Distance is tracked from origin ZIP **83501** by customer mapping. The supplied 
 
 ## Driver call flow
 
-The Driver Work Card is designed to follow a real phone conversation rather than expose every field at once. The default order is:
+The Driver Work Card is designed to follow a real phone conversation rather than expose every field at once. Its Idle Coaching graph plots only weighted rolling 28-day values, with each point calculated from raw idle/engine hours across four consecutive valid weekly periods; the latest 7-day value remains a numeric context field, not the graph series. The default order is:
 
 1. Fuel and immediate needs
 2. ETA and timing

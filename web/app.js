@@ -1,4 +1,4 @@
-import { renderDotTracking } from './dot.js?v=20260818.1';
+import { renderDotTracking } from './dot.js?v=20260818.2';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -970,7 +970,7 @@ async function openCard(id) {
       <details class="inline-detail"><summary>Adjust imported PTA only if needed</summary><label class="field"><span>Manual PTA observation</span><input data-action="pta" type="datetime-local" value="${esc(driver.pta_at?.slice(0, 16) || '')}"></label></details>`, 'blue-step'),
     callStep(3, 'Idle Coaching', idlePrompt, `
       <div class="idle-coach-head"><div><span>Weighted 28D</span><b>${fmtPercent(weighted28.percent)}</b></div><div><span>Latest 7D</span><b>${fmtPercent(latestIdle?.percent)}</b></div><div><span>28D Engine</span><b>${fmtHours(weighted28.engine_hours)}</b></div></div>
-      ${chart([...(card.idle || [])].reverse(), { field: 'percent', tone: 'green', title: 'Driver rolling idle history', compact: true })}
+      ${chart([...(card.idle28_history || [])].reverse(), { field: 'percent', tone: 'green', title: 'Driver weighted rolling 28-day idle', compact: true })}
       ${idleEligible ? conversationArea('What is their plan to reduce idle?', 'idle_plan', conversation.idle_plan, 'Keep it natural: shut down during long waits, address an APU issue, change break routine...') : '<p class="empty-copy">This step is informational only. Do not coach idle unless weighted 28-day idle is above 50%.</p>'}
       ${idleCoachingHistory(card.idle_coaching || [], conversation.cycle_key)}`, 'purple-step'),
     callStep(4, 'Help on the Load', 'Keep the main answers quick. Open a detail only when there is actually something to explain.', `

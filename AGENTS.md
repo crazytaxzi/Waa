@@ -107,7 +107,7 @@ Workflow lists current truck/driver assignments and is sortable/searchable/filte
 
 Header: truck, full driver name if known, PTA code, division, status, planning status, driver type, location, current PTA, data freshness.
 
-Idle section: 7D/28D %, engine/idle hours, trend, historical graph.
+Idle section: 7D/28D %, engine/idle hours, trend, and a weighted rolling 28-day historical graph. Driver-card idle graphs must not plot the weekly/rolling 7-day series.
 
 PTA section: effective PTA, relative time, priority, source/updated time, inline edit.
 

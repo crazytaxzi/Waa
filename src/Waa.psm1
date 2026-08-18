@@ -577,6 +577,31 @@ FROM aggregate;
     return $rows[0]
 }
 
+function Get-WaaWeighted28History {
+    param([Parameter(Mandatory = $true)][int]$DriverId,[int]$Limit=12)
+    if($Limit -lt 1){$Limit=1}; if($Limit -gt 52){$Limit=52}
+    return @(Invoke-Sql @"
+WITH ordered AS (
+  SELECT i.*,row_number() OVER(ORDER BY period_end,id) rn,
+         CASE WHEN julianday(period_end)-julianday(period_start)=6 THEN 1 ELSE 0 END valid_week
+  FROM idle_periods i WHERE driver_id=$DriverId
+), windows AS (
+  SELECT c.rn,c.period_end,min(w.period_start) period_start,
+         sum(w.engine_hours) engine_hours,sum(w.idle_hours) idle_hours,count(*) weeks,
+         sum(w.valid_week) valid_weeks,
+         sum(CASE WHEN w.rn>c.rn-3 AND julianday(w.period_start)-julianday(p.period_end)<>1 THEN 1 ELSE 0 END) gaps
+  FROM ordered c
+  JOIN ordered w ON w.rn BETWEEN c.rn-3 AND c.rn
+  LEFT JOIN ordered p ON p.rn=w.rn-1
+  GROUP BY c.rn,c.period_end
+)
+SELECT period_start,period_end,engine_hours,idle_hours,
+       round(idle_hours*100.0/nullif(engine_hours,0),2) percent
+FROM windows
+WHERE weeks=4 AND valid_weeks=4 AND gaps=0 AND engine_hours>0
+ORDER BY period_end DESC LIMIT $Limit;
+"@ -Json)
+}
 function Get-Dashboard {
     $sql = @'
 WITH ranked AS (SELECT i.*,row_number() OVER(PARTITION BY driver_id ORDER BY period_end DESC,id DESC) rn FROM idle_periods i),
@@ -750,6 +775,7 @@ SELECT json_object(
     $card=ConvertFrom-Json -InputObject $json
     if($null -eq $card.driver){throw 'Driver not found'}
     $card|Add-Member -NotePropertyName idle28 -NotePropertyValue (Get-WaaWeighted28Snapshot -DriverId $Id) -Force
+    $card|Add-Member -NotePropertyName idle28_history -NotePropertyValue @(Get-WaaWeighted28History -DriverId $Id -Limit 12) -Force
     if(Test-WaaLiveStoreOnline){
         $card.work=Get-WaaLiveWork $Id
         $followups=Get-WaaLiveFollowups $Id
