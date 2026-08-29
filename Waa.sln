@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Waa.App", "src\Waa.App\Waa.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Waa.Core.Tests", "tests\Waa.Core.Tests\Waa.Core.Tests.csproj", "{4E2DD544-7BEC-44BD-BE0C-6315899C14F1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Waa.App.Tests", "tests\Waa.App.Tests\Waa.App.Tests.csproj", "{C9F8A793-9C92-4AF7-BCF2-A557AE1F83D2}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,5 +28,9 @@ Global
 		{4E2DD544-7BEC-44BD-BE0C-6315899C14F1}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4E2DD544-7BEC-44BD-BE0C-6315899C14F1}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4E2DD544-7BEC-44BD-BE0C-6315899C14F1}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C9F8A793-9C92-4AF7-BCF2-A557AE1F83D2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C9F8A793-9C92-4AF7-BCF2-A557AE1F83D2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C9F8A793-9C92-4AF7-BCF2-A557AE1F83D2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C9F8A793-9C92-4AF7-BCF2-A557AE1F83D2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
