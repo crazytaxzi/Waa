@@ -1,6 +1,6 @@
 # WAA Data Sources
 
-This document defines only what the supplied reports actually support. It does not treat unrelated report fields as identity evidence merely because they are convenient.
+This document defines what the supplied reports actually support. Imported report data is evidence and context; it must not silently replace local work or conversation history.
 
 ## 1. Rolling 7 Day — primary roster and idle source
 
@@ -8,11 +8,32 @@ Expected file family:
 
 `rolling 7 day_data*.csv`
 
-The supplied representation contains these columns:
+The supplied representation is structurally accurate. Only the Driver Code, Driver Name, and Driver Leader values were obfuscated. The first row is the real header row and the remaining rows preserve the real repeated pattern.
+
+### Confirmed driver field format
+
+`Group by (copy)` contains:
+
+`<DriverCode><whitespace><DriverName>`
+
+Confirmed parsing rule:
+
+1. Trim the complete cell.
+2. The leading contiguous alphanumeric token is Driver Code.
+3. Split at the first whitespace after that token.
+4. The complete trimmed remainder is Driver Name, including any spaces in the name.
+5. Normalize Driver Code to uppercase for comparison while retaining the raw source label for audit.
+6. Reject a blank code, blank name, or code containing anything other than letters and digits.
+
+Do not use fixed-position slicing. The stars in the supplied representation show the maximum permitted code width, not padding that should be included in the value. A shorter valid code still ends at the first whitespace.
+
+`Driver Leader` is one complete leader code in its own column. Trim it, validate it as alphanumeric, normalize it to uppercase for comparison, and retain the raw source value for evidence. It is organizational context, never driver identity.
+
+### Confirmed columns
 
 - `Group by (copy)`
 - `Measure Names`
-- `Week Start Date`
+- first `Week Start Date`
 - `[Rolling 7 Day Engine Time]/60`
 - `[Rolling 7 Day Idle Time]/60`
 - `Rolling 7 Day Dispatch Miles`
@@ -24,271 +45,121 @@ The supplied representation contains these columns:
 - `OPS LOB`
 - `Rolling 7 Day Start Date`
 - `Unit Code`
-- duplicate `Week Start Date`
+- repeated `Week Start Date`
 - `Measure Values`
 
-### What WAA needs from this source
+Header matching must trim a UTF-8 BOM, convert non-breaking spaces to normal spaces, and collapse repeated whitespace. The first occurrence of `Week Start Date` is the authoritative weekly/report-cycle field.
 
-Identity and roster:
+### Repeated row pattern
 
-- combined driver label from `Group by (copy)`
-- `Driver Leader`
-- `Unit Code`
-- `Driver Terminal`
-- `Fleet Leader`
-- `Cost Center`
-- `OPS LOB`
-- normalized weekly/report-cycle date
+Each driver/week appears through two measure rows:
 
-Idle calculations:
+- `OOR %`
+- `Idle %`
 
-- `[Rolling 7 Day Engine Time]/60`
-- `[Rolling 7 Day Idle Time]/60`
-- `Measure Names` for source-shape validation
-- `Measure Values` only as comparison/evidence, not as the authoritative basis for weighted calculations
+Driver identity, week, raw engine hours, raw idle hours, Unit Code, Driver Leader, terminal, fleet, cost center, and line of business repeat across those rows. WAA must normalize the pair into one weekly driver observation.
 
-WAA derives weighted percentages from raw engine and idle hours. It must not average already-calculated weekly percentages.
-
-### Important shape of the supplied sample
-
-The supplied representation has:
-
-- 60 data rows
-- 3 driver labels
-- 10 weekly periods
-- 2 measure rows per driver/week: `OOR %` and `Idle %`
-
-Therefore a simple row-per-driver import is wrong. WAA must normalize repeated measure rows into one weekly driver observation.
-
-The duplicated rows should agree on driver label, week, raw engine hours, raw idle hours, Unit Code, Driver Leader, and other roster context. A disagreement is a data-quality conflict and must be surfaced rather than silently resolved.
-
-### Driver identity limitation in the supplied representation
-
-The uploaded representation masks the actual driver-code/name text. It visibly shows a combined driver label, but the exact delimiter between Driver Code and Driver Name cannot be proven from the redacted sample.
-
-Implementation rule:
-
-- store the raw driver label
-- create parser tests against an actual unredacted export before locking the split rule
-- reject any row whose label cannot be parsed unambiguously
-- never derive identity from Unit Code, Driver Leader, or fuzzy name matching
+The companion rows must agree on all repeated operational fields. A disagreement is a source conflict and must be rejected or surfaced; WAA must never choose one side silently.
 
 ### Identity semantics
 
 - Driver Code is the durable entity key.
-- Driver Name is the identity display value associated with Driver Code.
-- Unit Code is an associated object/observation, not identity.
-- Driver Leader is current organizational context, not identity.
-- A changed Unit Code does not create a new driver.
-- A missing driver in a later roster does not erase prior work or conversation history.
+- Driver Name is the current human-readable identity attached to Driver Code.
+- Unit Code is an object/assignment observation and must be stored as text.
+- Driver Leader is current organizational context.
+- A Unit Code or Driver Leader change does not create another driver.
+- A driver missing from a later roster does not lose historical work, conversation events, or observations.
 
 ### Report-cycle key
 
-The accepted file may contain multiple weekly dates. The maximum normalized value from the report's `Week Start Date` field becomes `ReportCycleDate` for current-roster and idle-conversation purposes.
+The maximum valid value from the first `Week Start Date` column becomes `ReportCycleDate`. The name is intentionally neutral about whether the source system treats the date as a beginning or ending boundary; WAA uses the supplied date as a stable cycle key.
 
-WAA does not assume the export's label accurately describes whether this is semantically the beginning or ending date. It uses the supplied date as the stable cycle key.
+### Weighted idle calculations
 
-### Weighted driver 7-day calculation
-
-For the current weekly observation:
+Driver 7-day:
 
 `Idle7d = IdleHours7d / EngineHours7d × 100`
 
+Driver 28-day:
+
+`Idle28d = Sum(IdleHours for current, -7, -14, and -21 day periods) / Sum(EngineHours for those same periods) × 100`
+
 Rules:
 
-- use raw source hours
-- negative hours invalidate the observation
-- zero engine hours produces `N/A`
+- calculate from raw hours, never by averaging weekly percentages
+- require all four expected weekly observations for a complete 28-day result
+- show incomplete coverage such as `3/4` when a period is absent
+- a present zero-engine week still counts as present coverage
+- a zero denominator displays `N/A`
 - retain full precision and round only for display
 
-### Weighted driver 28-day calculation
-
-Use the current `ReportCycleDate` plus the expected periods exactly 7, 14, and 21 days earlier:
-
-`Idle28d = Sum(IdleHours for all 4 expected periods) / Sum(EngineHours for all 4 expected periods) × 100`
-
-Rules:
-
-- never average weekly percentages
-- require all four expected observations for a complete result
-- show incomplete coverage such as `3/4` if a period is missing
-- a present zero-engine week remains a present period
-- zero total engine hours produces `N/A`
-
-### Fleet weighted calculations
-
-Current fleet 7-day:
+Fleet 7-day:
 
 `FleetIdle7d = Sum(Current Idle Hours) / Sum(Current Engine Hours) × 100`
 
-Include only observations with a valid positive denominator and expose the included-driver count.
+Fleet 28-day:
 
-Current fleet 28-day:
+`FleetIdle28d = Sum(Complete Driver 28-day Idle Hours) / Sum(Complete Driver 28-day Engine Hours) × 100`
 
-`FleetIdle28d = Sum(Complete 28-day Idle Hours) / Sum(Complete 28-day Engine Hours) × 100`
-
-Include only current-roster drivers with all four expected periods and a positive total denominator. Show coverage as eligible/current drivers.
+Both fleet figures must expose included-driver coverage.
 
 ### Threshold relationship
 
-The application has a locally configurable threshold, default `50.0%`, using a strict greater-than comparison.
-
-A driver is above threshold when either:
-
-- valid current weighted 7-day idle exceeds the threshold, or
-- complete current weighted 28-day idle exceeds the threshold
-
-Incomplete 28-day coverage cannot independently qualify a driver, but a valid 7-day value still can.
+The default threshold is `50.0%`, locally configurable, using strict greater-than comparison. A driver is above threshold when either the valid 7-day result or complete 28-day result exceeds the threshold. Incomplete 28-day coverage cannot qualify the driver by itself.
 
 ### Update policy
 
 Rolling 7 Day is scanned/imported only:
 
-1. once on application launch
+1. once during application launch
 2. when the user selects `Update Reports`
 
-There is no continuous watcher or polling loop. An added or corrected Downloads file remains untouched until one of those two update paths runs.
+There is no continuous watcher or recurring polling. Each update resolves the actual Windows Downloads known folder, finds matching candidates, reads a stable source, validates it, hashes it, parses into temporary memory, normalizes repeated rows, calculates snapshots, and commits atomically. Any failure retains the last known-good roster.
 
-Each update:
+## 2. Local idle-conversation events
 
-- resolves the actual Windows Downloads known folder
-- scans candidate files
-- validates source headers and shape
-- reads the selected stable file
-- hashes the content
-- skips an already accepted hash
-- parses into a temporary model
-- normalizes duplicate measure rows
-- calculates current weighted snapshots
-- commits the complete import atomically
-- retains last known-good data on any failure
+Imported reports own metrics and roster context. WAA local events own whether contact occurred.
 
-## 2. Local idle-conversation events — authoritative user work
-
-Imported reports determine metrics and current roster context. They do not determine whether the user spoke with a driver.
-
-WAA local conversation events are authoritative for that fact and are keyed by:
+Conversation state is keyed by:
 
 - Driver Code
 - Report Cycle Date
 
-Supported outcomes:
+Supported recorded outcomes:
 
 - `Attempted`
 - `Spoke`
 - `Spoke — Follow-up`
 
-No event means `Not Contacted` for that cycle.
+No event means `Not Contacted` for that cycle. Same-cycle corrected reports preserve conversation events. A later cycle derives a fresh state without deleting prior history.
 
-Each event snapshots the 7-day value, 28-day value/coverage, threshold, Unit Code, Driver Leader, source import ID, timestamp, and optional note/follow-up. Same-cycle report corrections do not erase these events. A later report cycle creates a fresh derived current state while preserving all prior events.
+Each event snapshots the timestamp, 7-day value, 28-day value and coverage, threshold, Unit Code, Driver Leader, and source import ID.
 
-## 3. Order Details Missing BOL — future driver work source
+## 3. Future sources
 
-Supplied workbook: `Order Details Missing BOL.xlsx`
+### Order Details Missing BOL
 
-Useful fields observed:
+`Last Dispatch Driver cd` is the natural join candidate to Driver Code. `Last Dispatch Driver nm` is supporting evidence. Unmatched codes remain visible rather than being merged by fuzzy name matching.
 
-- `Order #`
-- `Empty Call Date`
-- `Origin City St`
-- `Destination City St`
-- `Rev Type`
-- `Terminal `
-- `Driver Leader `
-- `Driver Status`
-- `Last Dispatch Driver cd`
-- `Last Dispatch Driver nm`
-- `Loaded Miles`
-- `Order Level Order Miles`
-- `Total Revenue`
+### Detail (Miles)
 
-### Relationship to the driver entity
+This is an asset/service source with Driver Leader ownership context. It does not contain trustworthy specific-driver identity and must not be forced into a driver record.
 
-`Last Dispatch Driver cd` is the natural join candidate to WAA Driver Code. `Last Dispatch Driver nm` is supporting display/evidence.
+### DOT Table
 
-Do not use a truck, order number, Driver Leader, or Terminal Leader to manufacture driver identity.
+This is trailer-centric data with repeated measure rows. It must be normalized by trailer and remain separate from driver identity unless another source establishes a trustworthy relationship.
 
-This source may eventually create or refresh Missing-BOL work context attached to an existing driver. If it contains a driver code not present in the roster, retain the item as unmatched instead of auto-merging by name.
-
-It must follow the same launch/manual update policy unless the user explicitly changes that product rule.
-
-## 4. Detail (Miles) — future maintenance/asset source
-
-Supplied file: `Detail (Miles)_data.csv`
-
-Observed fields:
-
-- `Asset #`
-- `Service Type`
-- `Terminal`
-- `Cost Center`
-- `Fleet Leader Code`
-- `Driver Leader Code`
-- `Due Date`
-- `Service Status`
-- `Measure Names`
-- `COLOR`
-- `Measure Values`
-- sort-helper fields
-
-The supplied file has 17 rows representing 13 distinct assets and three Driver Leader codes.
-
-### Relationship to the driver model
-
-This report does **not** provide a reliable driver identity field. It is an asset/service queue with Driver Leader ownership context.
-
-Do not attach a maintenance item to a specific driver merely because a driver currently uses an asset unless a future source explicitly supports that relationship at the relevant time.
-
-A future maintenance view should likely be leader/asset oriented and may sit beside the driver workflow rather than inside every driver card.
-
-## 5. DOT Table — future trailer source
-
-Supplied file: `DOT Table_data(1).csv`
-
-Observed fields:
-
-- `Trailer`
-- `Statuses`
-- `Description`
-- `Last DOT Date`
-- `Responsible CSR`
-- `Responsible CSR Supervisor`
-- `T2 Date`
-- `Customer`
-- `KMA`
-- `Measure Names`
-- `Measure Values`
-
-The supplied file has 122 rows for 61 distinct trailers. Each trailer appears through repeated measure rows such as `Trailer Count` and `Days Since Last DOT`.
-
-### Relationship to the driver model
-
-This is trailer-centric data, not driver identity data.
-
-A future DOT queue must deduplicate repeated measure rows by trailer and preserve trailer status/customer context. It should not be forced under a driver unless another source establishes a trustworthy current relationship.
-
-## 6. Source precedence
-
-1. **Rolling 7 Day** owns the current driver roster, current driver/unit/leader observation, and raw idle-hour evidence.
-2. **WAA calculation rules** own weighted 7-day/28-day values and coverage state.
-3. **WAA local idle-conversation events** own whether the user attempted or completed the weekly conversation.
-4. **WAA local work entries** own what the user did, what is waiting, and what needs follow-up.
-5. Other reports may later add work context, but they do not overwrite local work/conversation history.
-6. No imported report deletes historical drivers, work entries, conversation events, or prior observations because a row disappears from a newer export.
-
-## 7. Import safety rules
-
-All source importers should follow the same contract:
+## 4. Universal import rules
 
 - source files are read-only inputs
 - never modify or delete the Downloads copy
 - update only at launch or explicit `Update Reports`
 - validate required headers before mutation
-- store import metadata and content hash
-- parse into a temporary in-memory model first
-- commit a valid import atomically
+- retain source file metadata and SHA-256
+- parse into temporary memory first
+- commit valid imports atomically
 - preserve last known-good data on rejection
-- report errors with the actual missing/invalid field
-- treat unit/trailer/asset numbers as text to preserve leading zeros
-- never create identity through fuzzy name matching without an explicit reviewed rule
-- never average percentages where raw numerator/denominator values are available
+- report the actual missing, malformed, or conflicting field
+- store unit, trailer, and asset identifiers as text
+- never create identity through truck assignment, Driver Leader, or fuzzy name matching
+- never average percentages when raw numerator and denominator values are available

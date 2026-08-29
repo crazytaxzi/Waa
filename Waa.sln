@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Waa.Core", "src\Waa.Core\Waa.Core.csproj", "{19C97585-1883-4AA7-9F06-F3DD7B46FCA4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Waa.Core.Tests", "tests\Waa.Core.Tests\Waa.Core.Tests.csproj", "{4E2DD544-7BEC-44BD-BE0C-6315899C14F1}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{19C97585-1883-4AA7-9F06-F3DD7B46FCA4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{19C97585-1883-4AA7-9F06-F3DD7B46FCA4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{19C97585-1883-4AA7-9F06-F3DD7B46FCA4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{19C97585-1883-4AA7-9F06-F3DD7B46FCA4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4E2DD544-7BEC-44BD-BE0C-6315899C14F1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4E2DD544-7BEC-44BD-BE0C-6315899C14F1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4E2DD544-7BEC-44BD-BE0C-6315899C14F1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4E2DD544-7BEC-44BD-BE0C-6315899C14F1}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal
