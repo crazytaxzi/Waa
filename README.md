@@ -1,65 +1,74 @@
-# WAA — Work Activity & Handoff
+# WAA — Driver-Centric Work & Handoff
 
-WAA is being rebuilt from scratch as a small, professional work log for one purpose: **keep track of what was handled during the shift and make end-of-day handoff easy.**
+WAA is a fresh, local Windows work tool for keeping track of driver-related work during a shift and producing a clean handoff at the end of the day.
 
-## Product direction
+**This rebuild does not use the old WAA implementation or repository history as a design source.**
 
-WAA should look and behave like a normal workplace tool, not a dashboard, game, or command center.
+## Core model
 
-### Core flow
+The **driver is the primary entity**.
 
-1. **Capture** — quickly record what happened.
-2. **Track** — see what is done, waiting, or still needs attention.
-3. **Handoff** — generate a concise end-of-shift summary of completed work and unresolved items.
+- **Driver Code** is the durable identity key.
+- **Driver Name** is the human-readable identity.
+- **Unit Code / truck** is an object used by the driver and may change over time. A truck must never become driver identity.
+- **Driver Leader** is current organizational context and may also change over time.
 
-That flow should stay obvious from the moment the app opens.
+The current driver roster is derived from the newest valid `rolling 7 day_data*.csv` export in the Windows Downloads folder.
 
-## Design rules
+## Primary workflow
 
-- Professional and low-key enough to leave open on a work computer.
-- Dense, readable, and fast rather than decorative.
-- Neutral workplace styling; no neon, glow, animated backgrounds, oversized metrics, gamification, or visual noise.
-- Use ordinary system fonts and familiar controls.
-- One main screen should handle most of the shift.
-- Important information is shown by hierarchy, wording, and spacing before color.
-- Color is reserved for status and exceptions.
-- Every feature must directly support capture, follow-up, or handoff.
-- No feature exists merely because the previous version had it.
+WAA should support one obvious work-through flow:
 
-## Initial information model
+1. **Find or select a driver.**
+2. **See the driver context immediately** — code, name, current unit, Driver Leader.
+3. **Record what happened** with as little typing and clicking as practical.
+4. **Mark the item** as Done, Waiting, or Follow-up.
+5. **Move to the next driver or task.**
+6. **Generate the handoff** from the work recorded during the shift plus unresolved carry-forward items.
 
-A work entry should stay simple:
+There is no dashboard-first experience. The work list is the home screen.
 
-- Time
-- Subject / driver / unit / task
-- What happened
-- Status: `Done`, `Waiting`, or `Needs Follow-up`
-- Optional follow-up note
+## UI direction
 
-The exact fields can evolve only after the basic workflow proves useful.
+The app must look like a normal professional workplace utility.
 
-## Handoff output
+- light, neutral Windows-style interface
+- system typography
+- compact rows and controls
+- clear spacing and hierarchy
+- status color only where it communicates meaning
+- no glow, gradients for decoration, animated backgrounds, oversized KPI tiles, game-like widgets, or ornamental charts
+- no hidden multi-step maze for common actions
 
-The handoff should favor short, useful operational language and separate:
+## Technical direction
 
-- Completed today
-- Still waiting / pending
-- Needs follow-up next shift
-- Important notes
+Initial implementation target:
 
-The user must be able to edit the handoff before copying it.
+- **.NET 10 LTS**
+- **WPF** desktop UI
+- **SQLite** local persistence via `Microsoft.Data.Sqlite`
+- self-contained Windows x64 publishing so the app does not depend on a separately installed .NET runtime
+- no network service required for normal operation
 
-## Scope discipline
+The app watches the Windows Downloads folder for completed Rolling 7 Day CSV exports, but file-system events are treated only as a signal to rescan. The newest valid file is selected, validated, hashed, and imported atomically. A failed or partial import never destroys the last good roster.
 
-The old WAA implementation is intentionally retired. Previous dashboards, coaching views, chart systems, multi-database architecture, report automation, and specialty workflows are **not requirements** for this rebuild.
+## Planning documents
 
-If an old capability is genuinely needed later, it should be reintroduced only after answering two questions:
+- [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) — product, UX, architecture, phases, and acceptance criteria
+- [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) — fresh source contracts for the supplied operational reports
 
-1. Does it reduce work or prevent something from being missed?
-2. Can it fit the simple shift-log-to-handoff flow without making the tool look busy or recreational?
+## First implementation milestone
 
-If either answer is no, leave it out.
+Build only the roster foundation first:
 
-## Current state
+- locate Downloads correctly
+- discover the newest `rolling 7 day_data*.csv`
+- validate required columns
+- parse Driver Code + Driver Name from the export's driver label
+- capture Driver Leader and Unit Code
+- deduplicate the report's measure rows
+- persist drivers and unit observations
+- display a fast searchable driver list
+- update automatically when a newer valid export finishes downloading
 
-Clean restart. No application implementation has been chosen yet.
+Do not add Missing BOL, maintenance, DOT, charts, coaching, analytics, or other specialty workflows until this foundation is correct and pleasant to use.
