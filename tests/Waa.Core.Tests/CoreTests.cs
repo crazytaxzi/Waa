@@ -1,4 +1,5 @@
 using Waa.Core;
+using Xunit;
 
 namespace Waa.Core.Tests;
 
