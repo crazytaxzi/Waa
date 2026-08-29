@@ -64,7 +64,7 @@ Selecting a driver opens one restrained work card where the user can:
 
 1. See current driver, unit, leader, 28-day idle, and 7-day idle context.
 2. Record ordinary work as Done, Waiting, or Follow-up.
-3. Record an idle outcome as `Spoke`, `Attempted`, or `Follow-up` with an optional note.
+3. Record an idle outcome as `Spoke`, `Attempted`, or `Spoke — Follow-up` with an optional note.
 4. Move directly to the next driver needing attention.
 
 Idle conversation records are tied to the report's current weekly cycle. Importing a newer weekly cycle automatically creates a new need-to-contact state for drivers above the threshold while preserving prior conversation history. Marking a driver `Spoke` updates the list immediately and moves that driver below still-uncontacted priority drivers—no manual “already talked to” filter and no weekly reset button.
