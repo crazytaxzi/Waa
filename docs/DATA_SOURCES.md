@@ -27,7 +27,7 @@ Confirmed parsing rule:
 
 Do not use fixed-position slicing. The stars in the supplied representation show the maximum permitted code width, not padding that should be included in the value. A shorter valid code still ends at the first whitespace.
 
-`Driver Leader` is one complete leader code in its own column. Trim it, validate it as alphanumeric, normalize it to uppercase for comparison, and retain the raw source value for evidence. It is organizational context, never driver identity.
+`Driver Leader` is one complete leader code in its own column. The supplied template shows **ten asterisks** in this field, so the confirmed maximum is **10 alphanumeric characters**, not five. Trim it, validate it as alphanumeric with a maximum length of 10, normalize it to uppercase for comparison, and retain the raw source value for evidence. It is organizational context, never driver identity.
 
 ### Confirmed columns
 
