@@ -48,6 +48,7 @@ public sealed class WaaRepositoryTests
             Assert.Equal(2, state.IncludedDrivers28Day);
 
             var highIdleDriver = Assert.Single(state.Drivers, driver => driver.DriverCode == "HIGH01");
+            Assert.Equal("LEADER0001", highIdleDriver.DriverLeader);
             Assert.Equal(60m, highIdleDriver.IdlePercent7Day);
             Assert.Equal(52.5m, highIdleDriver.IdlePercent28Day);
             Assert.Null(highIdleDriver.LatestOutcome);
@@ -62,6 +63,7 @@ public sealed class WaaRepositoryTests
             var contactedDriver = Assert.Single(
                 contactedState.Drivers,
                 driver => driver.DriverCode == "HIGH01");
+            Assert.Equal("LEADER0001", contactedDriver.DriverLeader);
             Assert.Equal(IdleContactOutcome.Spoke, contactedDriver.LatestOutcome);
             Assert.Equal("Reviewed idle and expectations.", contactedDriver.LatestNote);
             Assert.NotNull(contactedDriver.LatestContactUtc);
@@ -79,14 +81,14 @@ public sealed class WaaRepositoryTests
     private static string BuildCsv()
     {
         var rows = new List<string> { Header };
-        AddDriver(rows, "HIGH01 High Idle Driver", "DL001", "270139", new[]
+        AddDriver(rows, "HIGH01 High Idle Driver", "LEADER0001", "270139", new[]
         {
             ("8/23/2026", "50", "30"),
             ("8/16/2026", "50", "25"),
             ("8/9/2026", "50", "25"),
             ("8/2/2026", "50", "25")
         });
-        AddDriver(rows, "LOW001 Low Idle Driver", "DL002", "231540", new[]
+        AddDriver(rows, "LOW001 Low Idle Driver", "LEADER0002", "231540", new[]
         {
             ("8/23/2026", "50", "10"),
             ("8/16/2026", "50", "10"),
