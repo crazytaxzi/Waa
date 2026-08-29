@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Data.Sqlite;
 using Waa.App.Data;
 using Waa.Core;
 using Xunit;
@@ -70,6 +71,7 @@ public sealed class WaaRepositoryTests
         }
         finally
         {
+            SqliteConnection.ClearAllPools();
             Directory.Delete(root, recursive: true);
         }
     }
