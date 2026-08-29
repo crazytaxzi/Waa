@@ -2,75 +2,107 @@
 
 ## 1. Product goal
 
-WAA is a personal work-through and handoff tool for driver support work. Its job is not to look impressive. Its job is to make the shift easier to work, reduce missed follow-up, and make the end-of-day handoff accurate.
+WAA is a personal driver-support work-through and handoff tool. Its job is to make the shift easier to work, prevent missed follow-up, show fleet idle performance clearly, and produce an accurate end-of-day handoff.
 
-The driver is the center of the working model. Reports can attach information or work to a driver, unit, trailer, or leader, but those objects remain separate concepts.
+The driver is the center of the working model. Reports may attach information or work to a driver, unit, trailer, or leader, but those objects remain separate concepts.
+
+The application must look calm, clean, and unmistakably work-related. It is designed for a low-spec Windows PC and must not spend resources on decoration, browser infrastructure, continuous report monitoring, or background activity that does not directly help the user.
 
 ## 2. Product rules
 
 1. **Driver-centric, not truck-centric.** Driver Code is the durable key. Unit assignment is observed context.
 2. **The work list is the home screen.** No dashboard must be cleared before useful work can begin.
-3. **Common actions stay shallow.** Selecting a driver and recording work should not require modal chains or navigation through multiple pages.
-4. **Preserve the last known-good state.** Bad, incomplete, or locked report files must not blank the roster.
-5. **Never silently guess identity.** Ambiguous driver labels or conflicting same-period unit assignments must be surfaced rather than auto-merged incorrectly.
-6. **Status uses words first, color second.** Color communicates state or urgency, never decoration.
-7. **No feature gets in merely because data exists.** A report field must improve the work-through or handoff flow before it is shown.
-8. **No old-repository archaeology.** Previous WAA history is not a source for architecture, schemas, workflow, or styling unless the user explicitly requests otherwise.
+3. **Idle visibility belongs in the fleet list.** Weighted 28-day and 7-day percentages must be visible without opening every driver.
+4. **The list manages weekly attention automatically.** Drivers needing an idle conversation rise to the top; completed conversations move below unfinished high-idle work without manual filtering.
+5. **Common actions stay shallow.** Selecting a driver, recording work, and recording an idle outcome must not require modal chains or multiple pages.
+6. **Report updates are controlled.** Import once at launch and thereafter only through `Update Reports`; no watcher or polling loop.
+7. **Preserve the last known-good state.** Bad, incomplete, or locked report files must not blank the roster.
+8. **Never silently guess identity or data conflicts.** Ambiguous driver labels and conflicting same-period observations must be surfaced.
+9. **Status uses words first, color second.** Color communicates state or urgency, never decoration.
+10. **No feature gets in merely because data exists.** A report field must improve work-through or handoff before it is shown.
+11. **No old-repository archaeology.** Previous WAA history is not a source for architecture, schema, workflow, or styling unless the user explicitly requests a specific historical item.
 
-## 3. Primary source and roster behavior
+## 3. Low-end Windows constraints
 
-The initial roster source is the newest valid file matching:
+The first release is a native Windows desktop utility intended to remain responsive on modest office hardware.
+
+### Required design choices
+
+- native WPF window and controls
+- no WebView, browser client, local HTTP server, Node runtime, or cloud dependency
+- no continuous animation, blur, glow, animated charts, or decorative GPU work
+- no report watcher, periodic folder scan, or polling timer
+- virtualized fleet rows so only visible rows are realized
+- indexed database queries for default priority ordering and search
+- calculate and persist idle snapshots during import rather than recalculating history while scrolling
+- load the last known-good roster immediately, then run the one launch update off the UI thread
+- keep database write transactions short
+- avoid large image assets and unnecessary third-party UI frameworks
+
+### Performance acceptance
+
+- cached roster data becomes usable without waiting for Downloads scanning
+- launch update and manual update do not freeze typing, scrolling, or window movement
+- after launch update completes, the idle application performs no recurring report work
+- search, selection, and status changes feel immediate across the expected fleet size
+- ordinary list scrolling does not trigger per-row historical queries
+
+Performance must be validated on a representative low-end Windows machine rather than inferred only from a development PC.
+
+## 4. Primary source and update behavior
+
+The initial roster and idle source is the newest valid file matching:
 
 `rolling 7 day_data*.csv`
 
 in the current user's Windows Downloads known folder.
 
-### Startup
+### Application launch update
 
-On application startup:
+1. Open the local database and show the last known-good roster immediately.
+2. Resolve the actual Windows Downloads known folder rather than assuming a literal `%USERPROFILE%\\Downloads` path.
+3. Scan matching Rolling 7 Day CSV files once.
+4. Rank candidates by report-cycle date when readable, with last-write time as a discovery/tie-break signal.
+5. Validate required headers and source shape.
+6. Confirm the chosen file can be read consistently and is not locked/partially written.
+7. Hash the content.
+8. Skip import when that exact hash was already accepted.
+9. Parse, normalize, calculate, and commit in one transaction.
+10. Refresh the fleet list and stop automatic report activity.
 
-1. Resolve the real Downloads known folder rather than assuming a literal `%USERPROFILE%\\Downloads` path.
-2. Scan matching Rolling 7 Day CSV files.
-3. Sort candidates by last-write time, newest first.
-4. Validate required headers before accepting a candidate.
-5. Confirm the file can be read and is no longer actively changing.
-6. Hash its contents.
-7. Skip re-import if the hash was already successfully imported.
-8. Parse and commit the roster in one transaction.
-9. If the newest candidate is invalid, keep the last known-good roster and expose a compact sync warning.
+### Manual update
 
-### Live refresh
+A quiet, visible `Update Reports` command runs the exact same full scan and validation path. This is the only way to import a newly downloaded or corrected report while WAA remains open.
 
-Use `FileSystemWatcher` for Created, Changed, and Renamed notifications, but do **not** treat one event as one import. Windows file operations can raise duplicate events.
+There is no `FileSystemWatcher`, no recurring directory scan, and no import triggered merely because a file appeared in Downloads.
 
-Watcher behavior:
+### Update result
 
-- filter to CSV activity in Downloads
-- keep event handlers very short
-- debounce bursts of notifications
-- after the debounce, rescan the matching candidate set
-- select the newest valid stable file
-- import only when its content hash is new
-- perform a full rescan after watcher errors or buffer overflow
+The header status area reports one concise outcome:
 
-The watcher is therefore a wake-up signal; the directory scan is the source of truth.
+- updated from file name and report cycle
+- already current
+- no matching report found
+- newest candidate rejected, with the specific reason
 
-## 4. Rolling 7 Day normalization
+A rejected update retains the last known-good roster and all local work history.
 
-The supplied representation contains two rows for the same driver/week because `Measure Names` contains `OOR %` and `Idle %`. Operational metadata such as driver, unit, leader, terminal, and cost center repeats across those rows.
+## 5. Rolling 7 Day normalization
 
-For the roster:
+The supplied representation contains two rows for the same driver/week because `Measure Names` contains `OOR %` and `Idle %`. Driver, unit, leader, engine hours, and idle hours repeat across those measure rows.
 
-- use the newest available `Week Start Date` for each driver
-- deduplicate measure rows before creating current roster entries
+WAA normalizes them into one weekly observation per Driver Code and report-cycle date.
+
+### Identity and context
+
 - keep `Unit Code` as text, not an integer
 - keep the complete raw driver label for audit/debugging
-- extract Driver Code and Driver Name only through a tested parser for the real export format
-- preserve older weekly unit observations instead of overwriting history
-- if one driver has multiple distinct Unit Codes in the same newest period, mark the assignment ambiguous until the rule is understood
-- if a driver disappears from the newest report, do not delete the driver; mark the roster observation as no longer current
+- extract Driver Code and Driver Name only through a tested parser for the real unredacted export format
+- preserve older weekly unit/leader observations instead of overwriting history
+- if one driver has conflicting values within the same period, mark the source conflict rather than choosing silently
+- if a driver disappears from the newest report, preserve the driver and work history but mark the roster observation as no longer current
 
-### Required initial fields
+### Required fields
 
 Driver:
 
@@ -82,33 +114,107 @@ Driver:
 - `FleetLeader`
 - `CostCenter`
 - `OpsLob`
-- `RosterWeekStart`
+- `CurrentReportCycleDate`
 - `LastSeenUtc`
+- `IsCurrentRoster`
+
+Weekly idle observation:
+
+- `DriverCode`
+- `ReportCycleDate`
+- `EngineHours7d`
+- `IdleHours7d`
+- `UnitCode`
+- `DriverLeader`
+- `SourceImportId`
+- source-quality/conflict state
 
 Unit:
 
 - `UnitCode` — primary key, stored as text
-
-Observation:
-
-- `DriverCode`
-- `UnitCode`
-- `DriverLeader`
-- `WeekStart`
-- `SourceImportId`
 
 Import:
 
 - source file name/path
 - file last-write timestamp
 - SHA-256
+- report-cycle date
 - import timestamp
 - accepted/rejected status
 - validation/error detail when rejected
 
-## 5. Work model
+## 6. Weighted idle calculations
 
-The first useful work model should remain intentionally small.
+Percentages are calculated from raw hours at import time and stored at full precision. The UI rounds only for display.
+
+### Driver 7-day
+
+`Idle7d = IdleHours7d / EngineHours7d × 100`
+
+The current value uses the observation for the accepted report's maximum normalized `Week Start Date`.
+
+### Driver 28-day
+
+Use the current report period and the three expected periods exactly 7, 14, and 21 days earlier:
+
+`Idle28d = Sum(IdleHours across 4 expected periods) / Sum(EngineHours across those periods) × 100`
+
+Do not average weekly percentages. All four expected period rows are required for complete 28-day coverage. Missing periods show `Incomplete` and coverage such as `3/4`. A zero total engine denominator shows `N/A`.
+
+### Fleet calculations
+
+- Fleet 7-day = sum of current valid idle hours / sum of current valid engine hours.
+- Fleet 28-day = sum of four-period idle hours / sum of four-period engine hours for current-roster drivers with complete coverage.
+- Both fleet summaries expose included-driver coverage.
+
+### Threshold
+
+- default `50.0%`
+- locally configurable from `0.0` through `100.0`
+- strict greater-than comparison
+- initially shared by both 7-day and 28-day values
+- reranks the list immediately when changed
+- does not rewrite historical conversation records
+
+A driver is above threshold when either the valid current 7-day value or complete current 28-day value exceeds the threshold.
+
+## 7. Idle conversation accountability
+
+Idle conversation state is tied to Driver Code and current report-cycle date. It is not a disposable weekly checkbox.
+
+### Outcomes
+
+- `Not Contacted`
+- `Attempted`
+- `Spoke`
+- `Spoke — Follow-up`
+
+`Attempted` remains incomplete. `Spoke — Follow-up` proves the conversation occurred but remains actionable.
+
+Each event stores the timestamp, optional note, report cycle, weighted percentage snapshots, threshold snapshot, Unit Code, Driver Leader, and source import ID. A later report cannot rewrite what was discussed.
+
+### Automatic rollover
+
+- a corrected report with the same cycle preserves all conversation state
+- a later report cycle naturally derives fresh `Not Contacted` state for drivers without a new-cycle event
+- prior conversation history remains intact
+- there is no reset button, bulk uncheck, or filter-maintenance ritual
+
+### Default ordering
+
+The list automatically orders:
+
+1. above-threshold drivers with `Not Contacted`, `Attempted`, or `Spoke — Follow-up`
+2. above-threshold drivers with `Spoke`
+3. all remaining current drivers, with unresolved ordinary work before clear drivers
+
+Within unfinished high-idle work, follow-up items come first and then the greatest current idle concern sorts first. The concern value is the larger valid value of weighted 28-day and weighted 7-day idle.
+
+Marking `Spoke` immediately updates the row and moves it below unfinished high-idle drivers. The next unfinished driver can be selected automatically or with one direct action.
+
+See `docs/IDLE_WORKFLOW.md` for the authoritative rules.
+
+## 8. Work model
 
 A driver may have multiple shift entries. Each entry contains:
 
@@ -117,36 +223,59 @@ A driver may have multiple shift entries. Each entry contains:
 - short work text
 - status: `Done`, `Waiting`, or `Follow-up`
 - optional resolution timestamp
+- optional linked idle-conversation event
 
-Do not require category selection for every note in the first build. Categories can be added later only if real use proves they save time.
+Do not require a category for every ordinary note. Idle conversations are structured because weekly accountability depends on knowing whether the driver was actually reached.
 
 ### Carry-forward
 
-Unresolved `Waiting` and `Follow-up` entries remain visible on the driver's work card on later shifts until resolved. They should not need to be copied manually into a new day's notes.
+Unresolved `Waiting` and `Follow-up` entries remain visible on later shifts until resolved. They do not need to be copied into a new day's notes.
 
-## 6. Main-screen UX
+An idle action should create the appropriate work/handoff record automatically so the user does not type the same conversation twice.
 
-The initial application should use one main window.
+## 9. Main-screen UX
 
-### Left: driver list
+The initial application uses one main window.
 
-Each compact row shows:
+### Compact fleet header
 
+Show in one restrained line or compact toolbar:
+
+- current report cycle
+- configurable threshold
+- fleet weighted 28-day percentage and coverage
+- fleet weighted 7-day percentage and coverage
+- count needing idle attention
+- count spoken to this cycle
+- `Update Reports`
+- last update result
+
+These are operational summaries, not large KPI tiles.
+
+### Fleet list
+
+Each virtualized row shows:
+
+- attention/status wording
 - Driver Code
 - Driver Name
 - current Unit Code
 - Driver Leader
-- a small text status only when unresolved work exists
+- weighted 28-day idle percentage or coverage state
+- weighted 7-day idle percentage
+- current-cycle idle conversation status
+- unresolved ordinary-work indicator when present
 
 Controls:
 
-- search by driver code, driver name, or unit
+- search by driver code, name, or unit
 - optional Driver Leader filter
-- refresh/sync state in a quiet status area
+- sortable columns when needed
+- one action to restore the automatic priority order
 
-Do not put weekly percentages, charts, coaching scores, report counts, or large metrics in this list.
+Above-threshold values receive restrained semantic emphasis paired with text. Do not rely on color alone.
 
-### Center: selected driver work card
+### Selected driver work card
 
 Header:
 
@@ -154,51 +283,53 @@ Header:
 - Driver Code
 - Unit Code
 - Driver Leader
+- current 28-day and 7-day idle context
+- current cycle conversation status
+- most recent prior-cycle conversation date/outcome
 
 Body:
 
 - unresolved carry-forward first
 - today's entries in chronological order
-- one obvious text box for a new work entry
-- three direct save actions: Done, Waiting, Follow-up
+- one obvious text box for ordinary work
+- direct Done, Waiting, and Follow-up actions
+- direct `Spoke`, `Attempted`, and `Spoke — Follow-up` idle actions with an optional note
 
-The entry box should receive focus quickly after a driver is selected. Saving should append immediately and keep the user in the flow.
+Saving must append immediately, update ordering, and keep the user in the work-through flow.
 
 ### Handoff view
 
-Handoff is the only secondary top-level view needed initially.
+Handoff remains the only secondary top-level view initially.
 
 Generate editable text grouped as:
 
 1. Needs Follow-up
 2. Waiting / Pending
 3. Completed Today
-4. General notes only if a later requirement introduces them
 
-Each line should identify the driver by useful operational context, for example:
+Idle `Attempted` and `Spoke — Follow-up` events remain eligible for unresolved sections. Completed `Spoke` events may appear in completed-today history without flooding the unresolved handoff.
 
-`270139 — DRIVER NAME (CODE): waiting on ...`
+Generated text is editable before copying. Editing the draft never changes underlying work or conversation records.
 
-The handoff is editable before copying. Generated text should never modify the underlying work entries merely because the user edits the handoff draft.
-
-## 7. Visual design
+## 10. Visual design
 
 Use a restrained Windows workplace appearance inspired by Fluent principles, not a branded imitation.
 
 - light neutral surfaces
 - standard system typography
+- compact aligned percentage columns
 - modest borders and spacing
 - no continuous animation
 - no backdrop blur requirement
 - no glow
 - no decorative gradients
 - no giant cards
-- no charting in the initial product
-- semantic color only for meaningful state, always paired with text
+- no decorative charts
+- semantic color only for meaningful state and always paired with wording/iconography
 
-The application should look acceptable if a supervisor walks past the monitor and glances at it for two seconds.
+The application should look acceptable if a supervisor walks past and glances at it for two seconds.
 
-## 8. Technical architecture
+## 11. Technical architecture
 
 ### Runtime
 
@@ -206,96 +337,125 @@ The application should look acceptable if a supervisor walks past the monitor an
 - WPF
 - Windows x64 initial target
 - self-contained publish
-- prefer single-file publish if all required dependencies remain reliable in that mode
+- prefer single-file publish only if startup and dependency behavior remain reliable
 
 ### Persistence
 
-Use SQLite through `Microsoft.Data.Sqlite`.
-
-Store the database under the current user's local application data, for example:
+Use SQLite through `Microsoft.Data.Sqlite` under the current user's local application data, for example:
 
 `%LOCALAPPDATA%\\WAA\\waa.db`
 
-Use transactions for each import and for logically related mutations. WAL may be enabled for responsive reads while small writes occur, but the app should keep write transactions short.
+Use transactions for complete imports and logically related mutations. Keep writes short. WAL may be enabled if it improves measured responsiveness, but it is not an excuse for unnecessary concurrency.
 
-No Redis, LMDB, web server, browser client, background cloud service, or distributed architecture is justified for this product.
+No Redis, LMDB, web server, browser client, background cloud service, or distributed architecture is justified.
 
 ### Process shape
 
 One desktop process owns:
 
 - WPF UI
-- report discovery/import
-- file watcher
+- launch/manual report discovery and import
+- weighted snapshot calculation
 - SQLite access
+- work/conversation recording
 - handoff generation
 
-Keep the architecture separable in code without creating separate processes:
+Code boundaries:
 
-- `Domain` — Driver, Unit, WorkEntry, Handoff models/rules
-- `Data` — SQLite schema/repositories/migrations
-- `Imports` — Downloads discovery, Rolling 7 Day parser, validation, hashing
-- `UI` — WPF views/view-models
+- `Domain` — Driver, Unit, idle calculation, priority, work, conversation, handoff rules
+- `Data` — SQLite schema, repositories, migrations, indexed queries
+- `Imports` — Downloads discovery, CSV parser, validation, hashing, normalization
+- `UI` — WPF views/view-models and virtualized presentation
 
-## 9. Failure behavior
+The application must not create separate processes merely to appear architecturally sophisticated.
 
-The app must fail quietly and usefully.
+## 12. Failure behavior
 
-- Partial/locked CSV: retry only after the file settles; retain last good roster.
-- Missing required column: reject the candidate and say which column is missing.
-- Unknown driver label format: reject identity parsing for that row; do not invent a Driver Code.
-- Duplicate watcher events: collapse through debounce/hash.
-- SQLite write failure: do not report a successful save; keep the typed entry visible so it can be retried.
-- Corrupt database: stop writes and surface a clear recovery message; do not silently recreate and lose history.
+- partial/locked CSV: reject the update and retain last good data
+- missing required column: identify the actual missing header
+- unknown driver label format: reject identity parsing for that row; never invent a code
+- conflicting duplicated measure rows: record a data-quality error; never choose silently
+- missing 28-day period: show incomplete coverage instead of a normal percentage
+- zero denominator: show `N/A`
+- SQLite write failure: do not claim success; preserve the typed entry for retry
+- corrupt database: stop writes and provide a clear recovery path; never silently recreate and lose history
+- manual update clicked twice: prevent concurrent imports and report that an update is already running
 
-## 10. Development phases
+## 13. Development phases
 
-### Phase 1 — Roster foundation
+### Phase 1 — Roster and weighted idle foundation
 
-Build and verify only:
+Build and verify:
 
 - .NET 10 WPF shell
-- SQLite initialization
+- SQLite initialization/migrations
 - Downloads known-folder resolution
-- Rolling 7 Day candidate discovery
-- validation + stable-file read + SHA-256
-- parser and deduplication
-- Driver / Unit / observation persistence
-- searchable driver list
-- automatic refresh after a new download
-- small visible sync state
+- one automatic launch update
+- explicit `Update Reports` action
+- Rolling 7 Day candidate discovery and validation
+- stable read, SHA-256, and atomic import
+- repeated-measure normalization
+- Driver / Unit / weekly observation persistence
+- weighted driver 7-day and complete-coverage 28-day calculation
+- weighted fleet summaries with coverage
+- configurable threshold
+- searchable, virtualized, automatically prioritized fleet list
+- compact update status
 
 **Exit criteria**
 
-- the same driver remains the same entity when Unit Code changes
-- duplicated OOR/Idle rows do not create duplicate drivers
-- newest valid report becomes current without restarting the app
-- duplicate file-system events do not duplicate imports
-- a malformed newest file cannot wipe the last good roster
-- conflicting same-period unit observations are not silently guessed
+- same driver remains the same entity when Unit Code changes
+- duplicated OOR/Idle rows do not duplicate drivers or weekly observations
+- 28-day results use summed hours and require four expected periods
+- fleet percentages expose coverage
+- cached roster is usable before launch import completes
+- no watcher or recurring scan runs
+- a newly downloaded report is ignored until launch or `Update Reports`
+- duplicate/manual re-import of the same hash does not duplicate observations
+- malformed newest data cannot wipe the last good roster
+- threshold changes immediately rerank the list
 
-### Phase 2 — Driver work-through
+### Phase 2 — Idle conversation workflow
+
+Add:
+
+- per-driver/current-cycle state
+- `Spoke`, `Attempted`, and `Spoke — Follow-up`
+- immutable context snapshots
+- automatic weekly rollover by report-cycle date
+- same-cycle correction preservation
+- unfinished-first priority ordering
+- fast next-needing-attention behavior
+- automatic work/handoff linkage
+
+**Exit criteria**
+
+- the user never filters already-contacted drivers out manually
+- marking `Spoke` immediately changes state and ordering
+- a same-cycle corrected report preserves conversation state
+- a new report cycle creates fresh pending state without deleting history
+- attempted and follow-up outcomes remain actionable
+
+### Phase 3 — General driver work-through
 
 Add:
 
 - driver work card
-- timestamped work entry
-- Done / Waiting / Follow-up
+- timestamped Done / Waiting / Follow-up entries
 - unresolved carry-forward
-- fast next-driver/search behavior
-- useful keyboard focus and shortcuts after mouse flow is correct
+- useful keyboard focus and shortcuts after the mouse flow is correct
 
 **Exit criteria**
 
 - a normal driver update can be recorded without leaving the main screen
 - saved work survives restart
-- unresolved work is immediately visible when that driver is reopened
+- unresolved work is immediately visible when the driver is reopened
 
-### Phase 3 — Handoff
+### Phase 4 — Handoff
 
 Add:
 
-- handoff generation from real work entries
+- handoff generation from work and idle events
 - editable handoff draft
 - Copy to Clipboard
 - unresolved-first ordering
@@ -303,36 +463,36 @@ Add:
 
 **Exit criteria**
 
-- the user can produce the end-of-shift handoff without manually rereading every driver
-- editing the draft does not mutate historical work entries
+- end-of-shift handoff requires no manual rereading of every driver
+- editing the draft does not mutate historical records
 
-### Phase 4 — Missing BOL integration
+### Phase 5 — Missing BOL integration
 
-Only after Phases 1–3 are proven comfortable:
+Only after the core workflow is proven comfortable:
 
-- import newest Missing BOL report
+- import newest Missing BOL report on launch/manual update
 - attach items through Last Dispatch Driver Code
-- expose them as driver work context, not driver identity
+- expose them as driver work context, not identity
 - allow handling/resolution state without destroying source evidence
 
-### Phase 5 — Maintenance and DOT evaluation
+### Phase 6 — Maintenance and DOT evaluation
 
-Evaluate separately rather than forcing them into the driver card.
+Evaluate separately rather than forcing them into every driver card.
 
-- maintenance report is asset/Driver-Leader oriented
-- DOT report is trailer oriented
+- maintenance is asset/Driver-Leader oriented
+- DOT is trailer oriented
 
-Add them only if they clearly reduce work or missed follow-up. They may become separate compact queues rather than driver children.
+Add them only if they clearly reduce work or missed follow-up. They may become separate compact queues.
 
-## 11. Research basis
+## 14. Research basis
 
-Fresh research used for this plan:
+Fresh research already used for the technical direction:
 
-- Microsoft .NET support policy — .NET 10 is LTS and supported through November 2028: https://dotnet.microsoft.com/en-us/platform/support/policy
-- Microsoft WPF desktop guidance and .NET 10 WPF updates: https://learn.microsoft.com/en-us/dotnet/desktop/
+- Microsoft .NET support policy: https://dotnet.microsoft.com/en-us/platform/support/policy
+- Microsoft WPF desktop guidance: https://learn.microsoft.com/en-us/dotnet/desktop/
 - .NET single-file/self-contained publishing: https://learn.microsoft.com/en-us/dotnet/core/deploying/single-file/overview
 - Windows known-folder guidance: https://learn.microsoft.com/en-us/windows/win32/shell/known-folders
-- `FileSystemWatcher` behavior and duplicate events: https://learn.microsoft.com/en-us/dotnet/api/system.io.filesystemwatcher
 - `Microsoft.Data.Sqlite` transactions/WAL guidance: https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/transactions and https://learn.microsoft.com/en-us/dotnet/standard/data/sqlite/async
-- Fluent 2 color/layout principles: https://fluent2.microsoft.design/color and https://fluent2.microsoft.design/layout
-- GOV.UK task-list pattern for clear task names and explicit status: https://design-system.service.gov.uk/components/task-list/
+- WPF UI virtualization guidance: https://learn.microsoft.com/en-us/dotnet/desktop/wpf/advanced/optimizing-performance-controls
+- Fluent color/layout principles: https://fluent2.microsoft.design/color and https://fluent2.microsoft.design/layout
+- GOV.UK task-list pattern: https://design-system.service.gov.uk/components/task-list/
