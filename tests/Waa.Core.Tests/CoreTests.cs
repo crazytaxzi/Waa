@@ -23,6 +23,21 @@ public sealed class DriverLabelParserTests
 
         Assert.Contains("letters or digits", exception.Message);
     }
+
+    [Fact]
+    public void ParseDriverLeader_AcceptsTenCharacterCode()
+    {
+        Assert.Equal("LEADER0001", DriverLabelParser.ParseDriverLeader("leader0001"));
+    }
+
+    [Fact]
+    public void ParseDriverLeader_RejectsMoreThanTenCharacters()
+    {
+        var exception = Assert.Throws<ReportValidationException>(
+            () => DriverLabelParser.ParseDriverLeader("LEADER00001"));
+
+        Assert.Contains("10-character maximum", exception.Message);
+    }
 }
 
 public sealed class RollingSevenDayCsvParserTests
@@ -42,6 +57,7 @@ public sealed class RollingSevenDayCsvParserTests
         Assert.Equal("AB1234", driver.Driver.DriverCode);
         Assert.Equal("Jamie Example", driver.Driver.DriverName);
         Assert.Equal("270139", driver.UnitCode);
+        Assert.Equal("LEADER0001", driver.DriverLeader);
         Assert.Equal(50m, driver.IdlePercent7Day);
         Assert.Equal(36m, driver.IdlePercent28Day);
         Assert.True(driver.IsComplete28Day);
@@ -118,7 +134,7 @@ public sealed class RollingSevenDayCsvParserTests
         string engine,
         string idle,
         string unit) =>
-        $"{driver},{measure},{week},{engine},{idle},1000,1010,611 - Lewiston - Van,DL001,Lewiston,LEW1,Line Haul,{week},{unit},{week},0.5";
+        $"{driver},{measure},{week},{engine},{idle},1000,1010,611 - Lewiston - Van,LEADER0001,Lewiston,LEW1,Line Haul,{week},{unit},{week},0.5";
 }
 
 public sealed class DriverIdleSnapshotTests
@@ -131,7 +147,7 @@ public sealed class DriverIdleSnapshotTests
             driver,
             new DateOnly(2026, 8, 23),
             "270139",
-            "DL001",
+            "LEADER0001",
             40m,
             22m,
             55m,
