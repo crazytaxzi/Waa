@@ -1,24 +1,25 @@
-name: Windows build and test
+name: Windows build, test, and portable package
 
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  build-test-package:
     runs-on: windows-latest
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Install .NET 10 SDK
+      - name: Install .NET 8 SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.x
+          dotnet-version: 8.0.x
 
       - name: Restore
         shell: pwsh
@@ -38,14 +39,48 @@ jobs:
           dotnet test Waa.sln --configuration Release --no-build --logger "trx;LogFileName=waa-tests.trx" 2>&1 | Tee-Object -FilePath test.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Publish portable win-x64 application
+        shell: pwsh
+        run: |
+          $output = Join-Path $PWD 'artifacts\WAA-Portable-win-x64'
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+          dotnet publish src\Waa.App\Waa.App.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:PublishTrimmed=false `
+            -p:PublishReadyToRun=false `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            --output $output 2>&1 | Tee-Object -FilePath publish.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item portable\README-FIRST.txt (Join-Path $output 'README-FIRST.txt')
+          @(
+            'WAA portable build',
+            "Commit: $env:GITHUB_SHA",
+            "Built UTC: $([DateTime]::UtcNow.ToString('O'))",
+            'Target: .NET 8 Windows x64 self-contained'
+          ) | Set-Content -Path (Join-Path $output 'BUILD.txt') -Encoding UTF8
+
+      - name: Upload portable application
+        uses: actions/upload-artifact@v4
+        with:
+          name: WAA-Portable-win-x64
+          if-no-files-found: error
+          retention-days: 30
+          path: artifacts/WAA-Portable-win-x64/**
+
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: waa-build-diagnostics-${{ github.run_number }}
           if-no-files-found: ignore
+          retention-days: 14
           path: |
             restore.log
             build.log
             test.log
+            publish.log
             **/TestResults/*.trx

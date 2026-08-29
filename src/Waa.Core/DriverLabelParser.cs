@@ -2,6 +2,9 @@ namespace Waa.Core;
 
 public static class DriverLabelParser
 {
+    public const int MaximumDriverCodeLength = 6;
+    public const int MaximumDriverLeaderLength = 5;
+
     public static DriverIdentity Parse(string? rawLabel)
     {
         if (string.IsNullOrWhiteSpace(rawLabel))
@@ -19,6 +22,12 @@ public static class DriverLabelParser
 
         var driverCode = trimmed[..splitIndex];
         var driverName = trimmed[splitIndex..].Trim();
+
+        if (driverCode.Length > MaximumDriverCodeLength)
+        {
+            throw new ReportValidationException(
+                $"Driver Code '{driverCode}' exceeds the {MaximumDriverCodeLength}-character maximum.");
+        }
 
         if (driverCode.Any(character => !char.IsAsciiLetterOrDigit(character)))
         {
@@ -43,6 +52,12 @@ public static class DriverLabelParser
         }
 
         var code = rawDriverLeader.Trim();
+        if (code.Length > MaximumDriverLeaderLength)
+        {
+            throw new ReportValidationException(
+                $"Driver Leader code '{rawDriverLeader}' exceeds the {MaximumDriverLeaderLength}-character maximum.");
+        }
+
         if (code.Any(character => !char.IsAsciiLetterOrDigit(character)))
         {
             throw new ReportValidationException(
