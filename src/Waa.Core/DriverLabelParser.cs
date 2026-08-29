@@ -3,7 +3,7 @@ namespace Waa.Core;
 public static class DriverLabelParser
 {
     public const int MaximumDriverCodeLength = 6;
-    public const int MaximumDriverLeaderLength = 5;
+    public const int MaximumDriverLeaderLength = 10;
 
     public static DriverIdentity Parse(string? rawLabel)
     {
