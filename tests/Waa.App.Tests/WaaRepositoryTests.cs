@@ -9,16 +9,24 @@ namespace Waa.App.Tests;
 public sealed class WaaRepositoryTests
 {
     [Fact]
-    public void Repository_RoundTripsImportThresholdAndCurrentCycleContact()
+    public void Repository_RoundTripsImportThresholdContactAndTheme()
     {
         var root = Path.Combine(Path.GetTempPath(), "WaaAppTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
 
         try
         {
-            var repository = new WaaRepository(Path.Combine(root, "waa.db"));
+            var databasePath = Path.Combine(root, "waa.db");
+            var repository = new WaaRepository(databasePath);
             repository.Initialize();
             Assert.Equal(50m, repository.GetIdleThreshold());
+
+            var themeStore = new ThemePreferenceStore(databasePath);
+            Assert.False(themeStore.GetDarkMode());
+            themeStore.SetDarkMode(true);
+            Assert.True(themeStore.GetDarkMode());
+            themeStore.SetDarkMode(false);
+            Assert.False(themeStore.GetDarkMode());
 
             var csvBytes = Encoding.UTF8.GetBytes(BuildCsv());
             var import = new RollingSevenDayCsvParser().Parse(csvBytes);

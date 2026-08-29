@@ -7,7 +7,7 @@
         MinWidth="1050"
         MinHeight="650"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource WindowBackgroundBrush}">
+        Background="{DynamicResource WindowBackgroundBrush}">
     <Grid Margin="14">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -18,44 +18,51 @@
 
         <Border Grid.Row="0"
                 Padding="14,12"
-                Background="{StaticResource PanelBackgroundBrush}"
-                BorderBrush="{StaticResource BorderBrush}"
+                Background="{DynamicResource PanelBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="1">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="260" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0">
                     <TextBlock FontSize="20" FontWeight="SemiBold" Text="Driver Work Queue" />
                     <TextBlock Margin="0,3,0,0"
-                               Foreground="{StaticResource SubtleTextBrush}"
+                               Foreground="{DynamicResource SubtleTextBrush}"
                                Text="Weighted idle and contact accountability" />
                 </StackPanel>
 
                 <UniformGrid Grid.Column="1" Columns="4" Margin="16,0">
                     <StackPanel Margin="8,0">
-                        <TextBlock Foreground="{StaticResource SubtleTextBrush}" Text="Report cycle" />
+                        <TextBlock Foreground="{DynamicResource SubtleTextBrush}" Text="Report cycle" />
                         <TextBlock Margin="0,3,0,0" FontSize="15" FontWeight="SemiBold" Text="{Binding ReportCycleText}" />
                     </StackPanel>
                     <StackPanel Margin="8,0">
-                        <TextBlock Foreground="{StaticResource SubtleTextBrush}" Text="Fleet 28-day" />
+                        <TextBlock Foreground="{DynamicResource SubtleTextBrush}" Text="Fleet 28-day" />
                         <TextBlock Margin="0,3,0,0" FontSize="15" FontWeight="SemiBold" Text="{Binding Fleet28DayText}" />
                     </StackPanel>
                     <StackPanel Margin="8,0">
-                        <TextBlock Foreground="{StaticResource SubtleTextBrush}" Text="Fleet 7-day" />
+                        <TextBlock Foreground="{DynamicResource SubtleTextBrush}" Text="Fleet 7-day" />
                         <TextBlock Margin="0,3,0,0" FontSize="15" FontWeight="SemiBold" Text="{Binding Fleet7DayText}" />
                     </StackPanel>
                     <StackPanel Margin="8,0">
-                        <TextBlock Foreground="{StaticResource SubtleTextBrush}" Text="Idle contact" />
+                        <TextBlock Foreground="{DynamicResource SubtleTextBrush}" Text="Idle contact" />
                         <TextBlock Margin="0,3,0,0" FontSize="15" FontWeight="SemiBold" Text="{Binding ContactProgressText}" />
                     </StackPanel>
                 </UniformGrid>
 
-                <Button Grid.Column="2"
-                        Margin="8,0,0,0"
+                <Button x:Name="ThemeButton"
+                        Grid.Column="2"
+                        Margin="8,0,8,0"
+                        Click="OnThemeButtonClick"
+                        Content="Dark mode"
+                        ToolTip="Switch between light and dark appearance" />
+                <Button Grid.Column="3"
+                        Margin="0"
                         Style="{StaticResource PrimaryButtonStyle}"
                         Command="{Binding UpdateReportsCommand}"
                         Content="Update Reports" />
@@ -65,8 +72,8 @@
         <Border Grid.Row="1"
                 Margin="0,10,0,10"
                 Padding="10"
-                Background="{StaticResource PanelBackgroundBrush}"
-                BorderBrush="{StaticResource BorderBrush}"
+                Background="{DynamicResource PanelBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="1">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -85,7 +92,7 @@
                 <TextBlock Grid.Column="1"
                            Margin="0,0,7,0"
                            VerticalAlignment="Center"
-                           Foreground="{StaticResource SubtleTextBrush}"
+                           Foreground="{DynamicResource SubtleTextBrush}"
                            Text="Idle threshold" />
                 <TextBox Grid.Column="2"
                          HorizontalContentAlignment="Right"
@@ -105,8 +112,8 @@
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0"
-                    Background="{StaticResource PanelBackgroundBrush}"
-                    BorderBrush="{StaticResource BorderBrush}"
+                    Background="{DynamicResource PanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="1">
                 <DataGrid ItemsSource="{Binding Drivers}"
                           SelectedItem="{Binding SelectedDriver, Mode=TwoWay}"
@@ -134,24 +141,54 @@
                                                VerticalAlignment="Center"
                                                FontSize="11"
                                                FontWeight="SemiBold"
-                                               Foreground="{Binding AttentionBrush}"
-                                               Text="{Binding AttentionText}" />
+                                               Text="{Binding AttentionText}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="{x:Type TextBlock}">
+                                                <Setter Property="Foreground" Value="{DynamicResource QuietTextBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding AttentionText}" Value="NEEDS CALL">
+                                                        <Setter Property="Foreground" Value="{DynamicResource WarningTextBrush}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding AttentionText}" Value="ATTEMPTED">
+                                                        <Setter Property="Foreground" Value="{DynamicResource FollowUpTextBrush}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding AttentionText}" Value="FOLLOW-UP">
+                                                        <Setter Property="Foreground" Value="{DynamicResource FollowUpTextBrush}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding AttentionText}" Value="SPOKE">
+                                                        <Setter Property="Foreground" Value="{DynamicResource CompletedTextBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
                         <DataGridTextColumn Header="Code" Binding="{Binding DriverCode}" Width="70" />
                         <DataGridTextColumn Header="Driver" Binding="{Binding DriverName}" Width="*" MinWidth="155" />
                         <DataGridTextColumn Header="Unit" Binding="{Binding UnitCode}" Width="74" />
-                        <DataGridTextColumn Header="Leader" Binding="{Binding DriverLeader}" Width="70" />
+                        <DataGridTextColumn Header="Leader" Binding="{Binding DriverLeader}" Width="94" />
                         <DataGridTemplateColumn Header="28-day" Width="96">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
                                     <TextBlock Margin="6,0"
                                                HorizontalAlignment="Right"
                                                VerticalAlignment="Center"
-                                               FontWeight="{Binding Idle28FontWeight}"
-                                               Foreground="{Binding Idle28Brush}"
-                                               Text="{Binding Idle28Display}" />
+                                               Text="{Binding Idle28Display}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="{x:Type TextBlock}">
+                                                <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                                                <Setter Property="FontWeight" Value="Normal" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsIdle28Above}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource WarningTextBrush}" />
+                                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
@@ -161,9 +198,20 @@
                                     <TextBlock Margin="6,0"
                                                HorizontalAlignment="Right"
                                                VerticalAlignment="Center"
-                                               FontWeight="{Binding Idle7FontWeight}"
-                                               Foreground="{Binding Idle7Brush}"
-                                               Text="{Binding Idle7Display}" />
+                                               Text="{Binding Idle7Display}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="{x:Type TextBlock}">
+                                                <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                                                <Setter Property="FontWeight" Value="Normal" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsIdle7Above}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource WarningTextBrush}" />
+                                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
@@ -174,25 +222,25 @@
 
             <Border Grid.Column="2"
                     Padding="16"
-                    Background="{StaticResource PanelBackgroundBrush}"
-                    BorderBrush="{StaticResource BorderBrush}"
+                    Background="{DynamicResource PanelBackgroundBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
                     BorderThickness="1">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <TextBlock FontSize="12"
-                                   Foreground="{StaticResource SubtleTextBrush}"
+                                   Foreground="{DynamicResource SubtleTextBrush}"
                                    Text="SELECTED DRIVER" />
                         <TextBlock Margin="0,5,0,0"
                                    FontSize="21"
                                    FontWeight="SemiBold"
                                    Text="{Binding SelectedDriver.DriverName, TargetNullValue=Select a driver}" />
                         <TextBlock Margin="0,4,0,14"
-                                   Foreground="{StaticResource SubtleTextBrush}"
+                                   Foreground="{DynamicResource SubtleTextBrush}"
                                    Text="{Binding SelectedDriver.IdentityLine}" />
 
                         <Border Padding="12"
-                                Background="#F7F8F9"
-                                BorderBrush="{StaticResource BorderBrush}"
+                                Background="{DynamicResource PanelSubtleBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
                                 BorderThickness="1">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -200,20 +248,40 @@
                                     <ColumnDefinition Width="*" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" Margin="0,0,8,0">
-                                    <TextBlock Foreground="{StaticResource SubtleTextBrush}" Text="Weighted 28-day" />
+                                    <TextBlock Foreground="{DynamicResource SubtleTextBrush}" Text="Weighted 28-day" />
                                     <TextBlock Margin="0,4,0,0"
                                                FontSize="24"
-                                               FontWeight="SemiBold"
-                                               Foreground="{Binding SelectedDriver.Idle28Brush}"
-                                               Text="{Binding SelectedDriver.Idle28Display}" />
+                                               Text="{Binding SelectedDriver.Idle28Display}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="{x:Type TextBlock}">
+                                                <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding SelectedDriver.IsIdle28Above}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource WarningTextBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Margin="8,0,0,0">
-                                    <TextBlock Foreground="{StaticResource SubtleTextBrush}" Text="Weighted 7-day" />
+                                    <TextBlock Foreground="{DynamicResource SubtleTextBrush}" Text="Weighted 7-day" />
                                     <TextBlock Margin="0,4,0,0"
                                                FontSize="24"
-                                               FontWeight="SemiBold"
-                                               Foreground="{Binding SelectedDriver.Idle7Brush}"
-                                               Text="{Binding SelectedDriver.Idle7Display}" />
+                                               Text="{Binding SelectedDriver.Idle7Display}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="{x:Type TextBlock}">
+                                                <Setter Property="Foreground" Value="{DynamicResource TextBrush}" />
+                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding SelectedDriver.IsIdle7Above}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource WarningTextBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
                                 </StackPanel>
                             </Grid>
                         </Border>
@@ -222,7 +290,7 @@
                                    FontWeight="SemiBold"
                                    Text="Current-cycle idle contact" />
                         <TextBlock Margin="0,0,0,10"
-                                   Foreground="{StaticResource SubtleTextBrush}"
+                                   Foreground="{DynamicResource SubtleTextBrush}"
                                    Text="{Binding SelectedDriver.ContactDisplay}" />
 
                         <TextBlock Margin="0,4,0,4" Text="Optional note" />
@@ -247,10 +315,10 @@
 
                         <Border Margin="0,18,0,0"
                                 Padding="10"
-                                Background="#F7F8F9"
-                                BorderBrush="{StaticResource BorderBrush}"
+                                Background="{DynamicResource PanelSubtleBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
                                 BorderThickness="1">
-                            <TextBlock Foreground="{StaticResource SubtleTextBrush}"
+                            <TextBlock Foreground="{DynamicResource SubtleTextBrush}"
                                        TextWrapping="Wrap"
                                        Text="Saving an outcome updates the queue immediately. A new report cycle creates fresh contact status without deleting prior weeks." />
                         </Border>
@@ -262,8 +330,8 @@
         <Border Grid.Row="3"
                 Margin="0,10,0,0"
                 Padding="10,7"
-                Background="{StaticResource PanelBackgroundBrush}"
-                BorderBrush="{StaticResource BorderBrush}"
+                Background="{DynamicResource PanelBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="1">
             <Grid>
                 <Grid.ColumnDefinitions>
@@ -274,7 +342,7 @@
                 <TextBlock Grid.Column="1"
                            Margin="16,0,0,0"
                            VerticalAlignment="Center"
-                           Foreground="{StaticResource SubtleTextBrush}"
+                           Foreground="{DynamicResource SubtleTextBrush}"
                            Text="{Binding RosterSummaryText}" />
             </Grid>
         </Border>

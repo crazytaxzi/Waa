@@ -24,9 +24,13 @@ public partial class App : Application
             DispatcherUnhandledException += OnDispatcherUnhandledException;
 
             var repository = new WaaRepository(paths.DatabasePath);
+            repository.Initialize();
+            var themePreferenceStore = new ThemePreferenceStore(paths.DatabasePath);
+            ThemeManager.Apply(themePreferenceStore.GetDarkMode());
+
             var updateService = new ReportUpdateService(repository, new RollingSevenDayCsvParser());
             var viewModel = new MainViewModel(repository, updateService);
-            var window = new MainWindow(viewModel);
+            var window = new MainWindow(viewModel, themePreferenceStore);
             MainWindow = window;
             window.Show();
         }
