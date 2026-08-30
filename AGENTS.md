@@ -6,9 +6,10 @@ WAA is a clean, driver-centric Windows work application. The current `main` tree
 
 - Do not inspect, copy, port, or resurrect implementation, schema, workflow, or styling ideas from repository history.
 - Uploaded or runtime operational reports may be used only as source contracts and read-only inputs.
-- `docs/DATA_SOURCES.md` is authoritative for source structure and weighted calculations.
+- `docs/DATA_SOURCES.md` is authoritative for report structures, field precedence, and weighted calculations.
 - `docs/IDLE_WORKFLOW.md` is authoritative for report-cycle idle accountability and queue ordering.
 - `docs/WORK_LOG_HANDOFF.md` is authoritative for driver work history and deterministic handoff behavior.
+- `docs/MISSING_BOL_WORKFLOW.md` is authoritative for Missing BOL ingestion, matching, tasks, actions, unmatched items, and source lifecycle.
 
 ## Driver and history invariants
 
@@ -28,20 +29,40 @@ WAA is a clean, driver-centric Windows work application. The current `main` tree
 - Every new idle contact creates exactly one linked work entry in the same SQLite transaction.
 - Existing idle events without linked work are backfilled idempotently during migration.
 - A linked idle event may have at most one work entry.
+- Every matched unresolved Missing BOL item creates at most one linked `MissingBolTask` work entry.
+- Missing BOL actions create completed `MissingBolAction` activity entries and save atomically with item/task state.
+- Generic Open Work controls must not let a linked Missing BOL task drift from its item; current UI directs resolution and reopening through the Missing BOL controls.
 - Handoff is generated only from saved work entries using the PC's local calendar-day boundary.
-- Editing or copying a handoff draft never mutates work history, idle events, reports, threshold settings, or driver identity.
+- Editing or copying a handoff draft never mutates work history, BOL state, idle events, reports, threshold settings, or driver identity.
 - Regenerate intentionally replaces the editable draft from current saved records.
 - Migrations never wipe, replace, or silently recreate an existing database after failure.
-- Repository fixtures and logs committed to source must contain synthetic identities only; never commit real employee data or production databases.
+- Repository fixtures and logs committed to source must contain synthetic identities only; never commit real employee data, production reports, or production databases.
 
 ## Report-update invariants
 
 - Scan/import reports automatically once during launch.
 - After launch, import only through the explicit `Update Reports` action.
 - Do not add `FileSystemWatcher`, periodic polling, recurring directory scans, or automatic mid-session imports.
-- Preserve the last known-good roster when an import fails.
+- Rolling 7 Day and Missing BOL update independently; failure in one source never erases or rolls back the other source's accepted state.
+- Preserve the last known-good roster and last known-good Missing BOL snapshot when an import fails.
 - Imported files are read-only inputs and are never modified, renamed, moved, or deleted.
 - Hash accepted source content and make imports idempotent and atomic.
+
+## Missing BOL invariants
+
+- `Order #` is the durable Missing BOL source-item key.
+- Match only normalized exact `Last Dispatch Driver cd` to normalized exact Driver Code.
+- Exact normalization is trim + uppercase invariant text; preserve leading zeros and never convert driver codes to integers.
+- Never match by name, Unit Code, Driver Leader, truck, substring, prefix, similarity, probability, or any fuzzy method.
+- `Last Dispatch Driver nm` is supporting evidence only and never overwrites durable Driver Name.
+- Unknown or blank source Driver Codes remain visible as unmatched and create no driver-owned task.
+- If a later roster introduces the exact Driver Code, attach the item and create its task exactly once.
+- Disappearance from a later workbook never resolves an item or its task.
+- A resolved item that reappears remains resolved, is marked present again, and may be explicitly reopened.
+- A later source row that moves an existing Order # to a different normalized Driver Code is a conflict; reject the snapshot rather than moving history.
+- One item creates at most one linked task. Reimport and Reopen never create a second task.
+- Requested, Attempted, Follow-up, Resolved, and Reopen append action history; they never overwrite prior events.
+- Missing BOL remains a compact workflow inside the existing queue, selected-driver pane, work log, and handoff.
 
 ## Weighted-idle invariants
 
@@ -53,14 +74,15 @@ WAA is a clean, driver-centric Windows work application. The current `main` tree
 - Default threshold is 50%, locally configurable, with a strict greater-than comparison.
 - Either valid 7-day or complete 28-day idle above threshold puts a driver in the high-idle population.
 
-## Idle-conversation invariants
+## Idle-conversation and queue invariants
 
 - Conversation state is keyed by Driver Code + Report Cycle Date.
 - Outcomes distinguish `Attempted`, `Spoke`, and `Spoke — Follow-up`; no event means `Not Contacted`.
 - Same-cycle corrected reports preserve conversation state.
 - A newer cycle derives fresh pending state without deleting prior history.
 - Idle actions snapshot metrics, threshold, Unit Code, Driver Leader, source import, and timestamp.
-- Queue ordering follows the four bands in `docs/IDLE_WORKFLOW.md`; unfinished high-idle work always precedes ordinary unresolved work.
+- Queue ordering follows the four bands in `docs/IDLE_WORKFLOW.md`; unfinished high-idle work always precedes ordinary unresolved work, including Missing BOL tasks.
+- Within otherwise equal ordinary unresolved work, the oldest open Missing BOL Empty Call Date may break ties before stable Driver Name and Driver Code ordering.
 
 ## Permanent product exclusions
 
@@ -69,34 +91,37 @@ The following capabilities are permanently outside WAA's intended scope unless t
 - emailing or transmitting documents
 - automatic calls, messages, or driver contact
 - OCR or document-image recognition
-- document upload/storage workflows
+- document upload, storage, attachment, or document-management workflows
 - giant Missing BOL dashboards or separate analytics portals
-- fuzzy identity matching, fuzzy record linking, or probabilistic merges
-- complex escalation trees, routing engines, or multi-level approval workflows
+- financial/BOL revenue analytics
+- fuzzy identity matching, fuzzy record linking, name similarity, or probabilistic merges
+- complex escalation trees, routing engines, approval workflows, or multi-level escalation logic
+- browser dashboards, WebView, local web servers, Node, cloud services, or helper processes
 
-Missing BOL remains a small imported work queue. It may attach source rows to an exact Driver Code, create/update local work status, affect queue priority, and feed the existing work log and handoff. It must not become a communications, document-management, OCR, analytics, or escalation product.
+Do not add placeholders, abstractions, schema, services, buttons, or documentation promises for excluded capabilities. Missing BOL may import source evidence, attach through exact Driver Code, create/update local work status, affect ordinary-work priority, and feed the existing work log and handoff. Nothing more.
 
 ## Product and performance discipline
 
 - Keep the primary workflow on one restrained, professional WPF window; Handoff is the only secondary top-level view.
-- Target low-spec Windows hardware using native WPF controls, virtualized rows, indexed queries, and short transactions.
-- No browser shell, WebView, local HTTP server, Node runtime, cloud service, helper process, continuous animation, blur, glow, decorative charts, gamification, or oversized dashboard tiles.
-- No one-query-per-row history or work-count loading.
-- Load selected-driver work only when selection changes or saved state changes.
+- Target low-spec Windows hardware using native WPF controls, virtualized rows, indexed aggregate queries, and short transactions.
+- No browser shell, continuous animation, blur, glow, decorative charts, gamification, or oversized dashboard tiles.
+- No one-query-per-row history, work-count, or BOL-count loading.
+- Load selected-driver work and BOL items only when selection or saved state changes.
+- Parse reports off the UI thread and dispose workbook/file streams promptly.
 - Generate handoff only when entering Handoff or pressing Regenerate.
 - Add a feature only when it reduces work, prevents missed follow-up, improves idle accountability, or improves handoff accuracy.
 
 ## Current product sequence
 
-Implemented through **WAA Work Log + Handoff v0.2**:
+Implemented through **WAA Missing BOL v0.3**:
 
 1. Rolling 7 Day ingestion, durable roster identity, weighted driver/fleet metrics, threshold, and prioritized virtualized fleet list.
 2. Per-cycle idle conversation tracking, same-cycle preservation, rollover, and ordering.
 3. General driver work card with Done / Waiting / Follow-up, resolution, reopening, and carry-forward.
 4. Editable deterministic Handoff with Copy to Clipboard.
+5. Missing BOL managed XLSX ingestion, exact-code matching, unmatched visibility, one linked task per item, atomic local actions, queue/search integration, and deterministic handoff integration.
 
 Future work remains separate and must not be pulled into a maintenance change without an explicit bounded milestone:
 
-5. Missing BOL as an exact-code imported work queue integrated with the existing driver queue, work log, and handoff.
 6. Evaluate maintenance workflow separately.
 7. Evaluate DOT workflow separately.
