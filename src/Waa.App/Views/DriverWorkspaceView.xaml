@@ -11,7 +11,7 @@
                     <TextBlock Margin="0,3,0,0" Text="{Binding Driver.IdentityLine}" Style="{StaticResource SubtleTextStyle}" />
                     <TextBlock Margin="0,3,0,0" Style="{StaticResource SubtleTextStyle}">
                         <Run Text="Report cycle " />
-                        <Run Text="{Binding Driver.Record.ReportCycleDate, StringFormat={}{0:M/d/yyyy}}" />
+                        <Run Text="{Binding Driver.Record.ReportCycleDate, Mode=OneWay, StringFormat={}{0:M/d/yyyy}}" />
                     </TextBlock>
                     <UniformGrid Margin="0,14,0,0" Columns="5">
                         <Border Margin="0,0,6,0" Style="{StaticResource SubtlePanelStyle}">
