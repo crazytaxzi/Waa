@@ -22,6 +22,22 @@ The application must remain calm, compact, professional, and responsive on a low
 10. The repository contains synthetic fixtures only.
 11. Current source is the only implementation authority unless the user explicitly requests history.
 
+## Permanent product exclusions
+
+WAA is not and will not become a communications, document-management, OCR, analytics-portal, or escalation platform.
+
+Permanently excluded unless the user explicitly reverses the decision:
+
+- emailing or transmitting documents
+- automatic calling, messaging, or driver contact
+- OCR or document-image recognition
+- document upload/storage workflows
+- giant Missing BOL dashboards or separate BOL analytics portals
+- fuzzy identity matching, fuzzy record linking, or probabilistic merges
+- complex escalation trees, routing engines, or multi-level approval workflows
+
+Future Missing BOL work must remain a small exact-code imported work queue integrated with the existing driver queue, work log, and handoff.
+
 ## Runtime and performance boundary
 
 - .NET 8 WPF desktop application
@@ -107,13 +123,27 @@ The v0.2 implementation has passed the Windows workflow’s restore, warnings-as
 
 ## Future phases — explicitly out of v0.2
 
-### Phase 5 — Missing BOL
+### Phase 5 — Missing BOL work queue
 
-Potential future work:
+Potential future work is deliberately limited to:
 
-- ingest an approved Missing BOL source
-- attach BOL work to Driver Code while preserving shipment/document context
-- surface unresolved document work in the same queue and handoff
+- ingest the approved Missing BOL source during the existing launch/manual update paths
+- attach items through exact `Last Dispatch Driver cd` to Driver Code
+- retain unmatched exact codes visibly without fuzzy matching
+- show a compact BOL count/status in the current fleet queue and selected-driver pane
+- support simple local statuses such as Open, Requested, Attempted, Follow-up, Resolved, and Reopen
+- link BOL actions to the existing work log and deterministic handoff
+- preserve source evidence and never treat disappearance from a later report as automatic resolution
+
+Explicitly excluded from this phase and the product roadmap:
+
+- emailing or transmitting documents
+- automatic calls or messages
+- OCR
+- document uploads or storage
+- giant/separate BOL dashboards
+- fuzzy identity or record matching
+- complex escalation trees
 
 This phase requires a fresh source contract and a separate bounded execution prompt.
 
