@@ -316,7 +316,7 @@ public sealed class WaaRepository
         {
             while (reader.Read())
             {
-                var outcome = reader.IsDBNull(15)
+                IdleContactOutcome? outcome = reader.IsDBNull(15)
                     ? null
                     : ParseIdleOutcome(reader.GetString(15));
 
@@ -466,7 +466,7 @@ public sealed class WaaRepository
 
         var normalizedText = NormalizeWorkText(text);
         var created = (createdUtc ?? DateTimeOffset.UtcNow).ToUniversalTime();
-        var resolved = status == WorkEntryStatus.Done ? created : null;
+        DateTimeOffset? resolved = status == WorkEntryStatus.Done ? created : null;
 
         using var connection = OpenConnection();
         using var transaction = connection.BeginTransaction();
@@ -1049,9 +1049,9 @@ public sealed class WaaRepository
     }
 
     private static string EnsureSentence(string value) =>
-        value.EndsWith('.', StringComparison.Ordinal) ||
-        value.EndsWith('!', StringComparison.Ordinal) ||
-        value.EndsWith('?', StringComparison.Ordinal)
+        value.EndsWith(".", StringComparison.Ordinal) ||
+        value.EndsWith("!", StringComparison.Ordinal) ||
+        value.EndsWith("?", StringComparison.Ordinal)
             ? value
             : value + ".";
 
