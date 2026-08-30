@@ -151,13 +151,6 @@ public sealed record MissingBolDriverSummary(
     DateOnly? OldestOpenEmptyCallDate,
     string OrderSearchText);
 
-public sealed record MissingBolHandoffRecord(
-    string DriverCode,
-    string DriverName,
-    string UnitCode,
-    string OrderNumber,
-    DateOnly EmptyCallDate);
-
 public sealed record MissingBolFleetState(
     IReadOnlyDictionary<string, MissingBolDriverSummary> DriverSummaries,
     int OpenMatchedCount,
