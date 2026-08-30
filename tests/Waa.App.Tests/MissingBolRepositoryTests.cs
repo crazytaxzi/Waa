@@ -394,7 +394,7 @@ public sealed class MissingBolRepositoryTests
 
         Assert.Contains("Missing BOL controls", exception.Message, StringComparison.Ordinal);
         Assert.Equal(MissingBolStatus.Open, bol.GetItemByOrder("SYN2160")?.CurrentStatus);
-        Assert.Null(fixture.Repository.GetWorkEntry(item.TaskWorkEntryId.Value)?.ResolvedUtc);
+        Assert.Null(fixture.Repository.GetWorkEntry(item.TaskWorkEntryId!.Value)?.ResolvedUtc);
     }
 
     [Fact]
