@@ -1,18 +1,10 @@
 using System.Globalization;
-using System.Windows;
-using System.Windows.Media;
 using Waa.App.Data;
 
 namespace Waa.App.ViewModels;
 
 public sealed class DriverRowViewModel
 {
-    private static readonly Brush NormalBrush = Brushes.Black;
-    private static readonly Brush WarningBrush = Brushes.Firebrick;
-    private static readonly Brush FollowUpBrush = Brushes.DarkGoldenrod;
-    private static readonly Brush CompletedBrush = Brushes.DarkGreen;
-    private static readonly Brush QuietBrush = Brushes.SlateGray;
-
     public DriverRowViewModel(FleetDriverRecord record, decimal threshold)
     {
         Record = record;
@@ -26,11 +18,17 @@ public sealed class DriverRowViewModel
     public string UnitCode => Record.UnitCode;
     public string DriverLeader => Record.DriverLeader;
     public string IdentityLine => $"{DriverCode}  •  Unit {UnitCode}  •  Leader {DriverLeader}";
+    public int OpenWorkCount => Record.OpenWorkCount;
+    public bool HasOpenWork => OpenWorkCount > 0;
+    public string OpenWorkDisplay => HasOpenWork
+        ? $"{OpenWorkCount.ToString(CultureInfo.CurrentCulture)} open"
+        : string.Empty;
 
     public bool IsIdle7Above => Record.IdlePercent7Day is not null && Record.IdlePercent7Day.Value > Threshold;
     public bool IsIdle28Above => Record.IsComplete28Day && Record.IdlePercent28Day is not null && Record.IdlePercent28Day.Value > Threshold;
     public bool IsAboveThreshold => IsIdle7Above || IsIdle28Above;
     public bool NeedsIdleAttention => IsAboveThreshold && Record.LatestOutcome != IdleContactOutcome.Spoke;
+    public bool NeedsAnyAttention => NeedsIdleAttention || HasOpenWork;
 
     public decimal? ConcernPercent
     {
@@ -52,47 +50,62 @@ public sealed class DriverRowViewModel
         }
     }
 
-    public int PriorityBand => IsAboveThreshold
-        ? Record.LatestOutcome == IdleContactOutcome.Spoke ? 1 : 0
-        : 2;
-
-    public int AttentionRank => Record.LatestOutcome switch
+    public int PriorityBand
     {
-        IdleContactOutcome.SpokeFollowUp => 0,
-        IdleContactOutcome.Attempted => 1,
-        null => 2,
-        IdleContactOutcome.Spoke => 3,
-        _ => 4
+        get
+        {
+            if (NeedsIdleAttention)
+            {
+                return 0;
+            }
+
+            if (IsAboveThreshold)
+            {
+                return 1;
+            }
+
+            return HasOpenWork ? 2 : 3;
+        }
+    }
+
+    public int PriorityWithinBand => PriorityBand switch
+    {
+        0 => Record.LatestOutcome switch
+        {
+            IdleContactOutcome.SpokeFollowUp => 0,
+            IdleContactOutcome.Attempted => 1,
+            null => 2,
+            _ => 3
+        },
+        1 => HasOpenWork ? 0 : 1,
+        _ => 0
     };
+
+    public decimal? PriorityConcern => PriorityBand <= 1 ? ConcernPercent : null;
 
     public string Idle7Display => FormatPercent(Record.IdlePercent7Day);
     public string Idle28Display => Record.IsComplete28Day
         ? FormatPercent(Record.IdlePercent28Day)
         : $"Incomplete {Record.Coverage28Day}/4";
 
-    public Brush Idle7Brush => IsIdle7Above ? WarningBrush : NormalBrush;
-    public Brush Idle28Brush => IsIdle28Above ? WarningBrush : NormalBrush;
-    public FontWeight Idle7FontWeight => IsIdle7Above ? FontWeights.SemiBold : FontWeights.Normal;
-    public FontWeight Idle28FontWeight => IsIdle28Above ? FontWeights.SemiBold : FontWeights.Normal;
-
-    public string AttentionText => IsAboveThreshold
-        ? Record.LatestOutcome switch
-        {
-            IdleContactOutcome.SpokeFollowUp => "FOLLOW-UP",
-            IdleContactOutcome.Attempted => "ATTEMPTED",
-            IdleContactOutcome.Spoke => "SPOKE",
-            _ => "NEEDS CALL"
-        }
-        : Record.LatestOutcome == IdleContactOutcome.SpokeFollowUp ? "FOLLOW-UP" : "OK";
-
-    public Brush AttentionBrush => AttentionText switch
+    public string AttentionText
     {
-        "NEEDS CALL" => WarningBrush,
-        "ATTEMPTED" => FollowUpBrush,
-        "FOLLOW-UP" => FollowUpBrush,
-        "SPOKE" => CompletedBrush,
-        _ => QuietBrush
-    };
+        get
+        {
+            if (IsAboveThreshold)
+            {
+                return Record.LatestOutcome switch
+                {
+                    IdleContactOutcome.SpokeFollowUp => "FOLLOW-UP",
+                    IdleContactOutcome.Attempted => "ATTEMPTED",
+                    IdleContactOutcome.Spoke => HasOpenWork ? "SPOKE + WORK" : "SPOKE",
+                    _ => "NEEDS CALL"
+                };
+            }
+
+            return HasOpenWork ? "OPEN WORK" : "OK";
+        }
+    }
 
     public string ContactDisplay
     {

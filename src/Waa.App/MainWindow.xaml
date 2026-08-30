@@ -2,10 +2,10 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="WAA — Driver Work Queue"
-        Width="1280"
-        Height="780"
-        MinWidth="1050"
-        MinHeight="650"
+        Width="1360"
+        Height="840"
+        MinWidth="1100"
+        MinHeight="700"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBackgroundBrush}">
     <Grid Margin="14">
@@ -27,13 +27,14 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0">
                     <TextBlock FontSize="20" FontWeight="SemiBold" Text="Driver Work Queue" />
                     <TextBlock Margin="0,3,0,0"
                                Foreground="{DynamicResource SubtleTextBrush}"
-                               Text="Weighted idle and contact accountability" />
+                               Text="Idle, work history, and shift handoff" />
                 </StackPanel>
 
                 <UniformGrid Grid.Column="1" Columns="4" Margin="16,0">
@@ -50,18 +51,26 @@
                         <TextBlock Margin="0,3,0,0" FontSize="15" FontWeight="SemiBold" Text="{Binding Fleet7DayText}" />
                     </StackPanel>
                     <StackPanel Margin="8,0">
-                        <TextBlock Foreground="{DynamicResource SubtleTextBrush}" Text="Idle contact" />
-                        <TextBlock Margin="0,3,0,0" FontSize="15" FontWeight="SemiBold" Text="{Binding ContactProgressText}" />
+                        <TextBlock Foreground="{DynamicResource SubtleTextBrush}" Text="Queue progress" />
+                        <TextBlock Margin="0,3,0,0"
+                                   FontSize="13"
+                                   FontWeight="SemiBold"
+                                   Text="{Binding ContactProgressText}"
+                                   TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                 </UniformGrid>
 
-                <Button x:Name="ThemeButton"
-                        Grid.Column="2"
+                <Button Grid.Column="2"
                         Margin="8,0,8,0"
+                        Command="{Binding OpenHandoffCommand}"
+                        Content="Handoff" />
+                <Button x:Name="ThemeButton"
+                        Grid.Column="3"
+                        Margin="0,0,8,0"
                         Click="OnThemeButtonClick"
                         Content="Dark mode"
                         ToolTip="Switch between light and dark appearance" />
-                <Button Grid.Column="3"
+                <Button Grid.Column="4"
                         Margin="0"
                         Style="{StaticResource PrimaryButtonStyle}"
                         Command="{Binding UpdateReportsCommand}"
@@ -75,6 +84,16 @@
                 Background="{DynamicResource PanelBackgroundBrush}"
                 BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="1">
+            <Border.Style>
+                <Style TargetType="{x:Type Border}">
+                    <Setter Property="Visibility" Value="Visible" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsHandoffView}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
@@ -105,10 +124,20 @@
         </Border>
 
         <Grid Grid.Row="2">
+            <Grid.Style>
+                <Style TargetType="{x:Type Grid}">
+                    <Setter Property="Visibility" Value="Visible" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsHandoffView}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Grid.Style>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="3*" MinWidth="650" />
                 <ColumnDefinition Width="12" />
-                <ColumnDefinition Width="2*" MinWidth="340" />
+                <ColumnDefinition Width="2*" MinWidth="390" />
             </Grid.ColumnDefinitions>
 
             <Border Grid.Column="0"
@@ -134,7 +163,7 @@
                           VirtualizingPanel.VirtualizationMode="Recycling"
                           ScrollViewer.CanContentScroll="True">
                     <DataGrid.Columns>
-                        <DataGridTemplateColumn Header="Status" Width="94">
+                        <DataGridTemplateColumn Header="Status" Width="104">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
                                     <TextBlock Margin="6,0"
@@ -158,6 +187,12 @@
                                                     <DataTrigger Binding="{Binding AttentionText}" Value="SPOKE">
                                                         <Setter Property="Foreground" Value="{DynamicResource CompletedTextBrush}" />
                                                     </DataTrigger>
+                                                    <DataTrigger Binding="{Binding AttentionText}" Value="SPOKE + WORK">
+                                                        <Setter Property="Foreground" Value="{DynamicResource FollowUpTextBrush}" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding AttentionText}" Value="OPEN WORK">
+                                                        <Setter Property="Foreground" Value="{DynamicResource FollowUpTextBrush}" />
+                                                    </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
                                         </TextBlock.Style>
@@ -166,10 +201,10 @@
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
                         <DataGridTextColumn Header="Code" Binding="{Binding DriverCode}" Width="70" />
-                        <DataGridTextColumn Header="Driver" Binding="{Binding DriverName}" Width="*" MinWidth="155" />
-                        <DataGridTextColumn Header="Unit" Binding="{Binding UnitCode}" Width="74" />
-                        <DataGridTextColumn Header="Leader" Binding="{Binding DriverLeader}" Width="94" />
-                        <DataGridTemplateColumn Header="28-day" Width="96">
+                        <DataGridTextColumn Header="Driver" Binding="{Binding DriverName}" Width="*" MinWidth="145" />
+                        <DataGridTextColumn Header="Unit" Binding="{Binding UnitCode}" Width="72" />
+                        <DataGridTextColumn Header="Leader" Binding="{Binding DriverLeader}" Width="92" />
+                        <DataGridTemplateColumn Header="28-day" Width="94">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>
                                     <TextBlock Margin="6,0"
@@ -215,7 +250,8 @@
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
-                        <DataGridTextColumn Header="Idle contact" Binding="{Binding ContactDisplay}" Width="128" />
+                        <DataGridTextColumn Header="Open work" Binding="{Binding OpenWorkDisplay}" Width="78" />
+                        <DataGridTextColumn Header="Idle contact" Binding="{Binding ContactDisplay}" Width="126" />
                     </DataGrid.Columns>
                 </DataGrid>
             </Border>
@@ -292,40 +328,229 @@
                         <TextBlock Margin="0,0,0,10"
                                    Foreground="{DynamicResource SubtleTextBrush}"
                                    Text="{Binding SelectedDriver.ContactDisplay}" />
-
                         <TextBlock Margin="0,4,0,4" Text="Optional note" />
-                        <TextBox MinHeight="76"
+                        <TextBox MinHeight="68"
                                  MaxLength="500"
                                  AcceptsReturn="True"
                                  TextWrapping="Wrap"
                                  VerticalContentAlignment="Top"
                                  Text="{Binding ContactNote, UpdateSourceTrigger=PropertyChanged}" />
-
-                        <WrapPanel Margin="0,12,0,0">
+                        <WrapPanel Margin="0,10,0,0">
                             <Button Style="{StaticResource PrimaryButtonStyle}"
                                     Command="{Binding SpokeCommand}"
                                     Content="Spoke" />
                             <Button Command="{Binding AttemptedCommand}"
                                     Content="Attempted" />
+                            <Button Margin="0"
+                                    Command="{Binding FollowUpCommand}"
+                                    Content="Spoke — Follow-up" />
                         </WrapPanel>
-                        <Button Margin="0,8,0,0"
-                                HorizontalAlignment="Left"
-                                Command="{Binding FollowUpCommand}"
-                                Content="Spoke — Follow-up" />
 
                         <Border Margin="0,18,0,0"
-                                Padding="10"
+                                Padding="12"
                                 Background="{DynamicResource PanelSubtleBackgroundBrush}"
                                 BorderBrush="{DynamicResource BorderBrush}"
                                 BorderThickness="1">
-                            <TextBlock Foreground="{DynamicResource SubtleTextBrush}"
-                                       TextWrapping="Wrap"
-                                       Text="Saving an outcome updates the queue immediately. A new report cycle creates fresh contact status without deleting prior weeks." />
+                            <StackPanel>
+                                <TextBlock FontWeight="SemiBold" Text="Open Work" />
+                                <TextBlock Margin="0,3,0,8"
+                                           Foreground="{DynamicResource SubtleTextBrush}"
+                                           Text="{Binding Work.OpenWorkSummary}" />
+                                <ItemsControl ItemsSource="{Binding Work.OpenEntries}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Margin="0,0,0,7"
+                                                    Padding="9"
+                                                    Background="{DynamicResource PanelBackgroundBrush}"
+                                                    BorderBrush="{DynamicResource BorderBrush}"
+                                                    BorderThickness="1">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <TextBlock FontSize="12"
+                                                                   FontWeight="SemiBold"
+                                                                   Foreground="{DynamicResource FollowUpTextBrush}"
+                                                                   Text="{Binding StatusDisplay}" />
+                                                        <TextBlock Margin="0,2,0,0"
+                                                                   FontSize="11"
+                                                                   Foreground="{DynamicResource SubtleTextBrush}"
+                                                                   Text="{Binding CreatedDisplay}" />
+                                                        <TextBlock Margin="0,5,8,0"
+                                                                   TextWrapping="Wrap"
+                                                                   Text="{Binding Text}" />
+                                                    </StackPanel>
+                                                    <Button Grid.Column="1"
+                                                            Margin="6,0,0,0"
+                                                            VerticalAlignment="Top"
+                                                            Command="{Binding ResolveCommand}"
+                                                            Content="Resolve" />
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
                         </Border>
+
+                        <TextBlock Margin="0,18,0,5"
+                                   FontWeight="SemiBold"
+                                   Text="New Work" />
+                        <TextBox MinHeight="82"
+                                 MaxLength="2000"
+                                 AcceptsReturn="True"
+                                 TextWrapping="Wrap"
+                                 VerticalContentAlignment="Top"
+                                 Text="{Binding Work.NewWorkText, UpdateSourceTrigger=PropertyChanged}" />
+                        <WrapPanel Margin="0,10,0,0">
+                            <Button Style="{StaticResource PrimaryButtonStyle}"
+                                    Command="{Binding Work.SaveDoneCommand}"
+                                    Content="Done" />
+                            <Button Command="{Binding Work.SaveWaitingCommand}"
+                                    Content="Waiting" />
+                            <Button Margin="0"
+                                    Command="{Binding Work.SaveFollowUpCommand}"
+                                    Content="Follow-up" />
+                        </WrapPanel>
+
+                        <Border Margin="0,18,0,0"
+                                Padding="12"
+                                Background="{DynamicResource PanelSubtleBackgroundBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock FontWeight="SemiBold" Text="Today’s Activity" />
+                                <TextBlock Margin="0,3,0,8"
+                                           Foreground="{DynamicResource SubtleTextBrush}"
+                                           Text="{Binding Work.TodaySummary}" />
+                                <ItemsControl ItemsSource="{Binding Work.TodayEntries}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Margin="0,0,0,7"
+                                                    Padding="9"
+                                                    Background="{DynamicResource PanelBackgroundBrush}"
+                                                    BorderBrush="{DynamicResource BorderBrush}"
+                                                    BorderThickness="1">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel>
+                                                        <TextBlock FontSize="12" FontWeight="SemiBold" Text="{Binding StatusDisplay}" />
+                                                        <TextBlock Margin="0,2,0,0"
+                                                                   FontSize="11"
+                                                                   Foreground="{DynamicResource SubtleTextBrush}"
+                                                                   Text="{Binding CreatedDisplay}" />
+                                                        <TextBlock Margin="0,1,0,0"
+                                                                   FontSize="11"
+                                                                   Foreground="{DynamicResource SubtleTextBrush}"
+                                                                   Text="{Binding SourceDisplay}" />
+                                                        <TextBlock Margin="0,5,8,0"
+                                                                   TextWrapping="Wrap"
+                                                                   Text="{Binding Text}" />
+                                                        <TextBlock Margin="0,4,0,0"
+                                                                   FontSize="11"
+                                                                   Foreground="{DynamicResource CompletedTextBrush}"
+                                                                   Text="{Binding ResolutionDisplay}" />
+                                                    </StackPanel>
+                                                    <Button Grid.Column="1"
+                                                            Margin="6,0,0,0"
+                                                            VerticalAlignment="Top"
+                                                            Command="{Binding ReopenCommand}"
+                                                            Content="Reopen">
+                                                        <Button.Style>
+                                                            <Style TargetType="{x:Type Button}"
+                                                                   BasedOn="{StaticResource {x:Type Button}}">
+                                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding CanReopen}" Value="True">
+                                                                        <Setter Property="Visibility" Value="Visible" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Button.Style>
+                                                    </Button>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+
+                        <Button Margin="0,18,0,0"
+                                HorizontalAlignment="Stretch"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                Command="{Binding NextNeedingAttentionCommand}"
+                                Content="Next Needing Attention" />
                     </StackPanel>
                 </ScrollViewer>
             </Border>
         </Grid>
+
+        <Border Grid.Row="2"
+                Padding="16"
+                Background="{DynamicResource PanelBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="1">
+            <Border.Style>
+                <Style TargetType="{x:Type Border}">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsHandoffView}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0"
+                            Command="{Binding BackToQueueCommand}"
+                            Content="Back to Queue" />
+                    <Button Grid.Column="1"
+                            Command="{Binding Handoff.RegenerateCommand}"
+                            Content="Regenerate" />
+                    <Button Grid.Column="2"
+                            Margin="0"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Command="{Binding Handoff.CopyCommand}"
+                            Content="Copy to Clipboard" />
+                    <TextBlock Grid.Column="3"
+                               Margin="18,0,0,0"
+                               VerticalAlignment="Center"
+                               HorizontalAlignment="Right"
+                               Foreground="{DynamicResource SubtleTextBrush}"
+                               Text="{Binding Handoff.SummaryText}" />
+                </Grid>
+                <TextBlock Grid.Row="1"
+                           Margin="0,12,0,8"
+                           Foreground="{DynamicResource SubtleTextBrush}"
+                           Text="Edit this draft freely. Regenerate replaces the editor from saved work; edits never change work history." />
+                <TextBox Grid.Row="2"
+                         AcceptsReturn="True"
+                         AcceptsTab="False"
+                         TextWrapping="Wrap"
+                         VerticalContentAlignment="Top"
+                         VerticalScrollBarVisibility="Auto"
+                         HorizontalScrollBarVisibility="Disabled"
+                         Text="{Binding Handoff.DraftText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            </Grid>
+        </Border>
 
         <Border Grid.Row="3"
                 Margin="0,10,0,0"
@@ -338,7 +563,9 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock VerticalAlignment="Center" Text="{Binding StatusMessage}" />
+                <TextBlock VerticalAlignment="Center"
+                           Text="{Binding StatusMessage}"
+                           TextWrapping="Wrap" />
                 <TextBlock Grid.Column="1"
                            Margin="16,0,0,0"
                            VerticalAlignment="Center"

@@ -29,7 +29,10 @@ public partial class App : Application
             ThemeManager.Apply(themePreferenceStore.GetDarkMode());
 
             var updateService = new ReportUpdateService(repository, new RollingSevenDayCsvParser());
-            var viewModel = new MainViewModel(repository, updateService);
+            var viewModel = new MainViewModel(
+                repository,
+                updateService,
+                new WindowsClipboardService());
             var window = new MainWindow(viewModel, themePreferenceStore);
             MainWindow = window;
             window.Show();

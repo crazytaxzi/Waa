@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 using Waa.App.Data;
 using Waa.App.Infrastructure;
@@ -24,11 +25,32 @@ public sealed class MainViewModel : ObservableObject
     private string _rosterSummaryText = "No roster loaded";
     private bool _isBusy;
     private bool _initialized;
+    private bool _isHandoffView;
 
-    public MainViewModel(WaaRepository repository, ReportUpdateService updateService)
+    public MainViewModel(
+        WaaRepository repository,
+        ReportUpdateService updateService,
+        IClipboardService clipboardService,
+        Func<DateTimeOffset>? now = null,
+        TimeZoneInfo? timeZone = null)
     {
         _repository = repository;
         _updateService = updateService;
+
+        Work = new DriverWorkViewModel(
+            repository,
+            OnWorkChangedAsync,
+            message => StatusMessage = message,
+            now,
+            timeZone);
+        Work.PropertyChanged += OnWorkPropertyChanged;
+        Handoff = new HandoffViewModel(
+            repository,
+            new HandoffService(),
+            clipboardService,
+            message => StatusMessage = message,
+            now,
+            timeZone);
 
         UpdateReportsCommand = new AsyncRelayCommand(
             () => UpdateReportsAsync(isLaunchUpdate: false),
@@ -43,14 +65,28 @@ public sealed class MainViewModel : ObservableObject
         FollowUpCommand = new AsyncRelayCommand(
             () => RecordContactAsync(IdleContactOutcome.SpokeFollowUp),
             CanRecordContact);
+        NextNeedingAttentionCommand = new AsyncRelayCommand(
+            NextNeedingAttentionAsync,
+            CanMoveNext);
+        OpenHandoffCommand = new AsyncRelayCommand(
+            OpenHandoffAsync,
+            () => !IsBusy && !IsHandoffView);
+        BackToQueueCommand = new AsyncRelayCommand(
+            BackToQueueAsync,
+            () => !IsBusy && IsHandoffView);
     }
 
     public ObservableCollection<DriverRowViewModel> Drivers { get; } = new();
+    public DriverWorkViewModel Work { get; }
+    public HandoffViewModel Handoff { get; }
     public AsyncRelayCommand UpdateReportsCommand { get; }
     public AsyncRelayCommand ApplyThresholdCommand { get; }
     public AsyncRelayCommand SpokeCommand { get; }
     public AsyncRelayCommand AttemptedCommand { get; }
     public AsyncRelayCommand FollowUpCommand { get; }
+    public AsyncRelayCommand NextNeedingAttentionCommand { get; }
+    public AsyncRelayCommand OpenHandoffCommand { get; }
+    public AsyncRelayCommand BackToQueueCommand { get; }
 
     public DriverRowViewModel? SelectedDriver
     {
@@ -60,6 +96,7 @@ public sealed class MainViewModel : ObservableObject
             if (SetProperty(ref _selectedDriver, value))
             {
                 RefreshCommandStates();
+                BeginSelectedDriverLoad(value);
             }
         }
     }
@@ -136,6 +173,18 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public bool IsHandoffView
+    {
+        get => _isHandoffView;
+        private set
+        {
+            if (SetProperty(ref _isHandoffView, value))
+            {
+                RefreshCommandStates();
+            }
+        }
+    }
+
     public async Task InitializeAsync()
     {
         if (_initialized)
@@ -147,7 +196,7 @@ public sealed class MainViewModel : ObservableObject
         try
         {
             IsBusy = true;
-            StatusMessage = "Loading saved roster…";
+            StatusMessage = "Loading saved roster and work history…";
             await Task.Run(_repository.Initialize);
             _threshold = await Task.Run(_repository.GetIdleThreshold);
             ThresholdText = _threshold.ToString("0.0", CultureInfo.CurrentCulture);
@@ -190,7 +239,7 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception exception)
         {
             AppLog.Write(exception, "Report update failed");
-            StatusMessage = $"Report update failed: {exception.Message}. The saved roster was left unchanged.";
+            StatusMessage = $"Report update failed: {exception.Message}. The saved roster and work history were left unchanged.";
         }
         finally
         {
@@ -245,12 +294,11 @@ public sealed class MainViewModel : ObservableObject
                 _threshold));
             ContactNote = string.Empty;
             await ReloadFleetAsync(currentCode);
-
-            var next = Drivers.FirstOrDefault(driver =>
-                driver.NeedsIdleAttention &&
-                !driver.DriverCode.Equals(currentCode, StringComparison.OrdinalIgnoreCase));
-            SelectedDriver = next ?? Drivers.FirstOrDefault(driver =>
-                driver.DriverCode.Equals(currentCode, StringComparison.OrdinalIgnoreCase));
+            var advanced = SelectNextNeedingAttention(currentCode, showEmptyStatus: false);
+            if (!advanced)
+            {
+                await Work.RefreshAsync();
+            }
 
             var outcomeText = outcome switch
             {
@@ -259,18 +307,85 @@ public sealed class MainViewModel : ObservableObject
                 IdleContactOutcome.SpokeFollowUp => "Spoke — Follow-up",
                 _ => outcome.ToString()
             };
-            StatusMessage = $"{outcomeText} saved for {selected.DriverName} for cycle {selected.Record.ReportCycleDate:M/d/yyyy}.";
+            StatusMessage = $"{outcomeText} and linked work saved for {selected.DriverName} for cycle {selected.Record.ReportCycleDate:M/d/yyyy}.";
         }
         catch (Exception exception)
         {
             AppLog.Write(exception, "Idle contact save failed");
-            StatusMessage = $"Idle contact was not saved: {exception.Message}";
+            StatusMessage = $"Idle contact and work were not saved: {exception.Message}";
         }
         finally
         {
             IsBusy = false;
         }
     }
+
+    private async Task NextNeedingAttentionAsync()
+    {
+        await Task.Yield();
+        _ = SelectNextNeedingAttention(SelectedDriver?.DriverCode, showEmptyStatus: true);
+    }
+
+    private bool SelectNextNeedingAttention(string? currentCode, bool showEmptyStatus)
+    {
+        if (Drivers.Count == 0)
+        {
+            if (showEmptyStatus)
+            {
+                StatusMessage = "No visible drivers currently need attention.";
+            }
+
+            return false;
+        }
+
+        var visible = Drivers.ToArray();
+        var currentIndex = currentCode is null
+            ? -1
+            : Array.FindIndex(
+                visible,
+                driver => driver.DriverCode.Equals(currentCode, StringComparison.OrdinalIgnoreCase));
+        var rotated = currentIndex < 0
+            ? visible.AsEnumerable()
+            : visible
+                .Skip(currentIndex + 1)
+                .Concat(visible.Take(currentIndex + 1));
+        var otherDrivers = rotated
+            .Where(driver => currentCode is null ||
+                !driver.DriverCode.Equals(currentCode, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var next = otherDrivers.FirstOrDefault(driver => driver.NeedsIdleAttention)
+            ?? otherDrivers.FirstOrDefault(driver => driver.HasOpenWork);
+
+        if (next is null)
+        {
+            if (showEmptyStatus)
+            {
+                StatusMessage = "No other visible drivers currently need attention.";
+            }
+
+            return false;
+        }
+
+        SelectedDriver = next;
+        StatusMessage = $"Selected {next.DriverName} — {next.NeedsIdleAttention switch { true => "idle contact needs attention", false => next.OpenWorkDisplay }}.";
+        return true;
+    }
+
+    private async Task OpenHandoffAsync()
+    {
+        IsHandoffView = true;
+        await Handoff.OpenAsync();
+    }
+
+    private Task BackToQueueAsync()
+    {
+        IsHandoffView = false;
+        StatusMessage = "Returned to the driver work queue.";
+        return Task.CompletedTask;
+    }
+
+    private async Task OnWorkChangedAsync(string driverCode) =>
+        await ReloadFleetAsync(driverCode);
 
     private async Task ReloadFleetAsync(string? preferredDriverCode = null)
     {
@@ -304,18 +419,13 @@ public sealed class MainViewModel : ObservableObject
     private void RebuildVisibleRows(string? preferredDriverCode)
     {
         var previousCode = preferredDriverCode ?? SelectedDriver?.DriverCode;
-        var query = _records
-            .Select(record => new DriverRowViewModel(record, _threshold))
-            .Where(MatchesSearch)
-            .OrderBy(driver => driver.PriorityBand)
-            .ThenBy(driver => driver.AttentionRank)
-            .ThenByDescending(driver => driver.ConcernPercent ?? decimal.MinValue)
-            .ThenBy(driver => driver.DriverName, StringComparer.CurrentCultureIgnoreCase)
-            .ThenBy(driver => driver.DriverCode, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        var ordered = DriverQueueOrderer.Order(
+            _records
+                .Select(record => new DriverRowViewModel(record, _threshold))
+                .Where(MatchesSearch));
 
         Drivers.Clear();
-        foreach (var driver in query)
+        foreach (var driver in ordered)
         {
             Drivers.Add(driver);
         }
@@ -331,8 +441,12 @@ public sealed class MainViewModel : ObservableObject
         var spoken = allRows.Count(driver =>
             driver.IsAboveThreshold &&
             driver.Record.LatestOutcome is IdleContactOutcome.Spoke or IdleContactOutcome.SpokeFollowUp);
+        var openWorkDrivers = allRows.Count(driver => driver.HasOpenWork);
 
-        ContactProgressText = $"{needContact.ToString(CultureInfo.CurrentCulture)} need  •  {spoken.ToString(CultureInfo.CurrentCulture)}/{aboveThreshold.ToString(CultureInfo.CurrentCulture)} spoken";
+        ContactProgressText =
+            $"{needContact.ToString(CultureInfo.CurrentCulture)} need  •  " +
+            $"{spoken.ToString(CultureInfo.CurrentCulture)}/{aboveThreshold.ToString(CultureInfo.CurrentCulture)} spoken  •  " +
+            $"{openWorkDrivers.ToString(CultureInfo.CurrentCulture)} with open work";
         RefreshCommandStates();
     }
 
@@ -350,7 +464,11 @@ public sealed class MainViewModel : ObservableObject
                driver.DriverLeader.Contains(search, StringComparison.CurrentCultureIgnoreCase);
     }
 
-    private bool CanRecordContact() => !IsBusy && SelectedDriver is not null;
+    private bool CanRecordContact() =>
+        !IsBusy && !Work.IsBusy && !IsHandoffView && SelectedDriver is not null;
+
+    private bool CanMoveNext() =>
+        !IsBusy && !Work.IsBusy && !IsHandoffView && SelectedDriver is not null;
 
     private void RefreshCommandStates()
     {
@@ -359,6 +477,30 @@ public sealed class MainViewModel : ObservableObject
         SpokeCommand.RaiseCanExecuteChanged();
         AttemptedCommand.RaiseCanExecuteChanged();
         FollowUpCommand.RaiseCanExecuteChanged();
+        NextNeedingAttentionCommand.RaiseCanExecuteChanged();
+        OpenHandoffCommand.RaiseCanExecuteChanged();
+        BackToQueueCommand.RaiseCanExecuteChanged();
+    }
+
+    private void OnWorkPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(DriverWorkViewModel.IsBusy))
+        {
+            RefreshCommandStates();
+        }
+    }
+
+    private async void BeginSelectedDriverLoad(DriverRowViewModel? selectedDriver)
+    {
+        try
+        {
+            await Work.SetDriverAsync(selectedDriver?.Record);
+        }
+        catch (Exception exception)
+        {
+            AppLog.Write(exception, "Selected driver work load failed");
+            StatusMessage = $"Selected driver work could not be loaded: {exception.Message}";
+        }
     }
 
     private static bool TryParseThreshold(string value, out decimal threshold) =>
