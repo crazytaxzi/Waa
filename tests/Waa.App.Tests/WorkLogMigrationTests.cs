@@ -17,11 +17,17 @@ public sealed class WorkLogMigrationTests
         {
             CreatePreWorkLogDatabase(databasePath);
             var repository = new WaaRepository(databasePath);
+            var missingBolRepository = new MissingBolRepository(databasePath);
 
             repository.Initialize();
+            missingBolRepository.Initialize();
             repository.Initialize();
+            missingBolRepository.Initialize();
+
             var restarted = new WaaRepository(databasePath);
+            var restartedMissingBol = new MissingBolRepository(databasePath);
             restarted.Initialize();
+            restartedMissingBol.Initialize();
 
             var work = Assert.IsType<WorkEntryRecord>(
                 restarted.GetWorkEntryForIdleContact(1));
@@ -44,7 +50,22 @@ public sealed class WorkLogMigrationTests
             Assert.Equal(
                 1L,
                 ScalarLong(connection, "SELECT COUNT(*) FROM work_entries WHERE linked_idle_contact_event_id = 1;"));
-            Assert.Equal(2L, ScalarLong(connection, "PRAGMA user_version;"));
+            Assert.Equal(3L, ScalarLong(connection, "PRAGMA user_version;"));
+            Assert.Equal(
+                1L,
+                ScalarLong(
+                    connection,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'missing_bol_imports';"));
+            Assert.Equal(
+                1L,
+                ScalarLong(
+                    connection,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'missing_bol_items';"));
+            Assert.Equal(
+                1L,
+                ScalarLong(
+                    connection,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'missing_bol_action_events';"));
 
             Assert.Equal(47.5m, restarted.GetIdleThreshold());
             Assert.True(new ThemePreferenceStore(databasePath).GetDarkMode());
@@ -53,6 +74,65 @@ public sealed class WorkLogMigrationTests
             Assert.Equal("LEADER0001", fleetDriver.DriverLeader);
             Assert.Equal(IdleContactOutcome.Attempted, fleetDriver.LatestOutcome);
             Assert.Equal(1, fleetDriver.OpenWorkCount);
+            Assert.Empty(restartedMissingBol.LoadFleetState().UnmatchedItems);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void MissingBolMigrationFailure_ThrowsClearlyAndLeavesExistingDataIntact()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "WaaMigrationTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var databasePath = Path.Combine(root, "waa.db");
+
+        try
+        {
+            var repository = new WaaRepository(databasePath);
+            repository.Initialize();
+            repository.SetIdleThreshold(46.5m);
+
+            using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+            {
+                connection.Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    CREATE TABLE missing_bol_imports (
+                        wrong_column TEXT NOT NULL
+                    );
+                    """;
+                command.ExecuteNonQuery();
+            }
+
+            var exception = Assert.Throws<InvalidOperationException>(() =>
+                new MissingBolRepository(databasePath).Initialize());
+
+            Assert.Contains("could not migrate Missing BOL data", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(databasePath, exception.Message, StringComparison.Ordinal);
+
+            var restarted = new WaaRepository(databasePath);
+            restarted.Initialize();
+            Assert.Equal(46.5m, restarted.GetIdleThreshold());
+
+            using var verify = new SqliteConnection($"Data Source={databasePath}");
+            verify.Open();
+            Assert.Equal(
+                1L,
+                ScalarLong(
+                    verify,
+                    "SELECT COUNT(*) FROM pragma_table_info('missing_bol_imports') WHERE name = 'wrong_column';"));
+            Assert.Equal(
+                0L,
+                ScalarLong(
+                    verify,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'missing_bol_items';"));
         }
         finally
         {
