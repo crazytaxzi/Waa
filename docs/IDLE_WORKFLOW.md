@@ -1,268 +1,152 @@
 # WAA Idle Workflow Specification
 
-## 1. Purpose
+## Purpose and cycle key
 
-The fleet list must answer four questions immediately:
+The fleet queue must show current weighted idle context, whether the current-cycle idle conversation is finished, ordinary unresolved work, and who needs attention next.
 
-1. What are this driver's weighted 28-day and 7-day idle percentages?
-2. Is either value above the configured attention threshold?
-3. Have I actually spoken with this driver about idle for the current report cycle?
-4. Who needs my attention next without making me maintain a filter?
+The accepted report’s maximum normalized `Week Start Date` is the stable `ReportCycleDate`. Idle contact state is keyed by Driver Code + Report Cycle Date.
 
-This workflow is part of the main driver work-through. It is not a separate dashboard or decorative analytics page.
+- A corrected report with the same cycle preserves contact state.
+- A newer cycle derives fresh `Not Contacted` state without deleting prior events.
+- Unit or leader changes never split driver identity or rewrite snapshots.
 
-## 2. Reporting-cycle key
+## Weighted calculations
 
-The accepted Rolling 7 Day report can contain many weekly periods. WAA defines the **current report cycle** as the maximum valid date found in the report's `Week Start Date` field after normalization.
-
-Internally this is stored as `ReportCycleDate`. The name does not assume whether the exporting system semantically treats that date as the beginning or ending boundary; it is simply the stable cycle key supplied by the report.
-
-Idle conversation state is keyed by:
-
-- `DriverCode`
-- `ReportCycleDate`
-
-A corrected or replaced report with the same `ReportCycleDate` must not erase conversation state. A report with a later `ReportCycleDate` naturally starts a new cycle while preserving all prior history.
-
-## 3. Source normalization
-
-The source repeats the same driver/week operational values across `OOR %` and `Idle %` measure rows. WAA must normalize those rows into one weekly observation per:
-
-- Driver Code
-- report cycle date
-
-The repeated rows must agree on the raw engine hours, idle hours, Unit Code, Driver Leader, and other roster context. A conflict is a data-quality condition and must be surfaced instead of silently choosing one row.
-
-Store raw hours at full source precision. Percentages are derived values, not identity or source keys.
-
-## 4. Weighted calculations
-
-### Driver weighted 7-day idle
-
-For the current driver/week observation:
+### Driver 7-day
 
 `Idle7d = IdleHours7d / EngineHours7d × 100`
 
-Rules:
+A zero denominator displays `N/A`.
 
-- negative engine or idle hours are invalid
-- zero engine hours produces `N/A`
-- retain full calculation precision in storage
-- round only for display, initially to one decimal place
+### Driver 28-day
 
-### Driver weighted 28-day idle
+Use the current period and the exact periods 7, 14, and 21 days earlier:
 
-Use the current report cycle plus the three expected weekly periods exactly 7, 14, and 21 days earlier.
+`Idle28d = Sum(IdleHours) / Sum(EngineHours) × 100`
 
-`Idle28d = Sum(IdleHours for 4 expected periods) / Sum(EngineHours for the same periods) × 100`
+Never average weekly percentages. All four expected observations are required for a complete value. Missing periods display incomplete coverage such as `3/4`; a zero total denominator displays `N/A`.
 
-Rules:
+### Fleet values
 
-- never average four weekly percentages
-- require all four expected period observations for a complete 28-day value
-- a zero-engine week may still be a present period and contributes zero to the denominator
-- if any expected period is missing, show `Incomplete` with coverage such as `3/4`; do not present a normal 28-day percentage
-- if total engine hours across all four periods is zero, show `N/A`
+Fleet 7-day and 28-day values are also summed numerator/denominator calculations and expose included-driver coverage. Fleet 28-day includes current-roster drivers with complete four-period coverage.
 
-### Fleet weighted 7-day idle
+## Threshold
 
-For current-roster drivers with a valid current weekly denominator:
+- default `50.0%`
+- valid range `0.0` through `100.0`
+- strict greater-than comparison
+- one threshold applies to valid 7-day and complete 28-day values
+- either value above threshold puts the driver in the high-idle population
+- changing the threshold reranks immediately and never changes saved contact/work history
 
-`FleetIdle7d = Sum(Current Idle Hours) / Sum(Current Engine Hours) × 100`
+## Contact outcomes
 
-Show the included-driver count so missing/invalid coverage is visible.
+- `Not Contacted` — no event for the current cycle
+- `Attempted` — driver not reached; actionable
+- `Spoke` — current-cycle idle conversation complete
+- `Spoke — Follow-up` — driver reached, further action remains open
 
-### Fleet weighted 28-day idle
+Each event snapshots:
 
-For current-roster drivers with complete four-period coverage:
-
-`FleetIdle28d = Sum(Eligible 28-day Idle Hours) / Sum(Eligible 28-day Engine Hours) × 100`
-
-Show coverage as `eligible drivers / current roster drivers`. Do not conceal incomplete coverage behind a confident fleet percentage.
-
-## 5. Configurable threshold
-
-- Default threshold: `50.0%`
-- Comparison: strictly greater than (`>`), not greater-than-or-equal
-- One threshold initially applies to both 7-day and 28-day percentages
-- Valid input range: `0.0` through `100.0`
-- Store the setting locally
-- Changing the threshold immediately recomputes list priority from existing observations
-- Changing the threshold never edits or deletes prior conversation records
-
-A driver is **above threshold** when either:
-
-- valid weighted 7-day idle is greater than the threshold, or
-- complete weighted 28-day idle is greater than the threshold
-
-An incomplete 28-day value cannot by itself put a driver above threshold, but a valid 7-day value still can.
-
-## 6. Conversation state
-
-Each driver/cycle has one current derived state backed by immutable events.
-
-### Visible states
-
-- `Not Contacted` — no idle contact event for the current cycle
-- `Attempted` — an attempt was recorded but the driver was not reached
-- `Spoke` — the idle conversation was completed for the current cycle
-- `Spoke — Follow-up` — the driver was reached, but further action remains open
-
-`Attempted` does not count as spoken. `Spoke — Follow-up` does count as spoken but remains actionable.
-
-### Event fields
-
-Each event records:
-
-- event ID
-- Driver Code
-- report cycle date
-- outcome
-- timestamp
-- optional concise note
-- optional follow-up text/status
-- weighted 7-day percentage snapshot
-- weighted 28-day percentage and coverage snapshot
-- configured threshold snapshot
-- Unit Code snapshot
-- Driver Leader snapshot
-- source import ID
-
-Snapshotting the context preserves what the user actually discussed even after later reports, truck changes, or threshold changes.
-
-## 7. Automatic priority and ordering
-
-The user must not need to filter out drivers already handled each week.
-
-The default list is automatically partitioned and ordered:
-
-### Priority A — Needs idle attention
-
-Above-threshold drivers whose current-cycle state is:
-
-- `Not Contacted`
-- `Attempted`
-- `Spoke — Follow-up`
-
-Within this group:
-
-1. open follow-up work first
-2. then drivers not yet reached
-3. sort by the larger of weighted 28-day and weighted 7-day percentages, descending
-4. use Driver Name as a stable final tie-breaker
-
-### Priority B — Above threshold, completed
-
-Above-threshold drivers with current-cycle state `Spoke`.
-
-These remain above the below-threshold fleet so the user can still see that they are high-idle drivers, but they sit below unfinished Priority A work.
-
-### Priority C — Remaining fleet
-
-All other current drivers, with unresolved ordinary work surfaced before fully clear drivers.
-
-Search and optional manual column sorting may temporarily alter presentation, but clearing search/sort returns to this automatic priority order. No weekly reset, saved filter, or “hide contacted” ritual is required.
-
-## 8. Main-list presentation
-
-Each compact, virtualized row shows:
-
-- attention/status text
-- Driver Code
-- Driver Name
+- Driver Code and report cycle
+- UTC timestamp
+- outcome and optional note
+- weighted 7-day percentage
+- weighted 28-day percentage or incomplete coverage
+- threshold
 - Unit Code
 - Driver Leader
-- weighted 28-day idle
-- weighted 7-day idle
-- current-cycle idle conversation state
-- unresolved ordinary-work marker when applicable
+- source import ID
 
-Above-threshold values use restrained semantic emphasis: bold text and a subtle warning treatment paired with explicit status wording. Do not rely on color alone.
+## Automatic idle-to-work linkage
 
-A compact header line shows:
+A new idle event and its linked work entry are one atomic SQLite transaction. Either both save or neither saves.
 
-- current report cycle
-- configured threshold
-- fleet weighted 28-day idle plus coverage
-- fleet weighted 7-day idle plus coverage
-- count needing idle attention
-- count spoken to this cycle
-- `Update Reports` action and last update result
+Mappings:
 
-These are compact operational summaries, not giant dashboard cards.
+- `Spoke` → `Done`, resolved at the event timestamp
+- `Attempted` → `FollowUp`, unresolved
+- `Spoke — Follow-up` → `FollowUp`, unresolved
 
-## 9. Driver-card interaction
+Generated text uses the event’s metric snapshots, not later recalculation. Incomplete 28-day coverage is stated explicitly. An optional note is appended concisely.
 
-The selected driver card shows the current percentages, coverage, threshold, current-cycle state, and most recent prior-cycle conversation.
+A partial unique index permits at most one work entry per linked idle event. Initialization idempotently backfills older idle events that predate the work-log feature.
 
-Idle actions are direct:
+## Queue ordering
 
-- `Spoke`
-- `Attempted`
-- `Spoke — Follow-up`
+The queue uses these required bands:
 
-An optional note field is available without forcing extra forms. Saving an outcome must:
+1. **Above threshold, idle unfinished** — `Not Contacted`, `Attempted`, or `Spoke — Follow-up`.
+2. **Above threshold, Spoke** — drivers with ordinary unresolved work first within this band.
+3. **Remaining drivers with unresolved ordinary work.**
+4. **Remaining clear drivers.**
 
-1. persist the event transactionally
-2. update the row immediately
-3. move the row to its correct priority position
-4. keep or advance selection predictably to the next Priority A driver
-5. create the appropriate work/handoff record without requiring duplicate typing
+Within band 1:
 
-Undo/correction should append a corrective event or explicitly replace the current-cycle outcome with an audited change; it must not silently destroy history.
+1. `Spoke — Follow-up`
+2. `Attempted`
+3. `Not Contacted`
+4. highest current idle concern, using the larger valid 7-day/complete 28-day value
+5. Driver Name and Driver Code as stable tie-breakers
 
-## 10. Report update and rollover behavior
+The queue obtains unresolved counts with one indexed aggregate query, not one history query per row.
 
-### Application launch
+## Driver-card behavior
 
-- display the last known-good roster immediately
-- run one Downloads scan/import off the UI thread
-- apply any accepted report and refresh calculated snapshots
-- stop all automatic report activity after that launch update completes
+The selected-driver pane presents:
 
-### Manual update
+1. identity and idle context
+2. current-cycle idle-contact actions
+3. Open Work
+4. New Work
+5. Today’s Activity
+6. Next Needing Attention
 
-`Update Reports` performs the same complete scan, validation, hash, import, and calculation process. It is the only mid-session report refresh path.
+Saving an idle outcome:
 
-### Same-cycle update
+1. inserts the event and linked work atomically
+2. refreshes the row status, open count, selected-driver activity, and queue order
+3. may advance predictably to the next visible driver needing attention
 
-When the accepted report has the same `ReportCycleDate`:
+The user never retypes the same idle conversation as ordinary work.
 
-- refresh roster assignments and weighted values
-- preserve all current-cycle conversation events
-- immediately add newly above-threshold drivers to Priority A
-- retain `Spoke` state for drivers already contacted
-- move a driver out of above-threshold priority if corrected values no longer exceed the current threshold, while preserving the conversation history
+## Next Needing Attention
 
-### New-cycle update
+The direct action examines only the current visible/search-filtered queue.
 
-When `ReportCycleDate` advances:
+- Prefer another driver with unfinished high-idle contact work.
+- Otherwise choose another driver with unresolved ordinary work.
+- Do not jump to a driver hidden by search.
+- If no other visible driver needs attention, retain selection and report that clearly.
 
-- prior events remain historical
-- no reset/delete operation runs
-- current-cycle state derives as `Not Contacted` for drivers without a new-cycle event
-- above-threshold drivers automatically enter Priority A
-- below-threshold drivers require no idle conversation unless the user records one voluntarily
+## Report update behavior
 
-## 11. Handoff integration
+- show saved data first
+- scan/import once during launch
+- thereafter update only through `Update Reports`
+- no `FileSystemWatcher`, recurring scan, or polling timer
+- same-cycle updates refresh assignments/metrics while preserving contacts
+- new-cycle updates preserve history and naturally derive new pending state
+- rejected reports retain the last known-good roster, contacts, work, settings, and appearance
 
-Idle activity is part of the shift record.
+## Handoff behavior
 
-- `Attempted` and `Spoke — Follow-up` remain eligible for unresolved handoff sections
-- `Spoke` can appear in completed-today history without cluttering unresolved handoff
-- handoff lines include concise driver context and the metric snapshot when useful
-- the user never has to retype the idle conversation as a separate work note
+Idle activity is rendered only through its linked work entry:
 
-## 12. Acceptance criteria
+- unresolved Attempted and Spoke — Follow-up entries appear in `NEEDS FOLLOW-UP`
+- current-day Spoke entries appear in `COMPLETED TODAY`
+- no event is rendered a second time from `idle_contact_events`
+- metric and assignment context come from the historical snapshots
 
-- weighted 28-day calculations use summed hours, not averaged percentages
-- four expected weekly observations are required for a complete driver 28-day value
-- fleet calculations expose coverage
-- a threshold change re-ranks the list immediately
-- either 7-day or complete 28-day idle above threshold puts a driver in the above-threshold population
-- uncontacted/attempted/follow-up drivers automatically rank above completed conversations
-- marking `Spoke` immediately updates state and ordering
-- a same-cycle corrected report does not erase contact state
-- a newer cycle automatically creates fresh pending state without deleting prior history
-- no folder watcher or periodic report polling runs
-- the user can work the weekly idle list without applying or maintaining a filter
+## Acceptance criteria
+
+- weighted 28-day calculations use summed raw hours and require four expected observations
+- threshold changes immediately rerank without rewriting history
+- unfinished high-idle work ranks before completed high-idle and ordinary work
+- idle event + work insertion is atomic
+- legacy event backfill is repeatable without duplication
+- marking Spoke updates state/order immediately
+- same-cycle correction preserves contact state
+- new cycle creates fresh pending state without deleting history
+- Next respects search and prefers idle attention
+- no report watcher or periodic polling exists

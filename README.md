@@ -1,121 +1,127 @@
-# WAA — Driver-Centric Work & Handoff
+# WAA — Driver Work Queue and Shift Handoff
 
-WAA is a fresh, local Windows work tool for working through a driver fleet, recording what was handled during the shift, and producing a clean handoff at the end of the day.
+WAA is a local, portable Windows application for working through a driver fleet, recording what happened, carrying unresolved work forward, and producing an editable end-of-shift handoff from the saved history.
 
-**This rebuild does not use the old WAA implementation or repository history as a design source.**
+The application is driver-centric: **Driver Code** is the durable key, **Driver Name** is display identity, and Unit Code and Driver Leader are historical context rather than identity.
 
-## Core model
+## Current release: Work Log + Handoff v0.2
 
-The **driver is the primary entity**.
+WAA currently provides:
 
-- **Driver Code** is the durable identity key.
-- **Driver Name** is the human-readable identity attached to that code.
-- **Unit Code / truck** is an object used by the driver and may change over time. A truck must never become driver identity.
-- **Driver Leader** is current organizational context and may also change over time.
+- a searchable, virtualized current-driver fleet queue
+- weighted driver and fleet 7-day idle
+- weighted driver and fleet 28-day idle with coverage
+- configurable idle threshold, default 50%
+- automatically prioritized current-cycle idle accountability
+- `Not Contacted`, `Attempted`, `Spoke`, and `Spoke — Follow-up` presentation
+- one automatic report update during launch and explicit `Update Reports` afterward
+- manual work saved as `Done`, `Waiting`, or `Follow-up`
+- unresolved Waiting and Follow-up items carried forward until resolved
+- direct Resolve and Reopen actions without deleting history
+- automatic idle-contact entries in the same unified work history
+- per-driver Open Work and Today’s Activity
+- an Open Work count in the fleet row
+- `Next Needing Attention`, respecting the active search results
+- deterministic editable Handoff generation
+- `Copy to Clipboard` for the current edited handoff text
+- persisted light and dark appearance
+- local SQLite storage under `%LOCALAPPDATA%\WAA`
+- self-contained Windows x64 portable publishing with no installer or administrator requirement
 
-The current driver roster and idle observations come from the newest valid `rolling 7 day_data*.csv` export in the current user's Windows Downloads folder.
+## Daily workflow
+
+1. Launch `WAA.exe`. WAA immediately opens the saved database, then checks Downloads once for the newest valid `rolling 7 day_data*.csv` report.
+2. Select a driver from the queue.
+3. Record the current-cycle idle outcome when applicable. The idle event and its linked work entry save atomically, so the conversation is never typed twice.
+4. Enter ordinary work and choose `Done`, `Waiting`, or `Follow-up`.
+5. Resolve open items when completed. Their original text, status, creation time, and snapshots remain intact.
+6. Choose `Next Needing Attention` to advance through visible drivers who still need idle contact or have unresolved ordinary work.
+7. Open `Handoff`, edit the generated text as needed, then choose `Copy to Clipboard`.
+
+Handoff edits are deliberately temporary. They never edit work history or resolve anything. `Regenerate` intentionally replaces the editor from current saved work.
+
+## Queue priority
+
+The automatic queue uses four bands:
+
+1. Above-threshold drivers with `Not Contacted`, `Attempted`, or `Spoke — Follow-up`.
+2. Above-threshold drivers with `Spoke`; those with unresolved ordinary work come first within this band.
+3. Remaining drivers with unresolved work.
+4. Remaining clear drivers.
+
+Within unfinished high-idle work, `Spoke — Follow-up` comes first, then `Attempted`, then `Not Contacted`, followed by the highest current valid idle concern and stable driver tie-breakers.
+
+Changing the threshold reranks immediately and does not rewrite saved contact or work history.
+
+## Handoff output
+
+The generated draft always contains:
+
+- `NEEDS FOLLOW-UP`
+- `WAITING / PENDING`
+- `COMPLETED TODAY`
+
+Unresolved sections are oldest-first and grouped predictably by driver. Completed Today is chronological for the PC’s current local calendar day. Timestamps are stored in UTC; WAA does not hard-code a time zone.
+
+Linked idle activity appears once through its unified work entry. Unit Code snapshots are preferred because they preserve the context from when the work occurred.
 
 ## Report refresh behavior
 
 WAA updates reports in exactly two ways:
 
-1. **Automatically once during application launch.**
-2. **Manually when the user chooses `Update Reports`.**
+1. once automatically during application launch
+2. when the user explicitly chooses `Update Reports`
 
-There is no continuous folder watcher, polling loop, or automatic mid-shift import. Dropping a newer or corrected report into Downloads does nothing until `Update Reports` is selected or WAA is launched again.
-
-Each update rescans Downloads, validates the newest matching report, hashes it, and imports it atomically. An invalid, incomplete, or locked file never replaces the last known-good roster.
+There is no folder watcher, recurring scan, polling timer, or automatic mid-session import. A bad, incomplete, or locked candidate never replaces the last known-good roster. Runtime report files remain read-only.
 
 ## Weighted idle rules
 
-All displayed idle percentages are weighted from the report's raw engine and idle hours. WAA must never calculate a 28-day result by averaging weekly percentages.
+- Driver 7-day = current idle hours / current engine hours × 100.
+- Driver 28-day = summed idle hours / summed engine hours across the current period and three expected prior weekly periods.
+- Fleet percentages are also weighted numerator/denominator calculations.
+- A missing expected period displays incomplete 28-day coverage rather than an invented percentage.
+- A zero denominator displays `N/A`.
 
-- **Driver weighted 7-day idle %** = newest valid week's idle hours / engine hours × 100.
-- **Driver weighted 28-day idle %** = sum of idle hours across the four expected weekly periods / sum of engine hours across those same periods × 100.
-- **Fleet weighted 7-day idle %** = total newest-week idle hours for the active fleet / total newest-week engine hours × 100.
-- **Fleet weighted 28-day idle %** = total eligible four-week idle hours / total eligible four-week engine hours × 100, with coverage shown.
+WAA never averages weekly percentages to produce the 28-day value.
 
-A zero denominator displays `N/A`. A driver missing one of the four expected weekly periods displays incomplete 28-day coverage rather than a falsely confident percentage.
+## Portable installation and upgrade
 
-The idle attention threshold defaults to **50%**, is locally configurable, and uses a strict `>` comparison. Changing it re-ranks the current list immediately without rewriting historical records.
+WAA targets **.NET 8 WPF** and is published self-contained for Windows x64.
 
-## Primary workflow
+First install:
 
-The main fleet list is both the work queue and the visual idle overview. Every driver row shows:
+1. Extract the complete `WAA-Portable-win-x64` ZIP to a normal local folder.
+2. Do not run it from inside the ZIP.
+3. Double-click `WAA.exe`.
 
-- Driver Code
-- Driver Name
-- Unit Code
-- Driver Leader
-- weighted 28-day idle %
-- weighted 7-day idle %
-- current idle-conversation status
-- unresolved work status when applicable
+Upgrade:
 
-The default order requires no weekly filter maintenance:
+1. Close WAA.
+2. Extract the new portable folder.
+3. Replace the old application folder with the new one.
+4. Start `WAA.exe`.
 
-1. Above-threshold drivers who still need an idle conversation for the current reporting cycle.
-2. Above-threshold drivers already spoken to for the current reporting cycle.
-3. All remaining drivers.
+The database and preferences remain under `%LOCALAPPDATA%\WAA`; replacing the portable application folder does not delete them. Database migrations are non-destructive and fail visibly rather than silently replacing an existing database.
 
-Within the priority groups, the highest current idle concern sorts first. The user may still search or sort, but the default view must remain useful without touching a filter.
+## Privacy
 
-Selecting a driver opens one restrained work card where the user can:
+This repository is public. Source and tests use synthetic identities only. Never commit real driver names, driver codes, leader codes, unit assignments, company reports, copied production databases, or logs containing employee information.
 
-1. See current driver, unit, leader, 28-day idle, and 7-day idle context.
-2. Record ordinary work as Done, Waiting, or Follow-up.
-3. Record an idle outcome as `Spoke`, `Attempted`, or `Spoke — Follow-up` with an optional note.
-4. Move directly to the next driver needing attention.
+## Technical shape
 
-Idle conversation records are tied to the report's current weekly cycle. Importing a newer weekly cycle automatically creates a new need-to-contact state for drivers above the threshold while preserving prior conversation history. Marking a driver `Spoke` updates the list immediately and moves that driver below still-uncontacted priority drivers—no manual “already talked to” filter and no weekly reset button.
+- .NET 8
+- native WPF
+- `Microsoft.Data.Sqlite`
+- one desktop process
+- local persistence only
+- indexed aggregate fleet/work reads
+- short transactional writes
+- no browser stack, local server, Node, cloud service, helper process, report watcher, or recurring timer
 
-## UI and low-end PC requirements
+## Documentation
 
-WAA must look like a normal professional workplace utility and run well on a low-spec Windows PC.
-
-- native WPF controls; no browser shell or WebView dependency
-- light, neutral Windows-style interface using system typography
-- compact virtualized rows and controls
-- clear spacing and hierarchy
-- two aligned numeric idle columns visible for the whole fleet
-- restrained text/status emphasis when a value exceeds the configured threshold
-- no glow, decorative gradients, backdrop blur, animated backgrounds, oversized KPI tiles, gamification, or ornamental charts
-- no continuous animation, report polling, or background folder watcher
-- open the last known-good roster immediately, then complete the one launch update off the UI thread
-- calculate and persist idle snapshots at import time so scrolling and sorting do not recalculate report history per row
-
-The application should remain calm and obviously work-related when viewed by a coworker or supervisor.
-
-## Technical direction
-
-Initial implementation target:
-
-- **.NET 10 LTS**
-- **WPF** desktop UI
-- **SQLite** local persistence via `Microsoft.Data.Sqlite`
-- self-contained Windows x64 publishing
-- one local desktop process and no network service
-- row virtualization and indexed roster/priority queries
-
-## Planning documents
-
-- [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) — product, UX, architecture, phases, and acceptance criteria
-- [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) — fresh source contracts and weighted idle calculations
-- [`docs/IDLE_WORKFLOW.md`](docs/IDLE_WORKFLOW.md) — idle priority, weekly conversation state, and rollover rules
-
-## First implementation milestone
-
-Build the roster and weighted-idle foundation first:
-
-- locate Downloads correctly
-- update once at launch plus an explicit `Update Reports` action
-- discover and validate the newest `rolling 7 day_data*.csv`
-- parse Driver Code + Driver Name from the real export format
-- capture Driver Leader and Unit Code
-- normalize repeated measure rows into one driver/week observation
-- calculate weighted 7-day and complete-coverage weighted 28-day percentages
-- calculate compact fleet weighted 7-day and 28-day summaries
-- persist drivers, weekly observations, imports, and the configurable threshold
-- display a fast searchable and automatically prioritized fleet list
-
-The next milestone adds competent per-cycle idle conversation tracking before broader report integrations are considered.
+- [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) — source contracts and weighted calculations
+- [`docs/IDLE_WORKFLOW.md`](docs/IDLE_WORKFLOW.md) — current-cycle idle accountability and queue ordering
+- [`docs/WORK_LOG_HANDOFF.md`](docs/WORK_LOG_HANDOFF.md) — authoritative work-log, migration, and handoff specification
+- [`docs/PROJECT_PLAN.md`](docs/PROJECT_PLAN.md) — implemented milestones and future boundaries
+- [`docs/IMPLEMENTATION_STATUS.md`](docs/IMPLEMENTATION_STATUS.md) — exact current implementation state
