@@ -35,9 +35,9 @@
                     <TextBlock Text="{Binding RosterSummaryText}" FontWeight="SemiBold" />
                     <TextBlock Style="{StaticResource SubtleTextStyle}">
                         <Run Text="Cycle " />
-                        <Run Text="{Binding ReportCycleText}" />
+                        <Run Text="{Binding ReportCycleText, Mode=OneWay}" />
                         <Run Text="  •  " />
-                        <Run Text="{Binding MissingBolSummaryText}" />
+                        <Run Text="{Binding MissingBolSummaryText, Mode=OneWay}" />
                     </TextBlock>
                 </StackPanel>
 
