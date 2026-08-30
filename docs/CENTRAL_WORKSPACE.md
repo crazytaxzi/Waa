@@ -1,30 +1,28 @@
-# WAA Central Workspace v0.4
+# WAA Central Workspace v0.4.2
 
 ## Purpose
 
-WAA v0.4 uses one native WPF `MainWindow` as the complete operational shell. The prior always-visible fleet/selected-driver split pane is removed. Work now follows a focused click-through path inside one central content host:
+WAA uses one native WPF `MainWindow` as the complete operational shell. The old always-visible fleet/selected-driver split pane is removed. Work follows a focused same-window path:
 
 `Fleet Queue → Driver Workspace → Focused Task Workspace`
 
-Handoff and Unmatched Missing BOL are also focused routes in the same window. WAA does not create driver, BOL, work-item, or handoff operating-system windows and does not use a browser, WebView, or navigation framework.
+Handoff and Unmatched Missing BOL are also focused central routes. WAA does not create driver/BOL/work/Handoff operating-system windows and does not use a browser, WebView, or heavy navigation framework.
 
 ## Shell
 
-`MainWindow` remains visible for the life of the application and owns the persistent shell:
+`MainWindow` remains visible for application lifetime and owns:
 
-- WAA title and current roster/report summary
-- Light/Dark mode action
+- title and current roster/report summary
+- Light/Dark action
 - `Update Reports`
 - `Handoff`
-- breadcrumb and Back action below the queue level
-- one `ContentControl` bound to the active workspace
+- breadcrumb + Back below queue level
+- one `ContentControl` bound to active workspace
 - persistent status/progress area
 
-The content host displays one workspace at a time. Route state lives in focused view-models plus the small `WorkspaceNavigator`; business rules remain in the existing repositories and workflow view-models.
+Route state lives in focused view-models plus small `WorkspaceNavigator`; business rules remain in repositories/workflow view-models.
 
-## Route hierarchy
-
-Current routes are:
+## Routes
 
 - `FleetQueue`
 - `DriverWorkspace`
@@ -35,73 +33,49 @@ Current routes are:
 - `ActivityDetail`
 - `Handoff`
 - `UnmatchedBol`
-- `Unavailable` for a stale entity that cannot be rebuilt safely
+- `Unavailable`
 
-Driver-owned routes are keyed by durable Driver Code. Missing BOL tasks use the persisted Missing BOL item ID and manual work/activity routes use the persisted work-entry ID. Unit Code and Driver Leader are context only and never route identity.
+Driver routes use durable Driver Code. BOL task routes use persisted BOL item ID; manual work/activity uses persisted work-entry ID. Unit Code/Driver Leader are context only.
 
-A fresh application launch always starts at Fleet Queue. Deep routes are session state, not restart state.
+Fresh launch starts at Fleet Queue. Deep routes are session state only.
 
 ## Fleet Queue
 
-Fleet Queue uses the central workspace width and retains the v0.3 queue contract:
+Fleet Queue uses full central width and retains deterministic search by Driver Code/Name/Unit/Leader/Order #, threshold, weighted fleet metrics, report-cycle progress, BOL/Open Work counts, idle status, current queue priority, Next Needing Attention, and virtualized/recycling DataGrid rows.
 
-- deterministic search by Driver Code, Driver Name, Unit Code, Driver Leader, and attached Order # text
-- configurable idle threshold
-- weighted fleet 28-day and 7-day values
-- current report cycle and queue progress
-- BOL count
-- Open Work count
-- idle/contact status
-- current deterministic priority order
-- `Next Needing Attention`
-- virtualized/recycling DataGrid rows
+Single mouse click opens Driver Workspace. Keyboard focus + Enter opens the same route. Up/Down remains normal DataGrid navigation. Double-click is unnecessary.
 
-A row is one restrained interactive target. A single mouse click opens its Driver Workspace. Keyboard focus plus `Enter` opens the same route. Up/Down remains normal DataGrid navigation. The UI does not require double-click.
-
-The compact BOL/Open Work columns remain summaries; the Driver Workspace provides explicit section actions for focused work. Reliable full-row opening takes precedence over fragile per-cell click routing.
+BOL/Open Work cells are compact summaries; reliable full-row opening takes precedence over fragile cell-specific routing.
 
 ## Driver Workspace
 
-The Driver Workspace is a full central page for one durable Driver Code. Its header shows:
-
-- Driver Name
-- Driver Code
-- Unit Code
-- Driver Leader
-- report cycle
-- weighted 28-day idle and coverage presentation
-- weighted 7-day idle
-- current idle-contact state
-- Open Work count
-- unresolved Missing BOL count
+Full central page for one Driver Code. Header shows Driver Name/Code, Unit, Leader, report cycle, weighted 28-day/coverage, weighted 7-day, current idle-contact state, Open Work count, and unresolved BOL count.
 
 The page is a work index, not a wall of editors.
 
 ### Needs Attention
 
-`NEEDS ATTENTION` presents each actionable object once as a compact keyboard-accessible row:
+Each actionable object appears once:
 
-1. unfinished/current idle contact work
+1. unfinished/current idle contact
 2. each unresolved Missing BOL item
 3. each unresolved manual Waiting/Follow-up item
 
-The linked idle work entry is represented by the idle item rather than duplicated as manual work. A linked Missing BOL task is represented by its Missing BOL item rather than duplicated as manual work. Existing repository links remain the source of truth.
+Linked idle work is represented by the Idle item rather than duplicated as manual work. Linked BOL task is represented by its BOL item rather than duplicated as manual work. Existing links remain source of truth.
 
-Each row shows type, concise title, status, important context/date, and an open affordance. Clicking or activating a row opens one focused task workspace.
+Rows are keyboard-accessible and open one focused task workspace.
 
 ### Quick Actions
 
-- `Add Work`
-- `Next Work Item`
-- `Missing BOL` focus
-- `Open Work` focus
-- `Next Needing Attention`
+- Add Work
+- Next Work Item
+- Missing BOL focus
+- Open Work focus
+- Next Needing Attention
 
-### Today's Activity
+### Today’s Activity
 
-Today’s Activity remains compact and uses the PC local calendar-day boundary already defined by the work-log workflow. Activity rows may open `ActivityDetail`, which is read-only and adds no edit or delete behavior.
-
-When nothing needs attention, the page states:
+Compact local-day activity list. Rows may open read-only ActivityDetail. When no work needs attention, Driver Workspace states:
 
 `No work currently needs attention for this driver.`
 
@@ -109,142 +83,138 @@ When nothing needs attention, the page states:
 
 ### Idle Task
 
-Idle Task shows Driver Code identity plus Unit/Leader context, report cycle, weighted 28-day value/coverage, weighted 7-day value, threshold, current-cycle outcome, prior note, and one optional action note editor.
+Shows driver identity/current Unit/Leader, cycle, weighted 28-day/coverage, weighted 7-day, threshold, current outcome, prior note, and optional action note.
 
-Actions remain:
-
-- `Spoke`
-- `Attempted`
-- `Spoke — Follow-up`
-
-The existing atomic idle-event/linked-work transaction is unchanged. Saving refreshes the current task/driver/queue state without silently jumping away. `Next Work Item` and `Next Needing Attention` remain explicit choices.
+Actions: Spoke / Attempted / Spoke — Follow-up. Existing atomic event+linked-work transaction is unchanged. Saving refreshes state without silently routing away. Next Work Item/Next Needing Attention remain explicit.
 
 ### Missing BOL Task
 
-One order is opened at a time. The workspace shows:
+One order at a time. Shows Order #, Empty Call Date, route, supported customer/miles, exact source code/name evidence, latest-source presence, warnings, current status, optional note, and action history.
 
-- Order #
-- Empty Call Date
-- route
-- supported customer and mileage context
-- exact source Driver Code and source name evidence
-- latest-report presence
-- source-name/presence warnings
-- current local status
-- optional note
-- action history
-
-Actions remain `Requested`, `Attempted`, `Follow-up`, `Resolved`, and `Reopen` when allowed by current state. Exact-code identity, one linked task, action history, transaction boundaries, absence-never-resolves behavior, and synchronized Resolve/Reopen behavior are unchanged. No fuzzy or manual assignment is introduced.
+Actions remain Requested / Attempted / Follow-up / Resolved / Reopen as permitted. Exact-code identity, one linked task, action history, transaction boundaries, absence-never-resolves, synchronized Resolve/Reopen, and no-fuzzy rules remain unchanged.
 
 ### Manual Work Item
 
-Manual work detail shows original status/text, creation time, source, Unit/Leader/report-cycle snapshots, resolution state, and Driver Code. Ordinary Waiting/Follow-up work may Resolve/Reopen. MissingBolTask work still cannot bypass the synchronized BOL workflow.
+Shows original status/text/time/source, Unit/Leader/report-cycle snapshots, resolution state, and Driver Code. Ordinary Waiting/Follow-up may Resolve/Reopen. MissingBolTask cannot bypass synchronized BOL workflow.
 
 ### New Work
 
-`Add Work` opens one multiline editor with `Done`, `Waiting`, and `Follow-up` actions. Existing whitespace prevention, duplicate-submit protection, retry text retention, transactional save, and context snapshots are preserved.
-
-After a successful save WAA returns to the same Driver Workspace and keeps the saved item highlighted/in context.
+One multiline editor with Done / Waiting / Follow-up. Existing whitespace prevention, duplicate-submit protection, retry-text retention, transaction, and context snapshots remain. Success returns to same Driver Workspace and keeps saved item in context.
 
 ### Activity Detail
 
-Activity Detail is read-only. It exposes saved text, status/source, timestamps, Unit/Leader/report-cycle snapshots, and resolution context. It provides no edit/delete mutation path.
+Read-only saved activity/context. No edit/delete path.
 
 ## Handoff
 
-Handoff is a central full-width route. It preserves:
+Handoff is a central full-width route with:
 
-- `Back to Queue`
-- `Regenerate`
+- Back to Queue
+- Regenerate
 - editable draft
-- `Copy to Clipboard`
-- deterministic Needs Follow-up / Waiting / Completed Today sections
+- Copy to Clipboard
 
-The first visit generates from saved work. Navigating away and back during the same application session preserves the edited draft. `Regenerate` intentionally replaces it from current saved work. Editing or copying never mutates repository state.
+First session visit generates from saved work. Navigating away/back preserves the edited draft. Regenerate intentionally replaces it. Editing/copying never mutates repository state.
+
+### v0.4.2 compact runtime draft
+
+The visible draft is driver-grouped rather than split into the old visible `NEEDS FOLLOW-UP`, `WAITING / PENDING`, and `COMPLETED TODAY` sections.
+
+It begins with the editable convention:
+
+`No open ACE/ACI's`
+
+WAA does not model/validate ACE/ACI state; the user must edit that line when it is not true.
+
+Then WAA emits at most one alphabetical narrative line per driver, preferring current fleet Unit Code/Driver Name. Relevant unresolved work and current-day activity are combined. Idle text keeps concise action + human note and omits generated 28D/7D boilerplate from the copied prose while saved metrics remain intact. WAA does not invent coached/not-coached state or other unstored facts.
+
+The draft ends with:
+
+`Missing BOLs:`
+
+Each driver appears once in that section with all unresolved matched Order # values grouped on the same line. The copied BOL line intentionally omits Empty Call Date, route, and local status because those details remain in the focused BOL workspace.
+
+See `docs/WORK_LOG_HANDOFF.md` for the complete format/data contract.
 
 ## Unmatched Missing BOL
 
-The queue’s unmatched count opens a central read-only route containing Order #, Empty Call Date, source Driver Code/name, route, latest-report presence, and an explicit exact-match explanation. It provides no fuzzy or manual assignment path.
+Unmatched count opens central read-only route with Order #, Empty Call Date, source code/name, route, latest presence, and exact-match explanation. No manual/fuzzy assignment.
 
 ## Back and breadcrumbs
 
-Routes below Fleet Queue expose a breadcrumb and Back action, for example:
+Routes below Fleet Queue expose breadcrumb + Back, e.g.:
 
 - `Fleet`
 - `Fleet > Alex Example`
 - `Fleet > Alex Example > Idle`
 - `Fleet > Alex Example > Missing BOL > BOL-100`
 
-`WorkspaceNavigator` keeps a real in-session back stack for driver/task navigation. Back from a task returns to the actual prior Driver Workspace. Handoff and Unmatched BOL deliberately return to Fleet Queue.
+WorkspaceNavigator keeps a real in-session stack. Task Back returns to actual prior Driver Workspace. Handoff/Unmatched deliberately return to Fleet Queue.
 
-`Alt+Left` invokes Back when available unless keyboard focus is inside `TextBoxBase`/`PasswordBox`; normal text editing is not hijacked.
+Alt+Left invokes Back when available unless focus is inside TextBoxBase/PasswordBox; normal text editing is not hijacked.
 
 ## Session-state preservation
 
-Within one running application WAA preserves:
+Within one run WAA preserves:
 
-- queue search text
+- queue search
 - threshold text/value
 - selected Driver Code
 - deterministic queue ordering
-- selected row and useful scroll position where WPF virtualization permits
+- selected row/useful scroll position where virtualization permits
 - current driver/focus context
 - per-driver New Work drafts
-- per-order Missing BOL note drafts
+- per-order BOL note drafts
 - edited Handoff draft
 
-Returning from a task keeps the same driver. Returning to Fleet Queue retains the current search and selected driver.
-
-Deep route state is intentionally not persisted across restart.
+Returning from task keeps same driver. Returning to Fleet retains search/selection. Deep route is not persisted across restart.
 
 ## Report update while navigated
 
-`Update Reports` remains globally available. Report/database work remains off the UI thread through the existing update path.
+Update Reports remains globally available. Before refresh MainViewModel records route/selected Driver Code; after reload it rebuilds by stable IDs where possible. Unsaved New Work/BOL notes remain in session.
 
-Before refresh, MainViewModel records the current route and selected Driver Code. After reload it rebuilds the route using stable IDs when the entity still exists. Unsaved New Work and Missing BOL note drafts are kept in session state.
-
-If a driver or item cannot be rebuilt, WAA shows a focused `Unavailable` workspace with a clear return path instead of dereferencing stale view-model objects or crashing.
+Missing driver/item renders explicit `Unavailable` workspace with safe return path rather than stale-view-model crash.
 
 ## Next Work Item
 
-For the current driver, actionable work is ordered deterministically:
+Current driver actionable order:
 
 1. unfinished idle contact
-2. unresolved Missing BOL, repository order with oldest Empty Call Date first
+2. unresolved Missing BOL, oldest Empty Call Date first
 3. manual Follow-up, oldest first
 4. manual Waiting, oldest first
-5. other unresolved manual work if introduced by the existing supported model
+5. other supported unresolved manual work
 
-`Next Work Item` moves within that already-built list. It does not create another fleet priority engine.
-
-When the current driver has no next open item, WAA reuses existing `Next Needing Attention` logic. That logic follows the current visible/search-filtered queue and preserves the existing fleet priority rules.
+Next Work Item moves in that list and does not create a second fleet priority engine. When no current-driver item remains it reuses existing search-respecting Next Needing Attention.
 
 ## Performance boundaries
 
-v0.4 is a presentation/navigation refactor, not a second data layer.
+Central workspace is presentation/navigation, not a second data layer.
 
-- Fleet data continues through aggregate/indexed repository reads.
-- No one-query-per-driver or one-query-per-row path is added.
-- Selected driver work and BOL collections load only for the selected Driver Code/state refresh.
-- One Missing BOL action history is loaded only when its focused task opens.
-- No timer, report watcher, recurring database polling, or query-per-keystroke path exists.
-- Queue virtualization/recycling remains enabled.
-- Database/report operations use bounded `Task.Run` work and short existing transactions.
-- Hidden legacy split-pane controls and duplicate query paths are removed.
+- aggregate/indexed fleet reads
+- no one-query-per-driver/row path
+- selected-driver work/BOL loads only for Driver Code/state refresh
+- one BOL action history loads only when focused BOL task opens
+- no timer/watcher/recurring DB polling/query-per-keystroke
+- queue virtualization/recycling remains enabled
+- database/report operations use bounded off-UI-thread work and short transactions
+- hidden legacy split-pane controls/duplicate query paths remain removed
 
-## Keyboard and accessibility
+Handoff generation performs one bounded saved-work load plus current fleet context load on first session entry/Regenerate; it does not query per driver.
 
-- fleet row: focus + `Enter` opens Driver Workspace
-- actionable driver rows: actual `Button` controls, so Enter/Space activation works through WPF keyboard semantics
-- visible keyboard focus uses `FocusBorderBrush`
-- buttons use explicit automation names where context needs clarification
+## Keyboard/accessibility
+
+- fleet row: focus + Enter opens Driver Workspace
+- actionable work rows are Button controls with keyboard activation
+- visible focus uses FocusBorderBrush
+- buttons expose automation names where useful
 - Back/breadcrumb/status have clear labels
-- status is expressed in text, with semantic color as secondary information
-- pointer cursor/hover/focus and restrained chevrons indicate clickable rows
-- no mouse-only task action is required
+- status uses words; color is secondary
+- restrained cursor/hover/focus/chevron indicates clickable rows
+- no mouse-only task action
 
 ## Window invariant
 
-`MainWindow` is the only top-level WPF Window in the application source. Driver, idle, BOL, work, new-work, activity, handoff, unmatched, and unavailable workspaces are UserControls/DataTemplates hosted in its central ContentControl.
+`MainWindow` is the only top-level WPF Window. Driver/idle/BOL/work/new-work/activity/Handoff/unmatched/unavailable views are UserControls/DataTemplates hosted in the central ContentControl.
 
 The old split-pane workflow must not be reintroduced in parallel.
