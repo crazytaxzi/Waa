@@ -104,7 +104,7 @@ public sealed class WorkLogMigrationTests
                 connection.Open();
                 using var command = connection.CreateCommand();
                 command.CommandText = """
-                    CREATE TABLE missing_bol_imports (
+                    CREATE TABLE missing_bol_items (
                         wrong_column TEXT NOT NULL
                     );
                     """;
@@ -127,12 +127,12 @@ public sealed class WorkLogMigrationTests
                 1L,
                 ScalarLong(
                     verify,
-                    "SELECT COUNT(*) FROM pragma_table_info('missing_bol_imports') WHERE name = 'wrong_column';"));
+                    "SELECT COUNT(*) FROM pragma_table_info('missing_bol_items') WHERE name = 'wrong_column';"));
             Assert.Equal(
                 0L,
                 ScalarLong(
                     verify,
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'missing_bol_items';"));
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'missing_bol_imports';"));
         }
         finally
         {
