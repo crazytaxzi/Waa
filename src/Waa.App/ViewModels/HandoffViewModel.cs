@@ -82,16 +82,22 @@ public sealed class HandoffViewModel : ObservableObject
         {
             IsBusy = true;
             var day = LocalDayRange.Create(_now(), _timeZone);
-            var entries = await Task.Run(() => _repository.LoadHandoffEntries(
-                day.StartUtc,
-                day.EndUtc));
-            var effectiveEntries = _missingBolRepository?.ApplyWorkSources(entries) ?? entries;
-            var result = _handoffService.Generate(effectiveEntries, day);
+            var loaded = await Task.Run(() =>
+            {
+                var entries = _repository.LoadHandoffEntries(day.StartUtc, day.EndUtc);
+                var effectiveEntries = _missingBolRepository?.ApplyWorkSources(entries) ?? entries;
+                var fleet = _repository.LoadFleet();
+                return (Entries: effectiveEntries, Drivers: fleet.Drivers);
+            });
+            var result = _handoffService.Generate(
+                loaded.Entries,
+                loaded.Drivers,
+                day);
             DraftText = result.Text;
             SummaryText =
-                $"{result.NeedsFollowUpCount} follow-up  •  " +
-                $"{result.WaitingCount} waiting  •  " +
-                $"{result.CompletedTodayCount} completed today";
+                $"{result.DriverLineCount} driver notes  •  " +
+                $"{result.MissingBolDriverCount} drivers with Missing BOL  •  " +
+                $"{result.MissingBolOrderCount} open BOL orders";
             _hasGenerated = true;
             OnPropertyChanged(nameof(HasGenerated));
             _reportStatus($"Handoff regenerated from saved work for {day.LocalDate:M/d/yyyy}.");
