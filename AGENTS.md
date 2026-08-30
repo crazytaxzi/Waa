@@ -62,6 +62,20 @@ WAA is a clean, driver-centric Windows work application. The current `main` tree
 - Idle actions snapshot metrics, threshold, Unit Code, Driver Leader, source import, and timestamp.
 - Queue ordering follows the four bands in `docs/IDLE_WORKFLOW.md`; unfinished high-idle work always precedes ordinary unresolved work.
 
+## Permanent product exclusions
+
+The following capabilities are permanently outside WAA's intended scope unless the user explicitly reverses this decision:
+
+- emailing or transmitting documents
+- automatic calls, messages, or driver contact
+- OCR or document-image recognition
+- document upload/storage workflows
+- giant Missing BOL dashboards or separate analytics portals
+- fuzzy identity matching, fuzzy record linking, or probabilistic merges
+- complex escalation trees, routing engines, or multi-level approval workflows
+
+Missing BOL remains a small imported work queue. It may attach source rows to an exact Driver Code, create/update local work status, affect queue priority, and feed the existing work log and handoff. It must not become a communications, document-management, OCR, analytics, or escalation product.
+
 ## Product and performance discipline
 
 - Keep the primary workflow on one restrained, professional WPF window; Handoff is the only secondary top-level view.
@@ -83,6 +97,6 @@ Implemented through **WAA Work Log + Handoff v0.2**:
 
 Future work remains separate and must not be pulled into a maintenance change without an explicit bounded milestone:
 
-5. Missing BOL integration.
+5. Missing BOL as an exact-code imported work queue integrated with the existing driver queue, work log, and handoff.
 6. Evaluate maintenance workflow separately.
 7. Evaluate DOT workflow separately.
