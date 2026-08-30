@@ -87,7 +87,24 @@ internal sealed class RepositoryFixture : IDisposable
         }
 
         _disposed = true;
-        SqliteConnection.ClearAllPools();
+        for (var attempt = 0; attempt < 80 && Directory.Exists(Root); attempt++)
+        {
+            SqliteConnection.ClearAllPools();
+            try
+            {
+                Directory.Delete(Root, recursive: true);
+                return;
+            }
+            catch (IOException) when (attempt < 79)
+            {
+                Thread.Sleep(25);
+            }
+            catch (UnauthorizedAccessException) when (attempt < 79)
+            {
+                Thread.Sleep(25);
+            }
+        }
+
         if (Directory.Exists(Root))
         {
             Directory.Delete(Root, recursive: true);
