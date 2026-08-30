@@ -55,23 +55,32 @@ public partial class MainWindow : Window
         UpdateThemeButtonText();
     }
 
-    private void OnThemeToggleClicked(object sender, RoutedEventArgs e)
+    private async void OnThemeToggleClicked(object sender, RoutedEventArgs e)
     {
+        var previous = ThemeManager.IsDarkMode;
+        var next = !previous;
+        ThemeToggleButton.IsEnabled = false;
+        ThemeManager.Apply(next);
+
         try
         {
-            var darkMode = !ThemeManager.IsDarkMode;
-            ThemeManager.Apply(darkMode);
-            _themePreferenceStore.SetDarkMode(darkMode);
+            await Task.Run(() => _themePreferenceStore.SetDarkMode(next));
+            AppLog.Write($"Appearance changed to {(next ? "dark" : "light")} mode.");
         }
         catch (Exception exception)
         {
+            ThemeManager.Apply(previous);
             AppLog.Write(exception, "Theme preference update failed");
             MessageBox.Show(
                 this,
-                $"The appearance preference could not be saved: {exception.Message}",
+                $"The appearance preference could not be saved. WAA returned to the prior theme.\n\n{exception.Message}",
                 "WAA appearance",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
+        }
+        finally
+        {
+            ThemeToggleButton.IsEnabled = true;
         }
     }
 
