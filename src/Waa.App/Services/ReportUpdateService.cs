@@ -45,8 +45,12 @@ public sealed class ReportUpdateService
     private readonly SemaphoreSlim _updateGate = new(1, 1);
 
     public ReportUpdateService(WaaRepository repository, RollingSevenDayCsvParser parser)
-        : this(repository, null, parser, null, DownloadsLocator.GetDownloadsFolder)
     {
+        _repository = repository;
+        _rollingParser = parser;
+        _missingBolRepository = null;
+        _missingBolParser = null;
+        _downloadsLocator = DownloadsLocator.GetDownloadsFolder;
     }
 
     public ReportUpdateService(
@@ -55,27 +59,12 @@ public sealed class ReportUpdateService
         RollingSevenDayCsvParser rollingParser,
         MissingBolWorkbookParser missingBolParser,
         Func<string>? downloadsLocator = null)
-        : this(
-            repository,
-            missingBolRepository,
-            rollingParser,
-            missingBolParser,
-            downloadsLocator ?? DownloadsLocator.GetDownloadsFolder)
-    {
-    }
-
-    private ReportUpdateService(
-        WaaRepository repository,
-        MissingBolRepository? missingBolRepository,
-        RollingSevenDayCsvParser rollingParser,
-        MissingBolWorkbookParser? missingBolParser,
-        Func<string> downloadsLocator)
     {
         _repository = repository;
         _missingBolRepository = missingBolRepository;
         _rollingParser = rollingParser;
         _missingBolParser = missingBolParser;
-        _downloadsLocator = downloadsLocator;
+        _downloadsLocator = downloadsLocator ?? DownloadsLocator.GetDownloadsFolder;
     }
 
     public async Task<ReportUpdateResult> UpdateAsync(CancellationToken cancellationToken = default)
@@ -114,7 +103,8 @@ public sealed class ReportUpdateService
         }
 
         var rolling = UpdateRollingSevenDay(downloads);
-        string? attachWarning = null;
+        string? attachMessage = null;
+        var attachFailed = false;
         if (_missingBolRepository is not null)
         {
             try
@@ -122,20 +112,25 @@ public sealed class ReportUpdateService
                 var attachedTasks = _missingBolRepository.AttachExactMatchesAndCreateTasks();
                 if (attachedTasks > 0)
                 {
-                    attachWarning =
-                        $"Attached {attachedTasks.ToString(CultureInfo.InvariantCulture)} previously unmatched Missing BOL item(s) by exact Driver Code.";
+                    attachMessage =
+                        $"Attached {attachedTasks.ToString(CultureInfo.InvariantCulture)} previously unmatched item(s) by exact Driver Code.";
                 }
             }
             catch (Exception exception) when (exception is SqliteException or InvalidOperationException)
             {
-                attachWarning = $"Exact Missing BOL attachment failed: {exception.Message}";
+                attachFailed = true;
+                attachMessage = $"Exact-code attachment failed: {exception.Message}";
             }
         }
 
         var missingBol = UpdateMissingBol(downloads);
-        if (attachWarning is not null)
+        if (attachMessage is not null)
         {
-            rolling = rolling with { Message = $"{rolling.Message} {attachWarning}" };
+            missingBol = missingBol with
+            {
+                State = attachFailed ? ReportSourceUpdateState.Failed : missingBol.State,
+                Message = $"{missingBol.Message} {attachMessage}"
+            };
         }
 
         return Combine(rolling, missingBol);
