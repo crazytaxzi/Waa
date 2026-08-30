@@ -199,7 +199,7 @@ public sealed class WorkspaceNavigationTests
         await environment.ViewModel.NavigateToDriverAsync("A00001");
 
         var workspace = Assert.IsType<DriverWorkspaceViewModel>(environment.ViewModel.CurrentWorkspace);
-        Assert.Single(workspace.NeedsAttention.Where(item => item.Kind == DriverAttentionKind.Idle));
+        Assert.Single(workspace.NeedsAttention, item => item.Kind == DriverAttentionKind.Idle);
         Assert.DoesNotContain(
             workspace.NeedsAttention,
             item => item.Kind == DriverAttentionKind.ManualWork &&
@@ -217,7 +217,7 @@ public sealed class WorkspaceNavigationTests
         await environment.ViewModel.NavigateToDriverAsync("A00001");
 
         var workspace = Assert.IsType<DriverWorkspaceViewModel>(environment.ViewModel.CurrentWorkspace);
-        Assert.Single(workspace.NeedsAttention.Where(item => item.Kind == DriverAttentionKind.MissingBol));
+        Assert.Single(workspace.NeedsAttention, item => item.Kind == DriverAttentionKind.MissingBol);
         Assert.DoesNotContain(
             workspace.NeedsAttention,
             item => item.Kind == DriverAttentionKind.ManualWork &&

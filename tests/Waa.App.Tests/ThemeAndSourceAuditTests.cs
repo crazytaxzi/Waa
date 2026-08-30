@@ -10,48 +10,25 @@ public sealed class ThemeAndSourceAuditTests
 {
     private static readonly string RepositoryRoot = FindRepositoryRoot();
     private static readonly string AppRoot = Path.Combine(RepositoryRoot, "src", "Waa.App");
-    private static readonly string LightPalettePath = Path.Combine(AppRoot, "Themes", "LightColors.xaml");
-    private static readonly string DarkPalettePath = Path.Combine(AppRoot, "Themes", "DarkColors.xaml");
-    private static readonly string BaseStylesPath = Path.Combine(AppRoot, "Themes", "BaseStyles.xaml");
+    private static readonly string ThemeRoot = Path.Combine(AppRoot, "Themes");
+    private static readonly string LightPalettePath = Path.Combine(ThemeRoot, "LightColors.xaml");
+    private static readonly string DarkPalettePath = Path.Combine(ThemeRoot, "DarkColors.xaml");
+    private static readonly string BaseStylesPath = Path.Combine(ThemeRoot, "BaseStyles.xaml");
 
     private static readonly string[] RequiredBrushKeys =
     [
-        "WindowBackgroundBrush",
-        "PanelBackgroundBrush",
-        "PanelSubtleBackgroundBrush",
-        "BorderBrush",
-        "ControlBorderBrush",
-        "ControlBackgroundBrush",
-        "ControlHoverBackgroundBrush",
-        "ControlDisabledBackgroundBrush",
-        "PrimaryBrush",
-        "PrimaryHoverBrush",
-        "TextBrush",
-        "SubtleTextBrush",
-        "DisabledTextBrush",
-        "PrimaryButtonTextBrush",
-        "LinkTextBrush",
-        "SelectionBrush",
-        "DataGridRowBrush",
-        "DataGridAlternateRowBrush",
-        "DataGridHeaderBrush",
-        "DataGridHeaderTextBrush",
-        "DataGridGridLineBrush",
-        "SelectedRowBrush",
-        "SelectedRowTextBrush",
-        "WarningTextBrush",
-        "WarningBackgroundBrush",
-        "FollowUpTextBrush",
-        "FollowUpBackgroundBrush",
-        "CompletedTextBrush",
-        "CompletedBackgroundBrush",
-        "QuietTextBrush",
-        "QuietBackgroundBrush",
-        "ErrorTextBrush",
-        "ErrorBackgroundBrush",
-        "InformationTextBrush",
-        "InformationBackgroundBrush",
-        "FocusBorderBrush"
+        "WindowBackgroundBrush", "PanelBackgroundBrush", "PanelSubtleBackgroundBrush",
+        "BorderBrush", "ControlBorderBrush", "ControlBackgroundBrush",
+        "ControlHoverBackgroundBrush", "ControlDisabledBackgroundBrush",
+        "PrimaryBrush", "PrimaryHoverBrush", "TextBrush", "SubtleTextBrush",
+        "DisabledTextBrush", "PrimaryButtonTextBrush", "LinkTextBrush", "SelectionBrush",
+        "DataGridRowBrush", "DataGridAlternateRowBrush", "DataGridHeaderBrush",
+        "DataGridHeaderTextBrush", "DataGridGridLineBrush", "SelectedRowBrush",
+        "SelectedRowTextBrush", "WarningTextBrush", "WarningBackgroundBrush",
+        "FollowUpTextBrush", "FollowUpBackgroundBrush", "CompletedTextBrush",
+        "CompletedBackgroundBrush", "QuietTextBrush", "QuietBackgroundBrush",
+        "ErrorTextBrush", "ErrorBackgroundBrush", "InformationTextBrush",
+        "InformationBackgroundBrush", "FocusBorderBrush"
     ];
 
     [Fact]
@@ -71,14 +48,14 @@ public sealed class ThemeAndSourceAuditTests
         var light = LoadPalette(LightPalettePath);
         var dark = LoadPalette(DarkPalettePath);
 
-        Assert.All(RequiredBrushKeys, key => Assert.True(light.ContainsKey(key), $"Light palette is missing {key}."));
-        Assert.All(RequiredBrushKeys, key => Assert.True(dark.ContainsKey(key), $"Dark palette is missing {key}."));
+        Assert.All(RequiredBrushKeys, key => Assert.Contains(key, light.Keys));
+        Assert.All(RequiredBrushKeys, key => Assert.Contains(key, dark.Keys));
     }
 
     [Fact]
     public void ThemeManager_SwapsOnlyTheActivePaletteDictionary()
     {
-        var source = File.ReadAllText(Path.Combine(AppRoot, "Infrastructure", "ThemeManager.cs"));
+        var source = ReadAppFile("Infrastructure", "ThemeManager.cs");
 
         Assert.Contains("MergedDictionaries", source, StringComparison.Ordinal);
         Assert.Contains("LightPaletteSource", source, StringComparison.Ordinal);
@@ -91,13 +68,20 @@ public sealed class ThemeAndSourceAuditTests
     }
 
     [Fact]
-    public void AppResources_MergeOnePaletteAndOneBaseStyleDictionary()
+    public void AppResources_MergePaletteBaseStylesAndWorkspaceTemplates()
     {
-        var source = File.ReadAllText(Path.Combine(AppRoot, "App.xaml"));
+        var source = ReadAppFile("App.xaml");
+        var requiredViews = new[]
+        {
+            "FleetQueueView", "DriverWorkspaceView", "IdleTaskView", "MissingBolTaskView",
+            "WorkItemTaskView", "NewWorkView", "ActivityDetailView", "HandoffView",
+            "UnmatchedBolView", "UnavailableView"
+        };
 
         Assert.Contains("Themes/LightColors.xaml", source, StringComparison.Ordinal);
         Assert.Contains("Themes/BaseStyles.xaml", source, StringComparison.Ordinal);
         Assert.DoesNotContain("SolidColorBrush", source, StringComparison.Ordinal);
+        Assert.All(requiredViews, view => Assert.Contains($"views:{view}", source, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -112,68 +96,47 @@ public sealed class ThemeAndSourceAuditTests
     }
 
     [Fact]
-    public void DataGridGeneratedText_UsesTheCurrentCellForeground()
+    public void DataGridGeneratedText_UsesCurrentCellForeground()
     {
         var styles = File.ReadAllText(BaseStylesPath);
-        var gridViews = File.ReadAllText(Path.Combine(AppRoot, "Views", "FleetQueueView.xaml")) +
-                        File.ReadAllText(Path.Combine(AppRoot, "Views", "UnmatchedBolView.xaml"));
-        var textColumns = Regex.Matches(gridViews, "<DataGridTextColumn\\b", RegexOptions.CultureInvariant).Count;
-        var dynamicElementStyles = Regex.Matches(
-            gridViews,
+        var views = ReadAppFile("Views", "FleetQueueView.xaml") +
+                    ReadAppFile("Views", "UnmatchedBolView.xaml");
+        var textColumns = Regex.Matches(views, "<DataGridTextColumn\\b", RegexOptions.CultureInvariant).Count;
+        var dynamicStyles = Regex.Matches(
+            views,
             "ElementStyle=\"\\{DynamicResource DataGridTextElementStyle\\}\"",
             RegexOptions.CultureInvariant).Count;
 
-        Assert.True(textColumns > 0);
-        Assert.Equal(textColumns, dynamicElementStyles);
+        Assert.NotEqual(0, textColumns);
+        Assert.Equal(textColumns, dynamicStyles);
         Assert.Contains("RelativeSource AncestorType={x:Type DataGridCell}", styles, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SelectedRowsAndHeaders_UseThemeAwareForegrounds()
+    public void SelectedRowsHeadersInputsButtonsAndToolTips_AreThemeAware()
     {
         var source = File.ReadAllText(BaseStylesPath);
+        var requiredFragments = new[]
+        {
+            "SelectedRowTextBrush", "SelectedRowBrush", "DataGridHeaderTextBrush",
+            "DataGridHeaderBrush", "TargetType=\"{x:Type TextBox}\"",
+            "Property=\"CaretBrush\" Value=\"{DynamicResource TextBrush}\"",
+            "Property=\"SelectionBrush\" Value=\"{DynamicResource SelectionBrush}\"",
+            "x:Key=\"BaseButtonStyle\"", "x:Key=\"PrimaryButtonStyle\"",
+            "PrimaryButtonTextBrush", "DisabledTextBrush", "TargetType=\"{x:Type ToolTip}\""
+        };
 
-        Assert.Contains("SelectedRowTextBrush", source, StringComparison.Ordinal);
-        Assert.Contains("DataGridHeaderTextBrush", source, StringComparison.Ordinal);
-        Assert.Contains("{DynamicResource SelectedRowBrush}", source, StringComparison.Ordinal);
-        Assert.Contains("{DynamicResource DataGridHeaderBrush}", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void TextInputs_UseThemeAwareTextCaretSelectionAndDisabledState()
-    {
-        var source = File.ReadAllText(BaseStylesPath);
-
-        Assert.Contains("TargetType=\"{x:Type TextBox}\"", source, StringComparison.Ordinal);
-        Assert.Contains("Property=\"CaretBrush\" Value=\"{DynamicResource TextBrush}\"", source, StringComparison.Ordinal);
-        Assert.Contains("Property=\"SelectionBrush\" Value=\"{DynamicResource SelectionBrush}\"", source, StringComparison.Ordinal);
-        Assert.Contains("{DynamicResource DisabledTextBrush}", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void Buttons_UseThemeAwareOrdinaryPrimaryAndDisabledText()
-    {
-        var source = File.ReadAllText(BaseStylesPath);
-
-        Assert.Contains("x:Key=\"BaseButtonStyle\"", source, StringComparison.Ordinal);
-        Assert.Contains("x:Key=\"PrimaryButtonStyle\"", source, StringComparison.Ordinal);
-        Assert.Contains("{DynamicResource PrimaryButtonTextBrush}", source, StringComparison.Ordinal);
-        Assert.Contains("{DynamicResource DisabledTextBrush}", source, StringComparison.Ordinal);
+        Assert.All(requiredFragments, fragment => Assert.Contains(fragment, source, StringComparison.Ordinal));
     }
 
     [Fact]
     public void SemanticText_UsesDynamicThemeResources()
     {
         var source = File.ReadAllText(BaseStylesPath);
-
         foreach (var key in new[]
                  {
-                     "WarningTextBrush",
-                     "FollowUpTextBrush",
-                     "CompletedTextBrush",
-                     "QuietTextBrush",
-                     "ErrorTextBrush",
-                     "InformationTextBrush"
+                     "WarningTextBrush", "FollowUpTextBrush", "CompletedTextBrush",
+                     "QuietTextBrush", "ErrorTextBrush", "InformationTextBrush"
                  })
         {
             Assert.Contains($"{{DynamicResource {key}}}", source, StringComparison.Ordinal);
@@ -181,48 +144,35 @@ public sealed class ThemeAndSourceAuditTests
     }
 
     [Fact]
-    public void ToolTips_UseThemeAwareTextAndSurface()
+    public void HandoffAndTaskEditors_RelyOnImplicitThemeAwareTextBoxStyle()
     {
-        var source = File.ReadAllText(BaseStylesPath);
-
-        Assert.Contains("TargetType=\"{x:Type ToolTip}\"", source, StringComparison.Ordinal);
-        Assert.Contains("{DynamicResource PanelBackgroundBrush}", source, StringComparison.Ordinal);
-        Assert.Contains("{DynamicResource TextBrush}", source, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void HandoffAndTaskEditors_RelyOnThemeAwareTextBoxStyle()
-    {
-        var files = new[]
+        foreach (var file in new[] { "HandoffView.xaml", "IdleTaskView.xaml", "MissingBolTaskView.xaml", "NewWorkView.xaml" })
         {
-            "HandoffView.xaml",
-            "IdleTaskView.xaml",
-            "MissingBolTaskView.xaml",
-            "NewWorkView.xaml"
-        };
-
-        foreach (var file in files)
-        {
-            var source = File.ReadAllText(Path.Combine(AppRoot, "Views", file));
+            var source = ReadAppFile("Views", file);
             var textBoxes = Regex.Matches(
-                source,
-                "<TextBox\\b[^>]*>",
-                RegexOptions.Singleline | RegexOptions.CultureInvariant);
+                    source,
+                    "<TextBox\\b[^>]*>",
+                    RegexOptions.Singleline | RegexOptions.CultureInvariant)
+                .Cast<Match>()
+                .ToArray();
             Assert.NotEmpty(textBoxes);
-            foreach (Match textBox in textBoxes)
+            Assert.All(textBoxes, textBox =>
             {
-                Assert.False(Regex.IsMatch(textBox.Value, "Foreground\\s*=", RegexOptions.CultureInvariant));
-                Assert.False(Regex.IsMatch(textBox.Value, "CaretBrush\\s*=", RegexOptions.CultureInvariant));
-            }
+                Assert.DoesNotMatch("Foreground\\s*=", textBox.Value);
+                Assert.DoesNotMatch("CaretBrush\\s*=", textBox.Value);
+            });
         }
     }
 
     [Fact]
     public void MainWindow_UsesOneCentralContentHostInsteadOfSplitPane()
     {
-        var source = File.ReadAllText(Path.Combine(AppRoot, "MainWindow.xaml"));
+        var source = ReadAppFile("MainWindow.xaml");
+        var contentHosts = Regex.Matches(source, "<ContentControl\\b", RegexOptions.CultureInvariant)
+            .Cast<Match>()
+            .ToArray();
 
-        Assert.Equal(1, Regex.Matches(source, "<ContentControl\\b", RegexOptions.CultureInvariant).Count);
+        Assert.Single(contentHosts);
         Assert.Contains("Content=\"{Binding CurrentWorkspace}\"", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Selected Driver", source, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("GridSplitter", source, StringComparison.Ordinal);
@@ -249,27 +199,6 @@ public sealed class ThemeAndSourceAuditTests
     }
 
     [Fact]
-    public void WorkspaceDataTemplates_CoverEveryCentralRouteView()
-    {
-        var source = File.ReadAllText(Path.Combine(AppRoot, "App.xaml"));
-        var requiredViews = new[]
-        {
-            "FleetQueueView",
-            "DriverWorkspaceView",
-            "IdleTaskView",
-            "MissingBolTaskView",
-            "WorkItemTaskView",
-            "NewWorkView",
-            "ActivityDetailView",
-            "HandoffView",
-            "UnmatchedBolView",
-            "UnavailableView"
-        };
-
-        Assert.All(requiredViews, view => Assert.Contains($"views:{view}", source, StringComparison.Ordinal));
-    }
-
-    [Fact]
     public void ApplicationSource_HasNoProhibitedFixedThemeColors()
     {
         var paletteFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -277,7 +206,6 @@ public sealed class ThemeAndSourceAuditTests
             Path.GetFullPath(LightPalettePath),
             Path.GetFullPath(DarkPalettePath)
         };
-        var violations = new List<string>();
         var checks = new (string Name, Regex Pattern)[]
         {
             ("hex theme attribute", new Regex("(?:Foreground|Background|BorderBrush|CaretBrush|SelectionBrush)\\s*=\\s*\"#[0-9A-Fa-f]{3,8}\"", RegexOptions.CultureInvariant)),
@@ -287,35 +215,26 @@ public sealed class ThemeAndSourceAuditTests
             ("fixed Color construction", new Regex("(?:Color\\.From|new\\s+Color\\s*\\()", RegexOptions.CultureInvariant)),
             ("static theme brush", new Regex("\\{StaticResource\\s+[A-Za-z0-9_]*Brush\\}", RegexOptions.CultureInvariant))
         };
+        var violations = new List<string>();
 
-        foreach (var path in Directory.EnumerateFiles(AppRoot, "*.*", SearchOption.AllDirectories)
-                     .Where(path => path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase) ||
-                                    path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)))
+        foreach (var path in AppSourceFiles().Where(path => !paletteFiles.Contains(Path.GetFullPath(path))))
         {
-            if (paletteFiles.Contains(Path.GetFullPath(path)))
-            {
-                continue;
-            }
-
             var source = File.ReadAllText(path);
             foreach (var check in checks)
             {
-                foreach (Match match in check.Pattern.Matches(source))
-                {
-                    violations.Add($"{Path.GetRelativePath(RepositoryRoot, path)}: {check.Name}: {match.Value}");
-                }
+                violations.AddRange(check.Pattern.Matches(source)
+                    .Cast<Match>()
+                    .Select(match => $"{Path.GetRelativePath(RepositoryRoot, path)}: {check.Name}: {match.Value}"));
             }
         }
 
-        Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations));
+        Assert.Empty(violations);
     }
 
     [Fact]
     public void LiteralHexThemeValues_ExistOnlyInPaletteFiles()
     {
-        var violations = Directory.EnumerateFiles(AppRoot, "*.*", SearchOption.AllDirectories)
-            .Where(path => path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase) ||
-                           path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+        var violations = AppSourceFiles()
             .Where(path => !path.Equals(LightPalettePath, StringComparison.OrdinalIgnoreCase) &&
                            !path.Equals(DarkPalettePath, StringComparison.OrdinalIgnoreCase))
             .Where(path => Regex.IsMatch(File.ReadAllText(path), "#[0-9A-Fa-f]{3,8}", RegexOptions.CultureInvariant))
@@ -328,17 +247,17 @@ public sealed class ThemeAndSourceAuditTests
     [Fact]
     public void ThemeSwitching_DoesNotRequireRestartOrNavigationReset()
     {
-        var themeSource = File.ReadAllText(Path.Combine(AppRoot, "Infrastructure", "ThemeManager.cs"));
-        var shellSource = File.ReadAllText(Path.Combine(AppRoot, "MainWindow.xaml.cs"));
-        var changeHandler = Regex.Match(
+        var themeSource = ReadAppFile("Infrastructure", "ThemeManager.cs");
+        var shellSource = ReadAppFile("MainWindow.xaml.cs");
+        var handler = Regex.Match(
             shellSource,
             "private void OnThemeChanged\\([^)]*\\)\\s*\\{.*?\\n    \\}",
             RegexOptions.Singleline | RegexOptions.CultureInvariant);
 
-        Assert.True(changeHandler.Success, "MainWindow theme change handler was not found.");
-        Assert.Contains("ApplyWindowTheme", changeHandler.Value, StringComparison.Ordinal);
-        Assert.Contains("UpdateThemeButtonText", changeHandler.Value, StringComparison.Ordinal);
-        Assert.DoesNotContain("InitializeAsync", changeHandler.Value, StringComparison.Ordinal);
+        Assert.True(handler.Success, "MainWindow theme-change handler was not found.");
+        Assert.Contains("ApplyWindowTheme", handler.Value, StringComparison.Ordinal);
+        Assert.Contains("UpdateThemeButtonText", handler.Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("InitializeAsync", handler.Value, StringComparison.Ordinal);
         Assert.DoesNotContain("Navigate", themeSource, StringComparison.Ordinal);
     }
 
@@ -350,7 +269,7 @@ public sealed class ThemeAndSourceAuditTests
         string backgroundKey,
         double minimumRatio)
     {
-        var palette = LoadPalette(Path.Combine(AppRoot, "Themes", paletteFile));
+        var palette = LoadPalette(Path.Combine(ThemeRoot, paletteFile));
         var actual = ContrastRatio(palette[foregroundKey], palette[backgroundKey]);
 
         Assert.True(
@@ -405,10 +324,8 @@ public sealed class ThemeAndSourceAuditTests
             .Descendants()
             .Where(element => element.Name.LocalName == "SolidColorBrush")
             .ToDictionary(
-                element => element.Attribute(x + "Key")?.Value ??
-                           throw new InvalidDataException($"Palette brush without x:Key in {path}."),
-                element => element.Attribute("Color")?.Value ??
-                           throw new InvalidDataException($"Palette brush without Color in {path}."),
+                element => element.Attribute(x + "Key")?.Value ?? throw new InvalidDataException($"Palette brush without x:Key in {path}."),
+                element => element.Attribute("Color")?.Value ?? throw new InvalidDataException($"Palette brush without Color in {path}."),
                 StringComparer.Ordinal);
     }
 
@@ -416,9 +333,8 @@ public sealed class ThemeAndSourceAuditTests
     {
         var foregroundLuminosity = RelativeLuminance(foreground);
         var backgroundLuminosity = RelativeLuminance(background);
-        var lighter = Math.Max(foregroundLuminosity, backgroundLuminosity);
-        var darker = Math.Min(foregroundLuminosity, backgroundLuminosity);
-        return (lighter + 0.05d) / (darker + 0.05d);
+        return (Math.Max(foregroundLuminosity, backgroundLuminosity) + 0.05d) /
+               (Math.Min(foregroundLuminosity, backgroundLuminosity) + 0.05d);
     }
 
     private static double RelativeLuminance(string color)
@@ -437,18 +353,22 @@ public sealed class ThemeAndSourceAuditTests
         var red = ParseChannel(normalized[0..2]);
         var green = ParseChannel(normalized[2..4]);
         var blue = ParseChannel(normalized[4..6]);
-        return (0.2126d * Linearize(red)) +
-               (0.7152d * Linearize(green)) +
-               (0.0722d * Linearize(blue));
+        return (0.2126d * Linearize(red)) + (0.7152d * Linearize(green)) + (0.0722d * Linearize(blue));
     }
 
     private static double ParseChannel(string value) =>
         int.Parse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture) / 255d;
 
     private static double Linearize(double channel) =>
-        channel <= 0.04045d
-            ? channel / 12.92d
-            : Math.Pow((channel + 0.055d) / 1.055d, 2.4d);
+        channel <= 0.04045d ? channel / 12.92d : Math.Pow((channel + 0.055d) / 1.055d, 2.4d);
+
+    private static IEnumerable<string> AppSourceFiles() =>
+        Directory.EnumerateFiles(AppRoot, "*.*", SearchOption.AllDirectories)
+            .Where(path => path.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase) ||
+                           path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase));
+
+    private static string ReadAppFile(params string[] parts) =>
+        File.ReadAllText(Path.Combine([AppRoot, .. parts]));
 
     private static string FindRepositoryRoot()
     {
