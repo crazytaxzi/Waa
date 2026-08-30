@@ -1130,7 +1130,7 @@ public sealed class WaaRepository
             work.driver_leader_snapshot
         FROM work_entries AS work
         INNER JOIN drivers AS driver ON driver.driver_code = work.driver_code
-        """;
+        """ + "\n";
 
     private sealed record LegacyIdleContactEvent(
         long Id,
