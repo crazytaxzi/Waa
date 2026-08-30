@@ -1,19 +1,19 @@
-# WAA Work Log + Handoff v0.4 Presentation / v0.3 Data Contract
+# WAA Work Log + Handoff v0.4.2 Presentation / v0.3 Data Contract
 
-This document is authoritative for persistent driver work history and deterministic shift Handoff, including idle linkage and Missing BOL task/action integration. v0.4 replaces the old selected-driver split-pane presentation with central Driver/Task workspaces while preserving the validated work/history model.
+This document is authoritative for persistent driver work history and deterministic shift Handoff, including idle linkage and Missing BOL task/action integration. The v0.4.x presentation uses the central one-window workspace while preserving the validated v0.3 work/history/database rules.
 
 ## Driver-centric ownership
 
 - Every work entry belongs to durable Driver Code.
 - Driver Name is display identity.
-- Unit Code and Driver Leader are snapshots/context, not identity.
+- Unit Code and Driver Leader are context/snapshots, never driver identity.
 - Later roster assignments never move, duplicate, or rewrite historical work.
 - Missing BOL source names/leaders never replace durable WAA identity/context.
-- Driver/task routes use durable Driver Code and persisted record IDs rather than Unit Code.
+- Driver/task routes use Driver Code and persisted record IDs rather than Unit Code.
 
 ## SQLite work model
 
-`work_entries` contains:
+`work_entries` stores:
 
 - `id`
 - `driver_code`
@@ -27,37 +27,23 @@ This document is authoritative for persistent driver work history and determinis
 - `unit_code_snapshot`
 - `driver_leader_snapshot`
 
-Allowed statuses:
+Allowed statuses are `Done`, `Waiting`, and `FollowUp`.
 
-- `Done`
-- `Waiting`
-- `FollowUp`
-
-Base persisted sources remain compatible with the existing table:
-
-- `Manual`
-- `IdleContact`
-
-Missing BOL semantic sources are overlaid through `missing_bol_work_links`:
-
-- `MissingBolTask`
-- `MissingBolAction`
+Base persisted sources remain `Manual` and `IdleContact`. Missing BOL semantic sources are overlaid through `missing_bol_work_links` as `MissingBolTask` and `MissingBolAction`.
 
 Semantics:
 
-- Manual Done is resolved at creation.
+- Manual Done resolves at creation.
 - Waiting/FollowUp remain unresolved until explicit Resolve.
-- `resolved_utc` is authoritative; resolution never erases original status/text/creation/context snapshots.
+- `resolved_utc` is authoritative; resolution never erases original status, text, creation time, or context snapshots.
 - Reopen clears only `resolved_utc` for supported ordinary Waiting/FollowUp work.
 - MissingBolTask remains unresolved until synchronized BOL Resolve.
-- MissingBolAction is a completed Done activity at action time.
-- timestamps store UTC; presentation uses PC time zone
-- work text is trimmed/non-blank
-- work entries are not destructively deleted
+- MissingBolAction is completed activity at action time.
+- timestamps are stored in UTC and displayed using the PC time zone.
+- work text is trimmed and may not be blank.
+- work entries are not destructively deleted.
 
-Indexes support driver history, aggregate unresolved fleet counts, local-day activity/Handoff, idle links, BOL item/task links, and action-source links.
-
-Initialization remains non-destructive. v0.4 central navigation/theming introduces no schema migration and does not increment schema version.
+The current central-workspace and compact-Handoff changes require no database migration and do not increment schema version.
 
 ## Idle contact integration
 
@@ -69,9 +55,7 @@ Idle event and linked work entry save in one transaction.
 | Attempted | FollowUp | unresolved |
 | Spoke — Follow-up | FollowUp | unresolved |
 
-Generated work text uses saved metric snapshots. Incomplete 28-day coverage is represented explicitly; optional note text is appended once.
-
-In v0.4 Driver Workspace, the current actionable idle state appears once as an Idle attention item rather than also rendering its linked work as a separate manual row. Persisted linkage/Handoff behavior is unchanged.
+Persisted idle work text keeps saved 28-day/7-day metric snapshots and optional note. Driver Workspace represents the current actionable idle state once rather than duplicating its linked work as a manual item.
 
 ## Missing BOL task integration
 
@@ -81,106 +65,61 @@ Example persisted task text:
 
 `Missing BOL for order SYN1001, empty call 8/27/2026, Boise, ID → Auburn, WA. Status: Open.`
 
-The task snapshots matched Driver Code, Unit Code, Driver Leader, report cycle when available, creation UTC, BOL item linkage, and source import.
+The task snapshots matched Driver Code, Unit Code, Driver Leader, report cycle when available, creation UTC, item linkage, and source import. Reimport/Reopen reuse the same task. Source/status wording may update while original creation/context snapshots remain intact. Source disappearance never resolves or deletes the task.
 
-Uniqueness constraints prevent one item from owning more than one task. Reimport/Reopen reuse the same task. Source/status wording may update while original creation/context snapshots stay intact. Source disappearance does not resolve/delete the task.
-
-Driver Workspace represents each unresolved BOL item once as a Missing BOL attention row. It does not duplicate the linked MissingBolTask as manual work. Generic Work Item Resolve/Reopen remains unavailable for MissingBolTask, and database guards reject bypass state changes.
+Driver Workspace represents each unresolved BOL item once as a Missing BOL attention row. It does not duplicate MissingBolTask as manual work. Generic Work Item Resolve/Reopen remains unavailable for MissingBolTask, and database guards reject bypass state changes.
 
 ## Missing BOL action integration
 
-Each Requested, Attempted, Follow-up, Resolved, or Reopen appends one BOL action event and creates one linked completed activity entry.
+Requested, Attempted, Follow-up, Resolved, and Reopen each append an action event and create one completed activity work entry.
 
-| Action | Item state | Task state | Activity text |
-|---|---|---|---|
-| Requested | Requested | unresolved | `Requested missing BOL for order …` |
-| Attempted | Attempted | unresolved | `Attempted contact regarding missing BOL for order …; driver not reached.` |
-| Follow-up | FollowUp | unresolved | `Missing BOL for order … requires follow-up.` |
-| Resolved | Resolved + timestamp | resolved same timestamp | `Resolved missing BOL for order …` |
-| Reopen | Open, resolution cleared | same task reopened | `Reopened missing BOL for order …` |
+| Action | Item state | Task state |
+|---|---|---|
+| Requested | Requested | unresolved |
+| Attempted | Attempted | unresolved |
+| Follow-up | FollowUp | unresolved |
+| Resolved | Resolved + timestamp | resolved same timestamp |
+| Reopen | Open, resolution cleared | same task reopened |
 
-Optional notes are retained in action history and appended concisely to activity text.
+Optional notes are retained in action history and appended to the saved activity. Item/task/action/activity writes remain atomic. Duplicate submit is blocked while a save is active and failed saves retain typed notes.
 
-Atomic boundaries remain:
+## Driver Workspace work index
 
-- Requested/Attempted/Follow-up: item status + task text/state + action event + completed activity
-- Resolved: item resolution + task resolution + action event + completed activity
-- Reopen: item reopen + same-task reopen + action event + completed activity
+Fleet Queue opens a full Driver Workspace in the same MainWindow. Driver Workspace shows summary context, `NEEDS ATTENTION`, Quick Actions, and compact Today’s Activity.
 
-Every group commits fully or rolls back fully. Duplicate submit is blocked while save is active. Failed save retains note for retry; v0.4 also retains unsaved BOL note drafts across route/report refreshes.
-
-## v0.4 Driver Workspace work index
-
-The Fleet Queue no longer remains beside an always-open driver card. A row opens a full Driver Workspace in the same MainWindow.
-
-Driver Workspace shows summary plus `NEEDS ATTENTION`, Quick Actions, and compact Today’s Activity. Actionable work is represented once:
+Actionable work is represented once:
 
 1. unfinished idle contact
 2. each unresolved Missing BOL item
 3. each unresolved manual Waiting/FollowUp item
 
-The page does not expose all editors simultaneously. Each row opens a focused task workspace.
+Each actionable row opens a focused task workspace rather than exposing all editors at once.
 
-### Manual Work Item workspace
+### Manual Work Item
 
-A manual work item shows:
+Shows Driver identity, original status/text/time/source, Unit/Leader/report-cycle snapshots, resolution state/time, and Resolve/Reopen where supported. MissingBolTask cannot use generic resolution.
 
-- Driver identity
-- original status
-- text
-- created local date/time
-- source
-- Unit snapshot
-- Driver Leader snapshot
-- report-cycle snapshot
-- resolution state/time
-- Resolve/Reopen when allowed
+### New Work
 
-MissingBolTask instructions point back to the synchronized Missing BOL workspace and cannot use generic resolution.
-
-### New Work workspace
-
-`Add Work` opens a focused page with one multiline editor and:
-
-- Done
-- Waiting
-- Follow-up
-
-Rules remain:
+`Add Work` opens one multiline editor with Done, Waiting, and Follow-up.
 
 - blank/whitespace input cannot save
 - input is trimmed
-- duplicate submission disabled while saving
-- successful save clears persisted draft and refreshes fleet/driver work
+- duplicate submission is disabled while saving
+- successful save refreshes fleet/driver work and returns to the same Driver Workspace
 - failed save retains typed text
 - per-driver draft survives in-session navigation
-- Unit/Leader/report-cycle snapshots are taken from current driver context
+- Unit/Leader/report-cycle snapshots come from current driver context
 
-v0.4 successful New Work returns to the same Driver Workspace and highlights/retains context for the newly saved entry.
+### Today’s Activity
 
-### Today’s Activity and Activity Detail
+Today’s Activity uses PC local calendar-day boundaries and includes manual work created today, linked idle work created today, older ordinary work resolved today, and MissingBolAction activity created today. MissingBolTask itself is not rendered as completed activity.
 
-Today’s Activity uses PC local calendar-day boundaries and newest-first display.
+Activity Detail is read-only and adds no edit/delete path.
 
-It includes:
+## Fleet integration and Next Work Item
 
-- manual work created today
-- linked idle-contact work created today
-- older ordinary work resolved today
-- MissingBolAction entries created today
-
-It excludes MissingBolTask as completed activity; BOL Resolve is represented by its linked Resolved action. Event tables are not separately rendered, preventing duplicates.
-
-A compact activity row may open read-only Activity Detail. Activity Detail provides context only and creates no edit/delete path.
-
-## Fleet integration
-
-Fleet rows expose:
-
-- Open Work count: all unresolved Waiting/FollowUp work including MissingBolTask
-- BOL count: unresolved matched Missing BOL subset
-
-Counts are aggregate/indexed, never one query per driver. Order # text is aggregated for deterministic search.
+Fleet rows expose aggregate Open Work and unresolved matched BOL counts without one query per driver. Order # remains available for deterministic search.
 
 Queue priority remains:
 
@@ -189,11 +128,7 @@ Queue priority remains:
 3. remaining unresolved work including Missing BOL
 4. clear fleet
 
-Within otherwise equal ordinary unresolved work, oldest open Missing BOL Empty Call Date may break ties. `Next Needing Attention` considers visible/search-filtered drivers only.
-
-## Next Work Item
-
-v0.4 adds direct `Next Work Item` on Driver/Task workspaces. It orders one driver’s action list:
+`Next Work Item` orders one driver’s actionable work:
 
 1. unfinished idle contact
 2. unresolved Missing BOL, oldest Empty Call Date first
@@ -201,98 +136,117 @@ v0.4 adds direct `Next Work Item` on Driver/Task workspaces. It orders one drive
 4. manual Waiting, oldest first
 5. other supported unresolved manual work
 
-It advances through that same list rather than creating another repository/priority engine. When the driver has no next item, WAA reuses existing search-respecting `Next Needing Attention`.
+When no next item remains for that driver, existing search-respecting `Next Needing Attention` is reused. No competing fleet-priority engine exists.
 
-## Handoff generation
+## Handoff workspace
 
-Handoff is a focused full-width route in the same MainWindow central content host, not another operating-system Window.
-
-Controls:
+Handoff is a focused full-width route in the same MainWindow. Controls remain:
 
 - Back to Queue
 - Regenerate
-- Copy to Clipboard
 - editable multiline draft
-- generated section counts
+- Copy to Clipboard
 
-The deterministic service consumes saved work-entry records plus explicit local-day UTC range and does not require WPF launch.
+First Handoff entry in a session generates from saved work. Navigating away/back preserves the edited draft. Regenerate intentionally replaces it from current saved records. Editing/copying never mutates work, BOL, idle, reports, settings, or identity.
 
-Output always contains:
+## v0.4.2 compact Handoff format
 
-1. `NEEDS FOLLOW-UP`
-2. `WAITING / PENDING`
-3. `COMPLETED TODAY`
+The visible generated draft is deliberately closer to an operational human handoff than a database report.
 
-Empty sections contain `None.`.
+### Opening line
 
-### Section membership
+The draft begins with:
 
-Needs Follow-up:
+`No open ACE/ACI's`
 
-- unresolved FollowUp
-- linked Attempted and Spoke — Follow-up idle entries
-- unresolved MissingBolTask
+This is a **user-requested editable handoff convention**. WAA does not currently model or validate ACE/ACI state. If the statement is not true for the shift, the user must edit it before copying the handoff.
 
-Waiting / Pending:
+### Driver narrative lines
 
-- unresolved Waiting
+After the opening line, WAA emits at most one narrative line per driver. Driver lines are alphabetical by Driver Name, then Driver Code.
 
-Completed Today:
+Preferred identity:
 
-- Done created today
-- ordinary Waiting/FollowUp resolved today
-- linked Spoke created today
-- MissingBolAction created today
+`261535 — Andrew Example [A00001]: ...`
 
-Resolved MissingBolTask is excluded from Completed Today so the Resolved action remains the single completion line. An entry appears at most once per section calculation.
+WAA prefers the driver’s current fleet Unit Code and current Driver Name when available. If current Unit is unavailable, it falls back to a useful saved work snapshot. Blank or `*` Unit values are omitted instead of being printed as a fake unit.
 
-### Ordering and line format
+The narrative combines relevant saved work for that driver into one line:
 
-- unresolved sections: oldest unresolved driver group first, chronological within driver
-- completed: chronological action/completion order
-- stable Driver Name, Driver Code, entry ID tie-breakers
+- unresolved ordinary Waiting/FollowUp work
+- unresolved linked idle-contact work
+- ordinary work completed/resolved during the current local day
+- linked idle activity completed during the current local day
+- MissingBolAction activity completed during the current local day
 
-Preferred line format:
+MissingBolTask itself is excluded from the narrative because unresolved BOL orders are rendered in the dedicated Missing BOL section.
 
-`270139 — Jamie Example [ABC123]: Missing BOL for order SYN1001, empty call 8/27/2026, Boise, ID → Auburn, WA. Status: Requested.`
+For idle activity, handoff prose removes the generated `28D / 7D` metric boilerplate and retains a concise action phrase plus the human-entered note. The metrics remain preserved in the underlying saved work/event records and task workspace; they are simply not repeated in the copied shift handoff.
 
-Without Unit snapshot:
+For MissingBolAction activity, a human-entered note is preferred as the narrative text. When no note exists, the concise saved action text is retained so a meaningful completed action is not silently discarded.
 
-`Jamie Example [ABC123]: Waiting on updated ETA.`
+Duplicate work-entry IDs and duplicate identical narrative phrases are collapsed.
 
-Whitespace is collapsed for concise operational lines.
+### Missing BOL section
 
-### Editor isolation and session preservation
+The draft then contains:
 
-- first Handoff entry in a session generates from saved work
-- Regenerate intentionally replaces editor text
-- editing never mutates work/BOL/idle/report/settings
-- Copy to Clipboard copies current edited text
-- navigating away/back in the same session preserves edited draft
-- Handoff is not continuously regenerated while typing
+`Missing BOLs:`
+
+Each driver appears once. All unresolved MissingBolTask orders for that driver are grouped onto the same line.
+
+Singular example:
+
+`260811 — Allen Example [A00001]: Missing BOL for order AST3962`
+
+Plural example:
+
+`242163 — Brad Example [B00002]: Missing BOL for orders AST2543, ASU1575`
+
+Within a driver, orders use the Empty Call Date already embedded in the deterministic MissingBolTask text for oldest-first ordering, then Order # as a stable tie-breaker. Duplicate order numbers collapse.
+
+The compact section intentionally does **not** repeat:
+
+- Empty Call Date
+- origin/destination route
+- local BOL status
+- one separate line per order
+
+Those details remain available in the focused Missing BOL workspace. Handoff only needs the driver and order list.
+
+If no unresolved matched BOL tasks exist, the section displays `None.`.
+
+### Removed visible headings
+
+The v0.4.2 runtime draft no longer displays:
+
+- `NEEDS FOLLOW-UP`
+- `WAITING / PENDING`
+- `COMPLETED TODAY`
+
+The underlying open/resolved/local-day classification remains deterministic and is still regression-tested; the visible handoff is simply grouped by driver instead of by database-state section.
 
 ## Back/navigation and report refresh
 
 Task Back returns to the actual prior Driver Workspace. Fleet search and selected Driver Code survive round-trip navigation. Alt+Left is available outside text-editing controls.
 
-If `Update Reports` runs while navigated, WAA rebuilds current route through durable Driver Code/item/work-entry IDs. New Work/BOL note drafts remain in session. A stale entity shows an Unavailable route with a safe return path rather than a stale-reference crash.
+If `Update Reports` runs while navigated, WAA rebuilds the current route using durable Driver Code/item/work IDs. New Work/BOL note drafts remain in session. A stale entity shows an Unavailable route with a safe return path.
 
 ## Theme, performance, and privacy
 
-All current work/Handoff surfaces use dynamic Light/Dark resources. Ordinary text inherits `TextBrush`; semantic color supplements word status. DataGrid-generated text and editors explicitly follow current theme resources.
+All work/Handoff surfaces use dynamic Light/Dark resources. Ordinary text inherits the active theme and semantic color supplements word status.
 
 - no recurring timer/watcher
 - no Excel/Office process
-- no DB call on text keystrokes
-- no per-row BOL/history queries
-- driver work/BOL loads only for selected driver/state refresh
+- no database call on text keystrokes
+- no per-row history/BOL queries
 - task detail loads only when opened
-- database/source parsing runs off UI thread through bounded operations
-- Handoff generation only on first session entry or Regenerate
+- database/source work stays in bounded operations off the UI thread where applicable
+- Handoff generation runs only on first session entry or explicit Regenerate
 - queue virtualization remains enabled
 
-Tests/fixtures use synthetic names, codes, leaders, units, orders, routes, customers, paths, notes, workbooks, and databases. Never commit production CSV/XLSX, databases, logs, or screenshots.
+Tests and fixtures use synthetic identities/data only. Never commit production reports, databases, logs, or screenshots containing operational employee/customer data.
 
 ## Validation coverage
 
-The Windows suite covers work migration/preservation, idle linkage, manual lifecycle, BOL task/action synchronization, queue aggregate counts/order/search, local-day activity/Handoff, deduplication, editor isolation, failed-save retention, duplicate-submit prevention, navigation/back/state restoration, report refresh, theme/source audit, contrast, keyboard route contracts, WPF/XAML compilation, and self-contained Windows x64 publishing.
+The Windows suite covers work migration/preservation, idle linkage, manual lifecycle, BOL task/action synchronization, queue aggregate counts/order/search, local-day activity, legacy classification regression, compact driver-grouped Handoff formatting, current-unit preference, BOL order aggregation, removal of BOL route/status boilerplate, editor isolation, failed-save retention, navigation/state restoration, theme/source audit, contrast, WPF/XAML compilation, and self-contained Windows x64 publishing.
