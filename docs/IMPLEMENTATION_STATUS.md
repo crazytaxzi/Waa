@@ -2,11 +2,13 @@
 
 ## Current bounded release
 
-**WAA v0.4.2 — compact driver-grouped Handoff release candidate, branch Windows-validated.**
+**WAA v0.4.2 — compact driver-grouped Handoff, merged to `main` and Windows-validated.**
 
-Current validated PR-tree workflow: **Windows build, test, and portable package #60**, run ID `33342823508`, August 30, 2026.
+Merged product commit: `f9ed536b6cb5ddf015cd2af3d342bfd70b669da6`.
 
-Final release still requires this validation-record commit to pass on PR #4, then merged `main` to pass before the portable artifact is delivered.
+Merged-main validation: **Windows build, test, and portable package #62**, run ID `33342993413`, August 30, 2026 — success.
+
+This status commit records that completed validation. Its own subsequent main workflow is the final documentation-aligned release gate/artifact source.
 
 ## Runtime and deployment
 
@@ -134,9 +136,13 @@ Still passing:
 
 No permanent exclusion was introduced.
 
-## Current validation
+## Validation
 
-PR #4 documented-tree precursor, workflow **#60**, run ID `33342823508`:
+PR #4 release tree, workflow **#61**, run ID `33342917393`: success.
+
+Merged `main` product tree, workflow **#62**, run ID `33342993413`: success.
+
+Merged-main #62 result:
 
 - restore: passed
 - warnings-as-errors Release build: passed
@@ -148,7 +154,7 @@ PR #4 documented-tree precursor, workflow **#60**, run ID `33342823508`:
 - self-contained win-x64 publish: passed
 - portable artifact upload: passed
 
-The #60 artifact is superseded by this validation-record commit and is not the release artifact. Final PR and merged-main workflows must pass before delivery.
+The documentation-only commit containing this final status must pass the same full workflow; only that latest successful main artifact is delivered.
 
 ## Remaining limitations
 
