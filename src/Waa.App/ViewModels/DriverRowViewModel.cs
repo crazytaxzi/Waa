@@ -5,14 +5,19 @@ namespace Waa.App.ViewModels;
 
 public sealed class DriverRowViewModel
 {
-    public DriverRowViewModel(FleetDriverRecord record, decimal threshold)
+    public DriverRowViewModel(
+        FleetDriverRecord record,
+        decimal threshold,
+        MissingBolDriverSummary? missingBolSummary = null)
     {
         Record = record;
         Threshold = threshold;
+        MissingBolSummary = missingBolSummary;
     }
 
     public FleetDriverRecord Record { get; }
     public decimal Threshold { get; }
+    public MissingBolDriverSummary? MissingBolSummary { get; }
     public string DriverCode => Record.DriverCode;
     public string DriverName => Record.DriverName;
     public string UnitCode => Record.UnitCode;
@@ -23,6 +28,13 @@ public sealed class DriverRowViewModel
     public string OpenWorkDisplay => HasOpenWork
         ? $"{OpenWorkCount.ToString(CultureInfo.CurrentCulture)} open"
         : string.Empty;
+    public int MissingBolCount => MissingBolSummary?.OpenCount ?? 0;
+    public bool HasMissingBol => MissingBolCount > 0;
+    public string MissingBolDisplay => HasMissingBol
+        ? MissingBolCount.ToString(CultureInfo.CurrentCulture)
+        : string.Empty;
+    public DateOnly? OldestMissingBolDate => MissingBolSummary?.OldestOpenEmptyCallDate;
+    public string OrderSearchText => MissingBolSummary?.OrderSearchText ?? string.Empty;
 
     public bool IsIdle7Above => Record.IdlePercent7Day is not null && Record.IdlePercent7Day.Value > Threshold;
     public bool IsIdle28Above => Record.IsComplete28Day && Record.IdlePercent28Day is not null && Record.IdlePercent28Day.Value > Threshold;

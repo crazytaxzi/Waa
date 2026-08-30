@@ -25,14 +25,21 @@ public partial class App : Application
 
             var repository = new WaaRepository(paths.DatabasePath);
             repository.Initialize();
+            var missingBolRepository = new MissingBolRepository(paths.DatabasePath);
+            missingBolRepository.Initialize();
             var themePreferenceStore = new ThemePreferenceStore(paths.DatabasePath);
             ThemeManager.Apply(themePreferenceStore.GetDarkMode());
 
-            var updateService = new ReportUpdateService(repository, new RollingSevenDayCsvParser());
+            var updateService = new ReportUpdateService(
+                repository,
+                missingBolRepository,
+                new RollingSevenDayCsvParser(),
+                new MissingBolWorkbookParser());
             var viewModel = new MainViewModel(
                 repository,
                 updateService,
-                new WindowsClipboardService());
+                new WindowsClipboardService(),
+                missingBolRepository: missingBolRepository);
             var window = new MainWindow(viewModel, themePreferenceStore);
             MainWindow = window;
             window.Show();

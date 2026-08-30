@@ -10,8 +10,10 @@ namespace Waa.App.ViewModels;
 public sealed class MainViewModel : ObservableObject
 {
     private readonly WaaRepository _repository;
+    private readonly MissingBolRepository? _missingBolRepository;
     private readonly ReportUpdateService _updateService;
     private IReadOnlyList<FleetDriverRecord> _records = Array.Empty<FleetDriverRecord>();
+    private MissingBolFleetState _missingBolFleetState = EmptyMissingBolFleetState();
     private decimal _threshold = 50m;
     private DriverRowViewModel? _selectedDriver;
     private string _searchText = string.Empty;
@@ -21,20 +23,24 @@ public sealed class MainViewModel : ObservableObject
     private string _fleet7DayText = "N/A";
     private string _fleet28DayText = "N/A";
     private string _contactProgressText = "0 need contact";
+    private string _missingBolSummaryText = "Missing BOL: 0 open  •  0 unmatched";
     private string _statusMessage = "Starting WAA…";
     private string _rosterSummaryText = "No roster loaded";
     private bool _isBusy;
     private bool _initialized;
     private bool _isHandoffView;
+    private bool _isUnmatchedBolVisible;
 
     public MainViewModel(
         WaaRepository repository,
         ReportUpdateService updateService,
         IClipboardService clipboardService,
         Func<DateTimeOffset>? now = null,
-        TimeZoneInfo? timeZone = null)
+        TimeZoneInfo? timeZone = null,
+        MissingBolRepository? missingBolRepository = null)
     {
         _repository = repository;
+        _missingBolRepository = missingBolRepository;
         _updateService = updateService;
 
         Work = new DriverWorkViewModel(
@@ -42,15 +48,27 @@ public sealed class MainViewModel : ObservableObject
             OnWorkChangedAsync,
             message => StatusMessage = message,
             now,
-            timeZone);
+            timeZone,
+            missingBolRepository);
         Work.PropertyChanged += OnWorkPropertyChanged;
+
+        if (missingBolRepository is not null)
+        {
+            MissingBol = new MissingBolViewModel(
+                missingBolRepository,
+                OnMissingBolChangedAsync,
+                message => StatusMessage = message);
+            MissingBol.PropertyChanged += OnMissingBolPropertyChanged;
+        }
+
         Handoff = new HandoffViewModel(
             repository,
             new HandoffService(),
             clipboardService,
             message => StatusMessage = message,
             now,
-            timeZone);
+            timeZone,
+            missingBolRepository);
 
         UpdateReportsCommand = new AsyncRelayCommand(
             () => UpdateReportsAsync(isLaunchUpdate: false),
@@ -74,10 +92,15 @@ public sealed class MainViewModel : ObservableObject
         BackToQueueCommand = new AsyncRelayCommand(
             BackToQueueAsync,
             () => !IsBusy && IsHandoffView);
+        ToggleUnmatchedBolCommand = new AsyncRelayCommand(
+            ToggleUnmatchedBolAsync,
+            () => !IsBusy && !IsHandoffView && HasUnmatchedBol);
     }
 
     public ObservableCollection<DriverRowViewModel> Drivers { get; } = new();
+    public ObservableCollection<MissingBolUnmatchedItemViewModel> UnmatchedBolItems { get; } = new();
     public DriverWorkViewModel Work { get; }
+    public MissingBolViewModel? MissingBol { get; }
     public HandoffViewModel Handoff { get; }
     public AsyncRelayCommand UpdateReportsCommand { get; }
     public AsyncRelayCommand ApplyThresholdCommand { get; }
@@ -87,6 +110,7 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand NextNeedingAttentionCommand { get; }
     public AsyncRelayCommand OpenHandoffCommand { get; }
     public AsyncRelayCommand BackToQueueCommand { get; }
+    public AsyncRelayCommand ToggleUnmatchedBolCommand { get; }
 
     public DriverRowViewModel? SelectedDriver
     {
@@ -149,6 +173,12 @@ public sealed class MainViewModel : ObservableObject
         private set => SetProperty(ref _contactProgressText, value);
     }
 
+    public string MissingBolSummaryText
+    {
+        get => _missingBolSummaryText;
+        private set => SetProperty(ref _missingBolSummaryText, value);
+    }
+
     public string StatusMessage
     {
         get => _statusMessage;
@@ -185,6 +215,17 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    public bool HasUnmatchedBol => UnmatchedBolItems.Count > 0;
+
+    public string UnmatchedBolButtonText =>
+        $"Unmatched BOL: {UnmatchedBolItems.Count.ToString(CultureInfo.CurrentCulture)}";
+
+    public bool IsUnmatchedBolVisible
+    {
+        get => _isUnmatchedBolVisible;
+        private set => SetProperty(ref _isUnmatchedBolVisible, value);
+    }
+
     public async Task InitializeAsync()
     {
         if (_initialized)
@@ -197,7 +238,11 @@ public sealed class MainViewModel : ObservableObject
         {
             IsBusy = true;
             StatusMessage = "Loading saved roster and work history…";
-            await Task.Run(_repository.Initialize);
+            await Task.Run(() =>
+            {
+                _repository.Initialize();
+                _missingBolRepository?.Initialize();
+            });
             _threshold = await Task.Run(_repository.GetIdleThreshold);
             ThresholdText = _threshold.ToString("0.0", CultureInfo.CurrentCulture);
             await ReloadFleetAsync();
@@ -239,7 +284,7 @@ public sealed class MainViewModel : ObservableObject
         catch (Exception exception)
         {
             AppLog.Write(exception, "Report update failed");
-            StatusMessage = $"Report update failed: {exception.Message}. The saved roster and work history were left unchanged.";
+            StatusMessage = $"Report update failed: {exception.Message}. The saved roster, Missing BOL state, and work history were left unchanged.";
         }
         finally
         {
@@ -373,6 +418,7 @@ public sealed class MainViewModel : ObservableObject
 
     private async Task OpenHandoffAsync()
     {
+        IsUnmatchedBolVisible = false;
         IsHandoffView = true;
         await Handoff.OpenAsync();
     }
@@ -384,12 +430,31 @@ public sealed class MainViewModel : ObservableObject
         return Task.CompletedTask;
     }
 
+    private Task ToggleUnmatchedBolAsync()
+    {
+        IsUnmatchedBolVisible = !IsUnmatchedBolVisible;
+        StatusMessage = IsUnmatchedBolVisible
+            ? "Showing unmatched Missing BOL items. They remain read-only until an exact Driver Code exists in WAA."
+            : "Unmatched Missing BOL list hidden.";
+        return Task.CompletedTask;
+    }
+
     private async Task OnWorkChangedAsync(string driverCode) =>
+        await ReloadFleetAsync(driverCode);
+
+    private async Task OnMissingBolChangedAsync(string driverCode) =>
         await ReloadFleetAsync(driverCode);
 
     private async Task ReloadFleetAsync(string? preferredDriverCode = null)
     {
-        var state = await Task.Run(_repository.LoadFleet);
+        var loaded = await Task.Run(() =>
+        {
+            var fleet = _repository.LoadFleet();
+            var missingBol = _missingBolRepository?.LoadFleetState() ?? EmptyMissingBolFleetState();
+            return (Fleet: fleet, MissingBol: missingBol);
+        });
+        var state = loaded.Fleet;
+        _missingBolFleetState = loaded.MissingBol;
         _records = state.Drivers;
         ReportCycleText = state.ReportCycleDate?.ToString("M/d/yyyy", CultureInfo.CurrentCulture) ?? "No report";
         Fleet7DayText = FormatFleetPercent(
@@ -400,6 +465,22 @@ public sealed class MainViewModel : ObservableObject
             state.FleetIdlePercent28Day,
             state.IncludedDrivers28Day,
             state.Drivers.Count);
+        MissingBolSummaryText =
+            $"Missing BOL: {_missingBolFleetState.OpenMatchedCount.ToString(CultureInfo.CurrentCulture)} open  •  " +
+            $"{_missingBolFleetState.UnmatchedItems.Count.ToString(CultureInfo.CurrentCulture)} unmatched";
+
+        UnmatchedBolItems.Clear();
+        foreach (var item in _missingBolFleetState.UnmatchedItems)
+        {
+            UnmatchedBolItems.Add(new MissingBolUnmatchedItemViewModel(item));
+        }
+
+        OnPropertyChanged(nameof(HasUnmatchedBol));
+        OnPropertyChanged(nameof(UnmatchedBolButtonText));
+        if (!HasUnmatchedBol)
+        {
+            IsUnmatchedBolVisible = false;
+        }
 
         if (state.LastImportedUtc is null)
         {
@@ -421,7 +502,7 @@ public sealed class MainViewModel : ObservableObject
         var previousCode = preferredDriverCode ?? SelectedDriver?.DriverCode;
         var ordered = DriverQueueOrderer.Order(
             _records
-                .Select(record => new DriverRowViewModel(record, _threshold))
+                .Select(CreateDriverRow)
                 .Where(MatchesSearch));
 
         Drivers.Clear();
@@ -435,7 +516,7 @@ public sealed class MainViewModel : ObservableObject
             : Drivers.FirstOrDefault(driver => driver.DriverCode.Equals(previousCode, StringComparison.OrdinalIgnoreCase))
               ?? Drivers.FirstOrDefault();
 
-        var allRows = _records.Select(record => new DriverRowViewModel(record, _threshold)).ToArray();
+        var allRows = _records.Select(CreateDriverRow).ToArray();
         var needContact = allRows.Count(driver => driver.NeedsIdleAttention);
         var aboveThreshold = allRows.Count(driver => driver.IsAboveThreshold);
         var spoken = allRows.Count(driver =>
@@ -450,6 +531,12 @@ public sealed class MainViewModel : ObservableObject
         RefreshCommandStates();
     }
 
+    private DriverRowViewModel CreateDriverRow(FleetDriverRecord record)
+    {
+        _missingBolFleetState.DriverSummaries.TryGetValue(record.DriverCode, out var summary);
+        return new DriverRowViewModel(record, _threshold, summary);
+    }
+
     private bool MatchesSearch(DriverRowViewModel driver)
     {
         var search = SearchText.Trim();
@@ -461,14 +548,23 @@ public sealed class MainViewModel : ObservableObject
         return driver.DriverCode.Contains(search, StringComparison.CurrentCultureIgnoreCase) ||
                driver.DriverName.Contains(search, StringComparison.CurrentCultureIgnoreCase) ||
                driver.UnitCode.Contains(search, StringComparison.CurrentCultureIgnoreCase) ||
-               driver.DriverLeader.Contains(search, StringComparison.CurrentCultureIgnoreCase);
+               driver.DriverLeader.Contains(search, StringComparison.CurrentCultureIgnoreCase) ||
+               driver.OrderSearchText.Contains(search, StringComparison.CurrentCultureIgnoreCase);
     }
 
     private bool CanRecordContact() =>
-        !IsBusy && !Work.IsBusy && !IsHandoffView && SelectedDriver is not null;
+        !IsBusy &&
+        !Work.IsBusy &&
+        MissingBol?.IsBusy != true &&
+        !IsHandoffView &&
+        SelectedDriver is not null;
 
     private bool CanMoveNext() =>
-        !IsBusy && !Work.IsBusy && !IsHandoffView && SelectedDriver is not null;
+        !IsBusy &&
+        !Work.IsBusy &&
+        MissingBol?.IsBusy != true &&
+        !IsHandoffView &&
+        SelectedDriver is not null;
 
     private void RefreshCommandStates()
     {
@@ -480,6 +576,7 @@ public sealed class MainViewModel : ObservableObject
         NextNeedingAttentionCommand.RaiseCanExecuteChanged();
         OpenHandoffCommand.RaiseCanExecuteChanged();
         BackToQueueCommand.RaiseCanExecuteChanged();
+        ToggleUnmatchedBolCommand.RaiseCanExecuteChanged();
     }
 
     private void OnWorkPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -490,18 +587,41 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    private void OnMissingBolPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MissingBolViewModel.IsBusy))
+        {
+            RefreshCommandStates();
+        }
+    }
+
     private async void BeginSelectedDriverLoad(DriverRowViewModel? selectedDriver)
     {
         try
         {
-            await Work.SetDriverAsync(selectedDriver?.Record);
+            var workTask = Work.SetDriverAsync(selectedDriver?.Record);
+            if (MissingBol is null)
+            {
+                await workTask;
+                return;
+            }
+
+            await Task.WhenAll(
+                workTask,
+                MissingBol.SetDriverAsync(selectedDriver?.Record));
         }
         catch (Exception exception)
         {
-            AppLog.Write(exception, "Selected driver work load failed");
+            AppLog.Write(exception, "Selected driver state load failed");
             StatusMessage = $"Selected driver work could not be loaded: {exception.Message}";
         }
     }
+
+    private static MissingBolFleetState EmptyMissingBolFleetState() =>
+        new(
+            new Dictionary<string, MissingBolDriverSummary>(StringComparer.OrdinalIgnoreCase),
+            0,
+            Array.Empty<MissingBolUnmatchedRecord>());
 
     private static bool TryParseThreshold(string value, out decimal threshold) =>
         decimal.TryParse(value, NumberStyles.Number, CultureInfo.CurrentCulture, out threshold) ||

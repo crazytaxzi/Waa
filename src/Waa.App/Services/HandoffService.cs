@@ -33,8 +33,9 @@ public sealed class HandoffService
             .ToArray();
         var completedToday = uniqueEntries
             .Where(entry =>
-                (entry.Status == WorkEntryStatus.Done && localDay.Contains(entry.CreatedUtc)) ||
-                (entry.ResolvedUtc is { } resolvedUtc && localDay.Contains(resolvedUtc)))
+                entry.Source != WorkEntrySource.MissingBolTask &&
+                ((entry.Status == WorkEntryStatus.Done && localDay.Contains(entry.CreatedUtc)) ||
+                 (entry.ResolvedUtc is { } resolvedUtc && localDay.Contains(resolvedUtc))))
             .OrderBy(GetCompletionTimestamp)
             .ThenBy(entry => entry.DriverName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(entry => entry.DriverCode, StringComparer.OrdinalIgnoreCase)

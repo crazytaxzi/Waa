@@ -8,6 +8,7 @@ namespace Waa.App.ViewModels;
 public sealed class DriverWorkViewModel : ObservableObject
 {
     private readonly WaaRepository _repository;
+    private readonly MissingBolRepository? _missingBolRepository;
     private readonly Func<string, Task> _onWorkChanged;
     private readonly Action<string> _reportStatus;
     private readonly Func<DateTimeOffset> _now;
@@ -25,9 +26,11 @@ public sealed class DriverWorkViewModel : ObservableObject
         Func<string, Task> onWorkChanged,
         Action<string> reportStatus,
         Func<DateTimeOffset>? now = null,
-        TimeZoneInfo? timeZone = null)
+        TimeZoneInfo? timeZone = null,
+        MissingBolRepository? missingBolRepository = null)
     {
         _repository = repository;
+        _missingBolRepository = missingBolRepository;
         _onWorkChanged = onWorkChanged;
         _reportStatus = reportStatus;
         _now = now ?? (() => DateTimeOffset.Now);
@@ -141,6 +144,12 @@ public sealed class DriverWorkViewModel : ObservableObject
                 driver.DriverCode,
                 day.StartUtc,
                 day.EndUtc));
+            var openEntries = _missingBolRepository?.ApplyWorkSources(state.OpenEntries)
+                ?? state.OpenEntries;
+            var todayEntries = (_missingBolRepository?.ApplyWorkSources(state.TodayEntries)
+                    ?? state.TodayEntries)
+                .Where(entry => entry.Source != WorkEntrySource.MissingBolTask)
+                .ToArray();
 
             if (version != _loadVersion ||
                 _driver is null ||
@@ -149,14 +158,14 @@ public sealed class DriverWorkViewModel : ObservableObject
                 return;
             }
 
-            ReplaceItems(OpenEntries, state.OpenEntries);
-            ReplaceItems(TodayEntries, state.TodayEntries);
-            OpenWorkSummary = state.OpenEntries.Count == 0
+            ReplaceItems(OpenEntries, openEntries);
+            ReplaceItems(TodayEntries, todayEntries);
+            OpenWorkSummary = openEntries.Count == 0
                 ? "No unresolved work."
-                : $"{state.OpenEntries.Count} unresolved item{(state.OpenEntries.Count == 1 ? string.Empty : "s")}.";
-            TodaySummary = state.TodayEntries.Count == 0
+                : $"{openEntries.Count} unresolved item{(openEntries.Count == 1 ? string.Empty : "s")}.";
+            TodaySummary = todayEntries.Length == 0
                 ? "No activity recorded today."
-                : $"{state.TodayEntries.Count} activit{(state.TodayEntries.Count == 1 ? "y" : "ies")} today — newest first.";
+                : $"{todayEntries.Length} activit{(todayEntries.Length == 1 ? "y" : "ies")} today — newest first.";
         }
         catch (Exception exception)
         {

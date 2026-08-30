@@ -28,16 +28,30 @@ public sealed class WorkEntryItemViewModel
     public AsyncRelayCommand ReopenCommand { get; }
     public string Text => Record.Text;
     public bool IsResolved => Record.ResolvedUtc is not null;
-    public bool CanResolve => !IsResolved && Record.Status is WorkEntryStatus.Waiting or WorkEntryStatus.FollowUp;
-    public bool CanReopen => IsResolved && Record.Status is WorkEntryStatus.Waiting or WorkEntryStatus.FollowUp;
+    public bool UsesMissingBolControls => Record.Source == WorkEntrySource.MissingBolTask;
+    public bool CanResolve =>
+        !UsesMissingBolControls &&
+        !IsResolved &&
+        Record.Status is WorkEntryStatus.Waiting or WorkEntryStatus.FollowUp;
+    public bool CanReopen =>
+        !UsesMissingBolControls &&
+        IsResolved &&
+        Record.Status is WorkEntryStatus.Waiting or WorkEntryStatus.FollowUp;
+    public string ResolutionInstruction => UsesMissingBolControls
+        ? "Use the Missing BOL actions above to resolve or reopen this linked task."
+        : string.Empty;
     public string StatusDisplay => Record.Status switch
     {
         WorkEntryStatus.FollowUp => "Follow-up",
         _ => Record.Status.ToString()
     };
-    public string SourceDisplay => Record.Source == WorkEntrySource.IdleContact
-        ? "Idle contact"
-        : "Manual";
+    public string SourceDisplay => Record.Source switch
+    {
+        WorkEntrySource.IdleContact => "Idle contact",
+        WorkEntrySource.MissingBolTask => "Missing BOL task",
+        WorkEntrySource.MissingBolAction => "Missing BOL action",
+        _ => "Manual"
+    };
     public string CreatedDisplay => FormatLocal(Record.CreatedUtc);
     public string ResolutionDisplay => Record.ResolvedUtc is { } resolvedUtc
         ? $"Resolved {FormatLocal(resolvedUtc)}"

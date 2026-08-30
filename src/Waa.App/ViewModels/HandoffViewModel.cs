@@ -7,6 +7,7 @@ namespace Waa.App.ViewModels;
 public sealed class HandoffViewModel : ObservableObject
 {
     private readonly WaaRepository _repository;
+    private readonly MissingBolRepository? _missingBolRepository;
     private readonly HandoffService _handoffService;
     private readonly IClipboardService _clipboardService;
     private readonly Action<string> _reportStatus;
@@ -22,9 +23,11 @@ public sealed class HandoffViewModel : ObservableObject
         IClipboardService clipboardService,
         Action<string> reportStatus,
         Func<DateTimeOffset>? now = null,
-        TimeZoneInfo? timeZone = null)
+        TimeZoneInfo? timeZone = null,
+        MissingBolRepository? missingBolRepository = null)
     {
         _repository = repository;
+        _missingBolRepository = missingBolRepository;
         _handoffService = handoffService;
         _clipboardService = clipboardService;
         _reportStatus = reportStatus;
@@ -80,7 +83,8 @@ public sealed class HandoffViewModel : ObservableObject
             var entries = await Task.Run(() => _repository.LoadHandoffEntries(
                 day.StartUtc,
                 day.EndUtc));
-            var result = _handoffService.Generate(entries, day);
+            var effectiveEntries = _missingBolRepository?.ApplyWorkSources(entries) ?? entries;
+            var result = _handoffService.Generate(effectiveEntries, day);
             DraftText = result.Text;
             SummaryText =
                 $"{result.NeedsFollowUpCount} follow-up  •  " +

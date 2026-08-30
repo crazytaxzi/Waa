@@ -11,6 +11,7 @@ public static class DriverQueueOrderer
             .OrderBy(driver => driver.PriorityBand)
             .ThenBy(driver => driver.PriorityWithinBand)
             .ThenByDescending(driver => driver.PriorityConcern ?? decimal.MinValue)
+            .ThenBy(driver => driver.OldestMissingBolDate ?? DateOnly.MaxValue)
             .ThenBy(driver => driver.DriverName, StringComparer.CurrentCultureIgnoreCase)
             .ThenBy(driver => driver.DriverCode, StringComparer.OrdinalIgnoreCase)
             .ToArray();
