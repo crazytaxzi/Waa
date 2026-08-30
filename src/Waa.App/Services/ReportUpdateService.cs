@@ -6,23 +6,76 @@ using Waa.Core;
 
 namespace Waa.App.Services;
 
+public enum ReportSourceUpdateState
+{
+    Imported,
+    Current,
+    NotFound,
+    SkippedOlder,
+    Failed,
+    NotConfigured
+}
+
+public sealed record ReportSourceUpdateResult(
+    ReportSourceUpdateState State,
+    bool Changed,
+    string Message,
+    string? SourceFile,
+    DateOnly? ReportCycleDate)
+{
+    public bool Succeeded => State != ReportSourceUpdateState.Failed;
+}
+
 public sealed record ReportUpdateResult(
     bool Changed,
     string Message,
     string? SourceFile,
-    DateOnly? ReportCycleDate);
+    DateOnly? ReportCycleDate,
+    ReportSourceUpdateResult RollingSevenDay,
+    ReportSourceUpdateResult MissingBol);
 
 public sealed class ReportUpdateService
 {
     private const long MaximumReportBytes = 100L * 1024L * 1024L;
     private readonly WaaRepository _repository;
-    private readonly RollingSevenDayCsvParser _parser;
+    private readonly MissingBolRepository? _missingBolRepository;
+    private readonly RollingSevenDayCsvParser _rollingParser;
+    private readonly MissingBolWorkbookParser? _missingBolParser;
+    private readonly Func<string> _downloadsLocator;
     private readonly SemaphoreSlim _updateGate = new(1, 1);
 
     public ReportUpdateService(WaaRepository repository, RollingSevenDayCsvParser parser)
+        : this(repository, null, parser, null, DownloadsLocator.GetDownloadsFolder)
+    {
+    }
+
+    public ReportUpdateService(
+        WaaRepository repository,
+        MissingBolRepository missingBolRepository,
+        RollingSevenDayCsvParser rollingParser,
+        MissingBolWorkbookParser missingBolParser,
+        Func<string>? downloadsLocator = null)
+        : this(
+            repository,
+            missingBolRepository,
+            rollingParser,
+            missingBolParser,
+            downloadsLocator ?? DownloadsLocator.GetDownloadsFolder)
+    {
+    }
+
+    private ReportUpdateService(
+        WaaRepository repository,
+        MissingBolRepository? missingBolRepository,
+        RollingSevenDayCsvParser rollingParser,
+        MissingBolWorkbookParser? missingBolParser,
+        Func<string> downloadsLocator)
     {
         _repository = repository;
-        _parser = parser;
+        _missingBolRepository = missingBolRepository;
+        _rollingParser = rollingParser;
+        _missingBolParser = missingBolParser;
+        _downloadsLocator = downloadsLocator;
     }
 
     public async Task<ReportUpdateResult> UpdateAsync(CancellationToken cancellationToken = default)
@@ -40,12 +93,56 @@ public sealed class ReportUpdateService
 
     private ReportUpdateResult UpdateCore()
     {
-        var downloads = DownloadsLocator.GetDownloadsFolder();
+        var downloads = _downloadsLocator();
         if (!Directory.Exists(downloads))
         {
-            return new ReportUpdateResult(false, $"Downloads folder was not found: {downloads}", null, null);
+            var rollingFailure = new ReportSourceUpdateResult(
+                ReportSourceUpdateState.Failed,
+                false,
+                $"Downloads folder was not found: {downloads}",
+                null,
+                _repository.GetCurrentReportCycle());
+            var bolFailure = _missingBolRepository is null
+                ? NotConfiguredMissingBol()
+                : new ReportSourceUpdateResult(
+                    ReportSourceUpdateState.Failed,
+                    false,
+                    $"Downloads folder was not found: {downloads}",
+                    null,
+                    null);
+            return Combine(rollingFailure, bolFailure);
         }
 
+        var rolling = UpdateRollingSevenDay(downloads);
+        string? attachWarning = null;
+        if (_missingBolRepository is not null)
+        {
+            try
+            {
+                var attachedTasks = _missingBolRepository.AttachExactMatchesAndCreateTasks();
+                if (attachedTasks > 0)
+                {
+                    attachWarning =
+                        $"Attached {attachedTasks.ToString(CultureInfo.InvariantCulture)} previously unmatched Missing BOL item(s) by exact Driver Code.";
+                }
+            }
+            catch (Exception exception) when (exception is SqliteException or InvalidOperationException)
+            {
+                attachWarning = $"Exact Missing BOL attachment failed: {exception.Message}";
+            }
+        }
+
+        var missingBol = UpdateMissingBol(downloads);
+        if (attachWarning is not null)
+        {
+            rolling = rolling with { Message = $"{rolling.Message} {attachWarning}" };
+        }
+
+        return Combine(rolling, missingBol);
+    }
+
+    private ReportSourceUpdateResult UpdateRollingSevenDay(string downloads)
+    {
         var paths = Directory
             .EnumerateFiles(downloads, "*.csv", SearchOption.TopDirectoryOnly)
             .Where(IsRollingSevenDayCandidate)
@@ -54,25 +151,29 @@ public sealed class ReportUpdateService
 
         if (paths.Length == 0)
         {
-            return new ReportUpdateResult(
+            return new ReportSourceUpdateResult(
+                ReportSourceUpdateState.NotFound,
                 false,
-                "No rolling 7 day_data CSV was found in Downloads. The saved roster was left unchanged.",
+                "No rolling 7 day_data CSV found; saved roster preserved",
                 null,
                 _repository.GetCurrentReportCycle());
         }
 
-        var validCandidates = new List<ParsedCandidate>();
+        var validCandidates = new List<RollingCandidate>();
         var failures = new List<string>();
-
         foreach (var path in paths)
         {
             try
             {
                 var bytes = ReadStableFile(path, out var lastWriteUtc);
-                var parsed = _parser.Parse(bytes);
-                validCandidates.Add(new ParsedCandidate(path, bytes, lastWriteUtc, parsed));
+                validCandidates.Add(new RollingCandidate(
+                    path,
+                    bytes,
+                    lastWriteUtc,
+                    _rollingParser.Parse(bytes)));
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ReportValidationException)
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or ReportValidationException)
             {
                 failures.Add($"{Path.GetFileName(path)}: {exception.Message}");
             }
@@ -81,9 +182,10 @@ public sealed class ReportUpdateService
         if (validCandidates.Count == 0)
         {
             var detail = failures.Count > 0 ? failures[0] : "No candidate could be read.";
-            return new ReportUpdateResult(
+            return new ReportSourceUpdateResult(
+                ReportSourceUpdateState.Failed,
                 false,
-                $"No valid Rolling 7 Day report was imported. {detail} The saved roster was left unchanged.",
+                $"No valid report imported — {detail}; saved roster preserved",
                 null,
                 _repository.GetCurrentReportCycle());
         }
@@ -92,13 +194,13 @@ public sealed class ReportUpdateService
             .OrderByDescending(candidate => candidate.Import.ReportCycleDate)
             .ThenByDescending(candidate => candidate.LastWriteUtc)
             .First();
-
         var currentCycle = _repository.GetCurrentReportCycle();
         if (currentCycle is not null && selected.Import.ReportCycleDate < currentCycle.Value)
         {
-            return new ReportUpdateResult(
+            return new ReportSourceUpdateResult(
+                ReportSourceUpdateState.SkippedOlder,
                 false,
-                $"The newest valid report in Downloads is cycle {selected.Import.ReportCycleDate:M/d/yyyy}, older than the saved cycle {currentCycle.Value:M/d/yyyy}. Nothing changed.",
+                $"Newest valid cycle {selected.Import.ReportCycleDate:M/d/yyyy} is older than saved cycle {currentCycle.Value:M/d/yyyy}; nothing changed",
                 Path.GetFileName(selected.Path),
                 currentCycle);
         }
@@ -110,38 +212,153 @@ public sealed class ReportUpdateService
             selected.Path,
             hash,
             selected.LastWriteUtc);
-
         var warning = failures.Count > 0
-            ? $" Ignored {failures.Count.ToString(CultureInfo.InvariantCulture)} invalid candidate file(s)."
+            ? $"; ignored {failures.Count.ToString(CultureInfo.InvariantCulture)} invalid candidate(s)"
             : string.Empty;
 
-        if (result.AlreadyAccepted)
-        {
-            return new ReportUpdateResult(
+        return result.AlreadyAccepted
+            ? new ReportSourceUpdateResult(
+                ReportSourceUpdateState.Current,
                 false,
-                $"Reports are already current for cycle {selected.Import.ReportCycleDate:M/d/yyyy}.{warning}",
+                $"Already current for cycle {selected.Import.ReportCycleDate:M/d/yyyy}{warning}",
+                Path.GetFileName(selected.Path),
+                selected.Import.ReportCycleDate)
+            : new ReportSourceUpdateResult(
+                ReportSourceUpdateState.Imported,
+                true,
+                $"Updated {selected.Import.Drivers.Count.ToString(CultureInfo.InvariantCulture)} drivers from {Path.GetFileName(selected.Path)} — cycle {selected.Import.ReportCycleDate:M/d/yyyy}{warning}",
                 Path.GetFileName(selected.Path),
                 selected.Import.ReportCycleDate);
-        }
-
-        return new ReportUpdateResult(
-            true,
-            $"Updated {selected.Import.Drivers.Count.ToString(CultureInfo.InvariantCulture)} drivers from {Path.GetFileName(selected.Path)} — cycle {selected.Import.ReportCycleDate:M/d/yyyy}.{warning}",
-            Path.GetFileName(selected.Path),
-            selected.Import.ReportCycleDate);
     }
 
-    private static bool IsRollingSevenDayCandidate(string path)
+    private ReportSourceUpdateResult UpdateMissingBol(string downloads)
+    {
+        if (_missingBolRepository is null || _missingBolParser is null)
+        {
+            return NotConfiguredMissingBol();
+        }
+
+        var paths = Directory
+            .EnumerateFiles(downloads, "*.xlsx", SearchOption.TopDirectoryOnly)
+            .Where(IsMissingBolCandidate)
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .ToArray();
+        if (paths.Length == 0)
+        {
+            return new ReportSourceUpdateResult(
+                ReportSourceUpdateState.NotFound,
+                false,
+                "No Missing BOL workbook found; saved BOL state preserved",
+                null,
+                null);
+        }
+
+        var failures = new List<string>();
+        foreach (var path in paths)
+        {
+            try
+            {
+                var bytes = ReadStableFile(path, out var lastWriteUtc);
+                var hash = Convert.ToHexString(SHA256.HashData(bytes));
+                if (_missingBolRepository.IsHashAccepted(hash))
+                {
+                    var warning = failures.Count > 0
+                        ? $"; ignored {failures.Count.ToString(CultureInfo.InvariantCulture)} newer invalid candidate(s)"
+                        : string.Empty;
+                    return new ReportSourceUpdateResult(
+                        ReportSourceUpdateState.Current,
+                        false,
+                        $"Missing BOL already current{warning}",
+                        Path.GetFileName(path),
+                        null);
+                }
+
+                var parsed = _missingBolParser.Parse(bytes);
+                var result = _missingBolRepository.ImportWorkbook(
+                    parsed,
+                    Path.GetFileName(path),
+                    path,
+                    hash,
+                    lastWriteUtc);
+                var ignored = failures.Count > 0
+                    ? $"; ignored {failures.Count.ToString(CultureInfo.InvariantCulture)} newer invalid candidate(s)"
+                    : string.Empty;
+                return new ReportSourceUpdateResult(
+                    result.AlreadyAccepted
+                        ? ReportSourceUpdateState.Current
+                        : ReportSourceUpdateState.Imported,
+                    result.Imported,
+                    result.AlreadyAccepted
+                        ? $"Missing BOL already current{ignored}"
+                        : $"Updated {result.ItemCount.ToString(CultureInfo.InvariantCulture)} Missing BOL order(s) from {Path.GetFileName(path)}; created {result.CreatedTaskCount.ToString(CultureInfo.InvariantCulture)} linked task(s){ignored}",
+                    Path.GetFileName(path),
+                    null);
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException or ReportValidationException or
+                InvalidOperationException or SqliteException)
+            {
+                failures.Add($"{Path.GetFileName(path)}: {exception.Message}");
+            }
+        }
+
+        var detail = failures.Count > 0 ? failures[0] : "No candidate could be read.";
+        return new ReportSourceUpdateResult(
+            ReportSourceUpdateState.Failed,
+            false,
+            $"Missing BOL update failed — {detail}; last accepted BOL state preserved",
+            null,
+            null);
+    }
+
+    private static ReportUpdateResult Combine(
+        ReportSourceUpdateResult rolling,
+        ReportSourceUpdateResult missingBol)
+    {
+        var prefix = rolling.Succeeded && missingBol.Succeeded
+            ? string.Empty
+            : "Partial update — ";
+        return new ReportUpdateResult(
+            rolling.Changed || missingBol.Changed,
+            $"{prefix}Rolling 7 Day: {rolling.Message}  •  Missing BOL: {missingBol.Message}",
+            rolling.SourceFile ?? missingBol.SourceFile,
+            rolling.ReportCycleDate,
+            rolling,
+            missingBol);
+    }
+
+    private static ReportSourceUpdateResult NotConfiguredMissingBol() =>
+        new(
+            ReportSourceUpdateState.NotConfigured,
+            false,
+            "not configured in this host",
+            null,
+            null);
+
+    internal static bool IsRollingSevenDayCandidate(string path)
     {
         var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(path);
         return fileNameWithoutExtension.StartsWith("rolling 7 day_data", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsMissingBolCandidate(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        if (fileName.StartsWith("~$", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(path);
+        return fileNameWithoutExtension.StartsWith(
+            "Order Details Missing BOL",
+            StringComparison.OrdinalIgnoreCase);
     }
 
     private static byte[] ReadStableFile(string path, out DateTime lastWriteUtc)
     {
         var before = new FileInfo(path);
         before.Refresh();
-
         if (before.Length <= 0)
         {
             throw new ReportValidationException("The file is empty.");
@@ -169,14 +386,15 @@ public sealed class ReportUpdateService
         after.Refresh();
         if (before.Length != after.Length || before.LastWriteTimeUtc != after.LastWriteTimeUtc)
         {
-            throw new IOException("The file changed while WAA was reading it. Try Update Reports again after the download finishes.");
+            throw new IOException(
+                "The file changed while WAA was reading it. Try Update Reports again after the download finishes.");
         }
 
         lastWriteUtc = after.LastWriteTimeUtc;
         return bytes;
     }
 
-    private sealed record ParsedCandidate(
+    private sealed record RollingCandidate(
         string Path,
         byte[] Bytes,
         DateTime LastWriteUtc,
