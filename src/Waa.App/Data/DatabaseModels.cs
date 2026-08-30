@@ -7,6 +7,19 @@ public enum IdleContactOutcome
     SpokeFollowUp
 }
 
+public enum WorkEntryStatus
+{
+    Done,
+    Waiting,
+    FollowUp
+}
+
+public enum WorkEntrySource
+{
+    Manual,
+    IdleContact
+}
+
 public sealed record FleetDriverRecord(
     string DriverCode,
     string DriverName,
@@ -25,7 +38,29 @@ public sealed record FleetDriverRecord(
     long SourceImportId,
     IdleContactOutcome? LatestOutcome,
     string LatestNote,
-    DateTimeOffset? LatestContactUtc);
+    DateTimeOffset? LatestContactUtc,
+    int OpenWorkCount);
+
+public sealed record WorkEntryRecord(
+    long Id,
+    string DriverCode,
+    string DriverName,
+    string Text,
+    WorkEntryStatus Status,
+    DateTimeOffset CreatedUtc,
+    DateTimeOffset? ResolvedUtc,
+    WorkEntrySource Source,
+    long? LinkedIdleContactEventId,
+    DateOnly? ReportCycleDateSnapshot,
+    string UnitCodeSnapshot,
+    string DriverLeaderSnapshot)
+{
+    public bool IsResolved => ResolvedUtc is not null;
+}
+
+public sealed record DriverWorkState(
+    IReadOnlyList<WorkEntryRecord> OpenEntries,
+    IReadOnlyList<WorkEntryRecord> TodayEntries);
 
 public sealed record FleetState(
     DateOnly? ReportCycleDate,
