@@ -10,6 +10,7 @@ public sealed class MissingBolViewModel : ObservableObject
     private readonly MissingBolRepository _repository;
     private readonly Func<string, Task> _onStateChanged;
     private readonly Action<string> _reportStatus;
+    private readonly Dictionary<long, string> _noteDrafts = new();
     private FleetDriverRecord? _driver;
     private string _summaryText = "Select a driver to review Missing BOL work.";
     private bool _isBusy;
@@ -42,8 +43,12 @@ public sealed class MissingBolViewModel : ObservableObject
         private set => SetProperty(ref _isBusy, value);
     }
 
+    public MissingBolItemViewModel? FindItem(long itemId) =>
+        Items.FirstOrDefault(item => item.Record.Id == itemId);
+
     public async Task SetDriverAsync(FleetDriverRecord? driver)
     {
+        PreserveDrafts();
         _driver = driver;
         OnPropertyChanged(nameof(HasDriver));
         var version = ++_loadVersion;
@@ -66,6 +71,7 @@ public sealed class MissingBolViewModel : ObservableObject
             return;
         }
 
+        PreserveDrafts();
         await LoadAsync(driver, ++_loadVersion);
     }
 
@@ -85,7 +91,8 @@ public sealed class MissingBolViewModel : ObservableObject
             Items.Clear();
             foreach (var record in records)
             {
-                Items.Add(new MissingBolItemViewModel(record, SaveActionAsync));
+                _noteDrafts.TryGetValue(record.Id, out var draft);
+                Items.Add(new MissingBolItemViewModel(record, SaveActionAsync, draft));
             }
 
             OnPropertyChanged(nameof(HasItems));
@@ -127,6 +134,7 @@ public sealed class MissingBolViewModel : ObservableObject
         {
             IsBusy = true;
             await Task.Run(() => _repository.RecordAction(item.Record.Id, outcome, note));
+            _noteDrafts.Remove(item.Record.Id);
             await _onStateChanged(driver.DriverCode);
             if (_driver is not null &&
                 _driver.DriverCode.Equals(driver.DriverCode, StringComparison.OrdinalIgnoreCase))
@@ -139,6 +147,7 @@ public sealed class MissingBolViewModel : ObservableObject
         }
         catch (Exception exception)
         {
+            _noteDrafts[item.Record.Id] = note;
             AppLog.Write(exception, "Missing BOL action save failed");
             _reportStatus($"Missing BOL action was not saved: {exception.Message}");
             return false;
@@ -146,6 +155,21 @@ public sealed class MissingBolViewModel : ObservableObject
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    private void PreserveDrafts()
+    {
+        foreach (var item in Items)
+        {
+            if (string.IsNullOrEmpty(item.Note))
+            {
+                _noteDrafts.Remove(item.Record.Id);
+            }
+            else
+            {
+                _noteDrafts[item.Record.Id] = item.Note;
+            }
         }
     }
 
@@ -159,15 +183,17 @@ public sealed class MissingBolViewModel : ObservableObject
 public sealed class MissingBolItemViewModel : ObservableObject
 {
     private readonly Func<MissingBolItemViewModel, MissingBolActionOutcome, string, Task<bool>> _save;
-    private string _note = string.Empty;
+    private string _note;
     private bool _isSaving;
 
     public MissingBolItemViewModel(
         MissingBolItemRecord record,
-        Func<MissingBolItemViewModel, MissingBolActionOutcome, string, Task<bool>> save)
+        Func<MissingBolItemViewModel, MissingBolActionOutcome, string, Task<bool>> save,
+        string? initialNote = null)
     {
         Record = record;
         _save = save;
+        _note = initialNote ?? string.Empty;
         RequestedCommand = CreateCommand(MissingBolActionOutcome.Requested, () => !IsResolved);
         AttemptedCommand = CreateCommand(MissingBolActionOutcome.Attempted, () => !IsResolved);
         FollowUpCommand = CreateCommand(MissingBolActionOutcome.FollowUp, () => !IsResolved);
@@ -190,12 +216,21 @@ public sealed class MissingBolItemViewModel : ObservableObject
     public bool IsResolved => Record.IsResolved;
     public string RouteDisplay => FormatRoute(Record.OriginCityState, Record.DestinationCityState);
     public string CustomerDisplay => Record.BillTo.Length == 0
-        ? string.Empty
-        : $"Customer: {Record.BillTo}";
+        ? "Customer not supplied"
+        : Record.BillTo;
     public string MilesDisplay => FormatMiles(Record.LoadedMiles, Record.OrderLevelMiles);
     public string SourceEvidence => FormatSourceEvidence(
         Record.SourceDriverCode,
         Record.SourceDriverName);
+    public string SourceDriverCodeDisplay => Record.SourceDriverCode.Length == 0
+        ? "(blank)"
+        : Record.SourceDriverCode;
+    public string SourceDriverNameDisplay => Record.SourceDriverName.Length == 0
+        ? "Not supplied"
+        : Record.SourceDriverName;
+    public string PresenceDisplay => Record.IsPresentInLatestImport
+        ? "Present in latest report"
+        : "Not in latest report";
     public string PresenceWarning =>
         Record.IsResolved && Record.ReturnedAfterResolution && Record.IsPresentInLatestImport
             ? "Resolved — present again in latest report"
@@ -207,6 +242,14 @@ public sealed class MissingBolItemViewModel : ObservableObject
         ? $"Exact Driver Code matched; source name “{Record.SourceDriverName}” differs from WAA name “{Record.MatchedDriverName}”."
         : string.Empty;
     public bool HasNameWarning => NameWarning.Length > 0;
+    public SemanticState SemanticState => Record.CurrentStatus switch
+    {
+        MissingBolStatus.Resolved => SemanticState.Completed,
+        MissingBolStatus.FollowUp => SemanticState.FollowUp,
+        MissingBolStatus.Attempted => SemanticState.Warning,
+        MissingBolStatus.Requested => SemanticState.Information,
+        _ => SemanticState.Warning
+    };
 
     public string Note
     {
@@ -278,17 +321,17 @@ public sealed class MissingBolItemViewModel : ObservableObject
     {
         if (loadedMiles is null && orderMiles is null)
         {
-            return string.Empty;
+            return "Miles not supplied";
         }
 
         if (loadedMiles is not null && orderMiles is not null)
         {
-            return $"Miles: {loadedMiles.Value:0.##} loaded / {orderMiles.Value:0.##} order";
+            return $"{loadedMiles.Value:0.##} loaded / {orderMiles.Value:0.##} order";
         }
 
         return loadedMiles is not null
-            ? $"Loaded miles: {loadedMiles.Value:0.##}"
-            : $"Order miles: {orderMiles!.Value:0.##}";
+            ? $"{loadedMiles.Value:0.##} loaded"
+            : $"{orderMiles!.Value:0.##} order";
     }
 
     private static string FormatSourceEvidence(string code, string name)
@@ -313,7 +356,9 @@ public sealed class MissingBolUnmatchedItemViewModel
     public string SourceDriverCodeDisplay => Record.SourceDriverCode.Length == 0
         ? "(blank)"
         : Record.SourceDriverCode;
-    public string SourceDriverName => Record.SourceDriverName;
+    public string SourceDriverName => Record.SourceDriverName.Length == 0
+        ? "Not supplied"
+        : Record.SourceDriverName;
     public string RouteDisplay => Record.OriginCityState.Length > 0 && Record.DestinationCityState.Length > 0
         ? $"{Record.OriginCityState} → {Record.DestinationCityState}"
         : Record.OriginCityState.Length > 0
@@ -322,6 +367,8 @@ public sealed class MissingBolUnmatchedItemViewModel
                 ? $"Destination: {Record.DestinationCityState}"
                 : "Route not supplied";
     public string PresenceDisplay => Record.IsPresentInLatestImport
-        ? string.Empty
+        ? "Present in latest report"
         : "Not in latest report";
+    public string ExactMatchExplanation =>
+        "No exact durable Driver Code currently exists in WAA. This item remains read-only; name, unit, leader, and fuzzy matching are not used.";
 }

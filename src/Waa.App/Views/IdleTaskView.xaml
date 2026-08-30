@@ -1,0 +1,99 @@
+<UserControl x:Class="Waa.App.Views.IdleTaskView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel MaxWidth="980" HorizontalAlignment="Center">
+            <Border Style="{StaticResource PanelCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Idle Contact" Style="{StaticResource PageTitleStyle}" />
+                    <TextBlock Margin="0,3,0,0" Text="{Binding Driver.DriverName}" FontSize="17" FontWeight="SemiBold" />
+                    <TextBlock Margin="0,2,0,0" Text="{Binding Driver.IdentityLine}" Style="{StaticResource SubtleTextStyle}" />
+                </StackPanel>
+            </Border>
+
+            <UniformGrid Margin="0,10,0,0" Columns="4">
+                <Border Margin="0,0,6,0" Style="{StaticResource SubtlePanelStyle}">
+                    <StackPanel>
+                        <TextBlock Text="Report Cycle" Style="{StaticResource SubtleTextStyle}" />
+                        <TextBlock Margin="0,3,0,0" Text="{Binding ReportCycleDisplay}" FontWeight="SemiBold" />
+                    </StackPanel>
+                </Border>
+                <Border Margin="2,0,4,0" Style="{StaticResource SubtlePanelStyle}">
+                    <StackPanel>
+                        <TextBlock Text="28 Day Idle" Style="{StaticResource SubtleTextStyle}" />
+                        <TextBlock Margin="0,3,0,0" Text="{Binding Driver.Idle28Display}" FontSize="17" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Driver.Record.Coverage28Day, StringFormat=Coverage {0}/4}" Style="{StaticResource SubtleTextStyle}" />
+                    </StackPanel>
+                </Border>
+                <Border Margin="4,0,2,0" Style="{StaticResource SubtlePanelStyle}">
+                    <StackPanel>
+                        <TextBlock Text="7 Day Idle" Style="{StaticResource SubtleTextStyle}" />
+                        <TextBlock Margin="0,3,0,0" Text="{Binding Driver.Idle7Display}" FontSize="17" FontWeight="SemiBold" />
+                    </StackPanel>
+                </Border>
+                <Border Margin="6,0,0,0" Style="{StaticResource SubtlePanelStyle}">
+                    <StackPanel>
+                        <TextBlock Text="Threshold" Style="{StaticResource SubtleTextStyle}" />
+                        <TextBlock Margin="0,3,0,0" Text="{Binding ThresholdDisplay}" FontSize="17" FontWeight="SemiBold" />
+                    </StackPanel>
+                </Border>
+            </UniformGrid>
+
+            <Border Margin="0,10,0,0" Style="{StaticResource PanelCardStyle}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,0,28,0">
+                        <TextBlock Text="Current cycle outcome" Style="{StaticResource SubtleTextStyle}" />
+                        <TextBlock Margin="0,3,0,0" Text="{Binding Driver.ContactDisplay}" FontWeight="SemiBold" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1">
+                        <TextBlock Text="Prior note" Style="{StaticResource SubtleTextStyle}" />
+                        <TextBlock Margin="0,3,0,0"
+                                   Text="{Binding Driver.Record.LatestNote, TargetNullValue=No prior note, FallbackValue=No prior note}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Border Margin="0,10,0,0" Style="{StaticResource PanelCardStyle}">
+                <StackPanel>
+                    <TextBlock Text="Optional action note" Style="{StaticResource SectionTitleStyle}" />
+                    <TextBox MinHeight="86"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             VerticalContentAlignment="Top"
+                             Text="{Binding DataContext.ContactNote, RelativeSource={RelativeSource AncestorType={x:Type Window}}, UpdateSourceTrigger=PropertyChanged}"
+                             automation:AutomationProperties.Name="Optional idle contact note" />
+                    <WrapPanel Margin="0,10,0,0">
+                        <Button Margin="0,0,8,8"
+                                Content="Spoke"
+                                Command="{Binding DataContext.SpokeCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                automation:AutomationProperties.Name="Save spoke idle contact outcome" />
+                        <Button Margin="0,0,8,8"
+                                Content="Attempted"
+                                Command="{Binding DataContext.AttemptedCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                automation:AutomationProperties.Name="Save attempted idle contact outcome" />
+                        <Button Margin="0,0,8,8"
+                                Content="Spoke — Follow-up"
+                                Command="{Binding DataContext.FollowUpCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                automation:AutomationProperties.Name="Save spoke follow-up idle contact outcome" />
+                    </WrapPanel>
+                </StackPanel>
+            </Border>
+
+            <WrapPanel Margin="0,10,0,0" HorizontalAlignment="Right">
+                <Button Margin="0,0,8,0"
+                        Content="Next Work Item"
+                        Command="{Binding DataContext.NextWorkItemCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                        automation:AutomationProperties.Name="Open next work item" />
+                <Button Content="Next Needing Attention"
+                        Command="{Binding DataContext.NextNeedingAttentionCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                        automation:AutomationProperties.Name="Open next driver needing attention" />
+            </WrapPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

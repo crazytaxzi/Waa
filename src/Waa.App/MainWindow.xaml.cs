@@ -1,4 +1,8 @@
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
+using System.Windows.Media;
 using Waa.App.Data;
 using Waa.App.Infrastructure;
 using Waa.App.ViewModels;
@@ -7,13 +11,16 @@ namespace Waa.App;
 
 public partial class MainWindow : Window
 {
+    private readonly MainViewModel _viewModel;
     private readonly ThemePreferenceStore _themePreferenceStore;
-    private bool _started;
 
-    public MainWindow(MainViewModel viewModel, ThemePreferenceStore themePreferenceStore)
+    public MainWindow(
+        MainViewModel viewModel,
+        ThemePreferenceStore themePreferenceStore)
     {
-        _themePreferenceStore = themePreferenceStore;
         InitializeComponent();
+        _viewModel = viewModel;
+        _themePreferenceStore = themePreferenceStore;
         DataContext = viewModel;
         Loaded += OnLoaded;
         SourceInitialized += OnSourceInitialized;
@@ -24,32 +31,35 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        if (_started)
+        try
         {
-            return;
+            await _viewModel.InitializeAsync();
         }
-
-        _started = true;
-        if (DataContext is MainViewModel viewModel)
+        catch (Exception exception)
         {
-            await viewModel.InitializeAsync();
+            AppLog.Write(exception, "Main window initialization failed");
+            MessageBox.Show(
+                this,
+                $"WAA could not finish starting: {exception.Message}",
+                "WAA startup error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 
-    private void OnSourceInitialized(object? sender, EventArgs e) =>
-        WindowThemeHelper.SetDarkTitleBar(this, ThemeManager.IsDarkMode);
+    private void OnSourceInitialized(object? sender, EventArgs e) => ApplyWindowTheme();
 
     private void OnThemeChanged(object? sender, EventArgs e)
     {
+        ApplyWindowTheme();
         UpdateThemeButtonText();
-        WindowThemeHelper.SetDarkTitleBar(this, ThemeManager.IsDarkMode);
     }
 
-    private async void OnThemeButtonClick(object sender, RoutedEventArgs e)
+    private async void OnThemeToggleClicked(object sender, RoutedEventArgs e)
     {
         var previous = ThemeManager.IsDarkMode;
         var next = !previous;
-        ThemeButton.IsEnabled = false;
+        ThemeToggleButton.IsEnabled = false;
         ThemeManager.Apply(next);
 
         try
@@ -60,26 +70,65 @@ public partial class MainWindow : Window
         catch (Exception exception)
         {
             ThemeManager.Apply(previous);
-            AppLog.Write(exception, "Theme preference save failed");
+            AppLog.Write(exception, "Theme preference update failed");
             MessageBox.Show(
-                $"The appearance could not be saved. WAA returned to the prior theme.\n\n{exception.Message}",
-                "WAA Appearance",
+                this,
+                $"The appearance preference could not be saved. WAA returned to the prior theme.\n\n{exception.Message}",
+                "WAA appearance",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
         }
         finally
         {
-            ThemeButton.IsEnabled = true;
+            ThemeToggleButton.IsEnabled = true;
         }
     }
 
-    private void UpdateThemeButtonText() =>
-        ThemeButton.Content = ThemeManager.IsDarkMode ? "Light mode" : "Dark mode";
+    private void OnPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Left ||
+            (Keyboard.Modifiers & ModifierKeys.Alt) != ModifierKeys.Alt ||
+            IsTextEditingControl(Keyboard.FocusedElement as DependencyObject) ||
+            !_viewModel.BackCommand.CanExecute(null))
+        {
+            return;
+        }
+
+        _viewModel.BackCommand.Execute(null);
+        e.Handled = true;
+    }
+
+    private void ApplyWindowTheme() =>
+        WindowThemeHelper.SetDarkTitleBar(this, ThemeManager.IsDarkMode);
+
+    private void UpdateThemeButtonText()
+    {
+        if (ThemeToggleButton is not null)
+        {
+            ThemeToggleButton.Content = ThemeManager.IsDarkMode ? "Light mode" : "Dark mode";
+        }
+    }
 
     private void OnClosed(object? sender, EventArgs e)
     {
         ThemeManager.ThemeChanged -= OnThemeChanged;
-        SourceInitialized -= OnSourceInitialized;
-        Closed -= OnClosed;
+    }
+
+    private static bool IsTextEditingControl(DependencyObject? element)
+    {
+        var current = element;
+        while (current is not null)
+        {
+            if (current is TextBoxBase or PasswordBox)
+            {
+                return true;
+            }
+
+            current = current is Visual or System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(current)
+                : LogicalTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 }

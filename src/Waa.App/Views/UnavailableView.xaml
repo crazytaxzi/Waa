@@ -1,0 +1,18 @@
+<UserControl x:Class="Waa.App.Views.UnavailableView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Border MaxWidth="760"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Style="{StaticResource PanelCardStyle}">
+            <StackPanel>
+                <TextBlock Text="{Binding Title}" Style="{StaticResource PageTitleStyle}" />
+                <TextBlock Margin="0,10,0,0" Text="{Binding Message}" />
+                <TextBlock Margin="0,10,0,0"
+                           Text="Use the Back action above to return to a valid workspace. Unsaved text in other tasks remains in the current session."
+                           Style="{StaticResource SubtleTextStyle}" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</UserControl>

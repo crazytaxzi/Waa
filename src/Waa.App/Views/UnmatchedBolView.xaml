@@ -1,0 +1,38 @@
+<UserControl x:Class="Waa.App.Views.UnmatchedBolView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore">
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+        <Border Grid.Row="0" Style="{StaticResource PanelCardStyle}">
+            <StackPanel>
+                <TextBlock Text="Unmatched Missing BOL" Style="{StaticResource PageTitleStyle}" />
+                <TextBlock Margin="0,3,0,0" Text="These rows remain read-only until the exact source Driver Code exists as a durable WAA Driver Code. Names, units, leaders, trucks, and fuzzy matching are not used." Style="{StaticResource SubtleTextStyle}" />
+            </StackPanel>
+        </Border>
+        <Border Grid.Row="1" Margin="0,10,0,10" Padding="12,9" Background="{DynamicResource InformationBackgroundBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="4">
+            <TextBlock Text="No manual assignment is available by design. A later Rolling 7 Day report may attach an item only when its exact Driver Code becomes known." Style="{StaticResource InformationTextStyle}" />
+        </Border>
+        <Border Grid.Row="2" Style="{StaticResource PanelCardStyle}" Padding="0">
+            <Grid>
+                <DataGrid ItemsSource="{Binding Items}" AlternationCount="2" EnableRowVirtualization="True" EnableColumnVirtualization="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling" automation:AutomationProperties.Name="Read-only unmatched Missing BOL items">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Order #" Width="1.0*" Binding="{Binding OrderNumber}" ElementStyle="{DynamicResource DataGridTextElementStyle}" EditingElementStyle="{DynamicResource DataGridTextEditingElementStyle}" />
+                        <DataGridTextColumn Header="Empty Call" Width="0.9*" Binding="{Binding EmptyCallDateDisplay}" ElementStyle="{DynamicResource DataGridTextElementStyle}" EditingElementStyle="{DynamicResource DataGridTextEditingElementStyle}" />
+                        <DataGridTextColumn Header="Source Driver Code" Width="1.1*" Binding="{Binding SourceDriverCodeDisplay}" ElementStyle="{DynamicResource DataGridTextElementStyle}" EditingElementStyle="{DynamicResource DataGridTextEditingElementStyle}" />
+                        <DataGridTextColumn Header="Source Driver Name" Width="1.5*" Binding="{Binding SourceDriverName}" ElementStyle="{DynamicResource DataGridTextElementStyle}" EditingElementStyle="{DynamicResource DataGridTextEditingElementStyle}" />
+                        <DataGridTextColumn Header="Route" Width="2.0*" Binding="{Binding RouteDisplay}" ElementStyle="{DynamicResource DataGridTextElementStyle}" EditingElementStyle="{DynamicResource DataGridTextEditingElementStyle}" />
+                        <DataGridTextColumn Header="Latest Report" Width="1.1*" Binding="{Binding PresenceDisplay}" ElementStyle="{DynamicResource DataGridTextElementStyle}" EditingElementStyle="{DynamicResource DataGridTextEditingElementStyle}" />
+                    </DataGrid.Columns>
+                </DataGrid>
+                <TextBlock Margin="24" HorizontalAlignment="Center" VerticalAlignment="Center" Text="No unmatched Missing BOL items.">
+                    <TextBlock.Style>
+                        <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource SubtleTextStyle}">
+                            <Style.Triggers><DataTrigger Binding="{Binding HasItems}" Value="True"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

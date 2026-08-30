@@ -20,6 +20,7 @@ public sealed class DriverWorkViewModel : ObservableObject
     private string _todaySummary = "Select a driver to view today’s activity.";
     private bool _isBusy;
     private int _loadVersion;
+    private long? _lastSavedWorkEntryId;
 
     public DriverWorkViewModel(
         WaaRepository repository,
@@ -54,6 +55,12 @@ public sealed class DriverWorkViewModel : ObservableObject
     public AsyncRelayCommand SaveFollowUpCommand { get; }
 
     public bool HasDriver => _driver is not null;
+
+    public long? LastSavedWorkEntryId
+    {
+        get => _lastSavedWorkEntryId;
+        private set => SetProperty(ref _lastSavedWorkEntryId, value);
+    }
 
     public string NewWorkText
     {
@@ -193,7 +200,7 @@ public sealed class DriverWorkViewModel : ObservableObject
         try
         {
             IsBusy = true;
-            await Task.Run(() => _repository.RecordManualWork(driver, status, text));
+            LastSavedWorkEntryId = await Task.Run(() => _repository.RecordManualWork(driver, status, text));
             _drafts.Remove(driver.DriverCode);
             NewWorkText = string.Empty;
             await _onWorkChanged(driver.DriverCode);

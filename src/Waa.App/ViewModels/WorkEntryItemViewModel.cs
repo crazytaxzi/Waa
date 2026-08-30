@@ -38,7 +38,7 @@ public sealed class WorkEntryItemViewModel
         IsResolved &&
         Record.Status is WorkEntryStatus.Waiting or WorkEntryStatus.FollowUp;
     public string ResolutionInstruction => UsesMissingBolControls
-        ? "Use the Missing BOL actions above to resolve or reopen this linked task."
+        ? "Use the Missing BOL workspace to resolve or reopen this linked task."
         : string.Empty;
     public string StatusDisplay => Record.Status switch
     {
@@ -53,9 +53,25 @@ public sealed class WorkEntryItemViewModel
         _ => "Manual"
     };
     public string CreatedDisplay => FormatLocal(Record.CreatedUtc);
+    public string CreatedFullDisplay =>
+        TimeZoneInfo.ConvertTime(Record.CreatedUtc, _timeZone).ToString("g", CultureInfo.CurrentCulture);
     public string ResolutionDisplay => Record.ResolvedUtc is { } resolvedUtc
         ? $"Resolved {FormatLocal(resolvedUtc)}"
-        : string.Empty;
+        : "Unresolved";
+    public string UnitCodeDisplay => string.IsNullOrWhiteSpace(Record.UnitCodeSnapshot)
+        ? "Not supplied"
+        : Record.UnitCodeSnapshot;
+    public string DriverLeaderDisplay => string.IsNullOrWhiteSpace(Record.DriverLeaderSnapshot)
+        ? "Not supplied"
+        : Record.DriverLeaderSnapshot;
+    public string ReportCycleDisplay => Record.ReportCycleDateSnapshot?.ToString(
+        "M/d/yyyy",
+        CultureInfo.CurrentCulture) ?? "Not supplied";
+    public SemanticState SemanticState => IsResolved
+        ? SemanticState.Completed
+        : Record.Status == WorkEntryStatus.FollowUp
+            ? SemanticState.FollowUp
+            : SemanticState.Information;
 
     private string FormatLocal(DateTimeOffset value) =>
         TimeZoneInfo.ConvertTime(value, _timeZone)

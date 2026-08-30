@@ -10,6 +10,8 @@ WAA is a clean, driver-centric Windows work application. The current `main` tree
 - `docs/IDLE_WORKFLOW.md` is authoritative for report-cycle idle accountability and queue ordering.
 - `docs/WORK_LOG_HANDOFF.md` is authoritative for driver work history and deterministic handoff behavior.
 - `docs/MISSING_BOL_WORKFLOW.md` is authoritative for Missing BOL ingestion, matching, tasks, actions, unmatched items, and source lifecycle.
+- `docs/CENTRAL_WORKSPACE.md` is authoritative for v0.4 one-window navigation, route/state preservation, keyboard behavior, and workspace responsibilities.
+- `docs/THEMING.md` is authoritative for v0.4 theme resource ownership, automatic text, semantic colors, contrast, and theme-source auditing.
 
 ## Driver and history invariants
 
@@ -31,12 +33,47 @@ WAA is a clean, driver-centric Windows work application. The current `main` tree
 - A linked idle event may have at most one work entry.
 - Every matched unresolved Missing BOL item creates at most one linked `MissingBolTask` work entry.
 - Missing BOL actions create completed `MissingBolAction` activity entries and save atomically with item/task state.
-- Generic Open Work controls must not let a linked Missing BOL task drift from its item; current UI directs resolution and reopening through the Missing BOL controls.
+- Generic Open Work controls must not let a linked Missing BOL task drift from its item; resolve/reopen remains synchronized through Missing BOL actions.
 - Handoff is generated only from saved work entries using the PC's local calendar-day boundary.
-- Editing or copying a handoff draft never mutates work history, BOL state, idle events, reports, threshold settings, or driver identity.
-- Regenerate intentionally replaces the editable draft from current saved records.
+- Editing or copying a Handoff draft never mutates work history, BOL state, idle events, reports, threshold settings, or driver identity.
+- Navigating away from an edited Handoff draft and back in the same session must preserve the draft; `Regenerate` intentionally replaces it from current saved records.
 - Migrations never wipe, replace, or silently recreate an existing database after failure.
 - Repository fixtures and logs committed to source must contain synthetic identities only; never commit real employee data, production reports, or production databases.
+
+## Central workspace invariants
+
+- One `MainWindow` is the operational shell.
+- Driver/task/Handoff/unmatched views render inside the shell's central content host; they do not create additional top-level WPF Windows.
+- The default/fresh-launch route is Fleet Queue.
+- A fleet row opens Driver Workspace for durable Driver Code; Unit Code never owns route identity.
+- An actionable driver-work row opens one focused task workspace.
+- The old always-visible selected-driver split pane must not be reintroduced or kept as a hidden parallel workflow.
+- Driver Workspace is primarily a work index. Do not put every task editor directly on it.
+- Back navigation must preserve actual session context. Task Back returns to its prior Driver Workspace rather than restarting the application workflow.
+- Queue search and selection survive Fleet → Driver → Fleet round trips.
+- New Work and Missing BOL unsaved text must not be silently discarded by in-session navigation or report refresh.
+- Handoff draft survives navigation away/back until `Regenerate` is intentionally pressed.
+- Report refresh may rebuild a current route only through stable Driver Code/item/work-entry IDs. Stale entities fail gracefully with an explicit return path.
+- `Next Work Item` uses the current driver’s deterministic work list and then reuses existing search-respecting `Next Needing Attention`; do not create a competing fleet priority engine.
+- Activity Detail and Unmatched Missing BOL are read-only.
+- `Alt+Left` may perform Back only when it does not hijack text editing.
+- Clickable rows must also be keyboard-accessible and must expose status in words, not color alone.
+
+## Theme invariants
+
+- Ordinary application text inherits the active theme through `TextBrush` and implicit/base WPF styles.
+- Do not set fixed ordinary text colors in MainWindow, UserControls, view-models, converters, code-behind, or data templates.
+- Literal theme colors belong only in the dedicated Light/Dark palette dictionaries or an explicitly equivalent centralized palette implementation.
+- Light and Dark palette dictionaries must have matching required key sets.
+- Theme-related style values use `DynamicResource` so live Light/Dark switching updates the current visible route without restart or navigation reset.
+- `SubtleTextBrush`, `DisabledTextBrush`, `PrimaryButtonTextBrush`, `SelectedRowTextBrush`, `LinkTextBrush`, semantic brushes, focus/border brushes, and editor colors are theme-aware.
+- DataGrid-generated `DataGridTextColumn` display/edit elements must explicitly follow the active cell/theme foreground and may not fall back to system black text.
+- Semantic state belongs in view-model flags/enums; view-models must not expose WPF Brush/Color objects.
+- Warning, Follow-up, Completed, Quiet, Error, and Information colors must be independently readable in both palettes.
+- Theme preference remains explicit Light/Dark, persisted locally. “Auto text” means resource inheritance, not a third System/Auto appearance mode.
+- Theme persistence must not block the UI thread. If saving the preference fails after a live switch, restore the prior visible theme.
+- Normal text combinations must meet at least 4.5:1 contrast; relevant UI boundaries/focus indicators must meet at least 3:1.
+- Keep the repository-level source audit that rejects hard-coded UI theme colors outside palette files. Fix palette/style failures; do not weaken/delete the audit or contrast tests.
 
 ## Report-update invariants
 
@@ -62,7 +99,8 @@ WAA is a clean, driver-centric Windows work application. The current `main` tree
 - A later source row that moves an existing Order # to a different normalized Driver Code is a conflict; reject the snapshot rather than moving history.
 - One item creates at most one linked task. Reimport and Reopen never create a second task.
 - Requested, Attempted, Follow-up, Resolved, and Reopen append action history; they never overwrite prior events.
-- Missing BOL remains a compact workflow inside the existing queue, selected-driver pane, work log, and handoff.
+- Missing BOL remains a compact workflow inside the central driver/task workspaces, unified work log, and Handoff.
+- Unmatched BOL remains read-only; do not add manual/fuzzy assignment.
 
 ## Weighted-idle invariants
 
@@ -95,33 +133,40 @@ The following capabilities are permanently outside WAA's intended scope unless t
 - giant Missing BOL dashboards or separate analytics portals
 - financial/BOL revenue analytics
 - fuzzy identity matching, fuzzy record linking, name similarity, or probabilistic merges
+- truck-, Unit Code-, or Driver-Leader-based identity
 - complex escalation trees, routing engines, approval workflows, or multi-level escalation logic
 - browser dashboards, WebView, local web servers, Node, cloud services, or helper processes
+- background report polling/watchers
+- decorative animation, blur, glow, or gamification
 
-Do not add placeholders, abstractions, schema, services, buttons, or documentation promises for excluded capabilities. Missing BOL may import source evidence, attach through exact Driver Code, create/update local work status, affect ordinary-work priority, and feed the existing work log and handoff. Nothing more.
+Do not add placeholders, abstractions, schema, services, buttons, or documentation promises for excluded capabilities. Missing BOL may import source evidence, attach through exact Driver Code, create/update local work status, affect ordinary-work priority, and feed the existing work log and Handoff. Nothing more.
 
 ## Product and performance discipline
 
-- Keep the primary workflow on one restrained, professional WPF window; Handoff is the only secondary top-level view.
-- Target low-spec Windows hardware using native WPF controls, virtualized rows, indexed aggregate queries, and short transactions.
-- No browser shell, continuous animation, blur, glow, decorative charts, gamification, or oversized dashboard tiles.
+- Keep all operational work inside one restrained, professional native WPF `MainWindow`.
+- Target low-spec Windows hardware using virtualized rows, indexed aggregate queries, bounded selected-entity reads, and short transactions.
 - No one-query-per-row history, work-count, or BOL-count loading.
-- Load selected-driver work and BOL items only when selection or saved state changes.
-- Parse reports off the UI thread and dispose workbook/file streams promptly.
-- Generate handoff only when entering Handoff or pressing Regenerate.
-- Add a feature only when it reduces work, prevents missed follow-up, improves idle accountability, or improves handoff accuracy.
+- Load selected-driver work/BOL state only for selection/saved-state/route refresh, not every keystroke.
+- Load a focused task’s additional detail (for example BOL action history) only when that task opens.
+- Parse reports and perform database/report operations off the UI thread where the operation can block.
+- Generate Handoff only on first session entry or explicit Regenerate; do not regenerate on every navigation return or edit.
+- Keep queue row virtualization/recycling enabled.
+- Do not keep hidden legacy split-pane controls or duplicate query paths.
+- Add a feature only when it reduces work, prevents missed follow-up, improves idle accountability, improves BOL accountability, or improves Handoff accuracy.
 
 ## Current product sequence
 
-Implemented through **WAA Missing BOL v0.3**:
+Implemented through **WAA Central Workspace + Theme-Safe Text v0.4**:
 
 1. Rolling 7 Day ingestion, durable roster identity, weighted driver/fleet metrics, threshold, and prioritized virtualized fleet list.
 2. Per-cycle idle conversation tracking, same-cycle preservation, rollover, and ordering.
-3. General driver work card with Done / Waiting / Follow-up, resolution, reopening, and carry-forward.
+3. Driver work log with Done / Waiting / Follow-up, resolution, reopening, carry-forward, and linked idle work.
 4. Editable deterministic Handoff with Copy to Clipboard.
-5. Missing BOL managed XLSX ingestion, exact-code matching, unmatched visibility, one linked task per item, atomic local actions, queue/search integration, and deterministic handoff integration.
+5. Missing BOL managed XLSX ingestion, exact-code matching, unmatched visibility, one linked task per item, atomic local actions, queue/search integration, and deterministic Handoff integration.
+6. One-window central Fleet → Driver → Task workspace with session-safe Back/breadcrumb navigation, focused task views, Next Work Item, centralized Handoff/Unmatched routes, and stale-route handling.
+7. Centralized Light/Dark palettes, automatic theme-safe text inheritance, semantic theme colors, DataGrid generated-text handling, source audit, and deterministic contrast validation.
 
 Future work remains separate and must not be pulled into a maintenance change without an explicit bounded milestone:
 
-6. Evaluate maintenance workflow separately.
-7. Evaluate DOT workflow separately.
+8. Evaluate maintenance workflow separately.
+9. Evaluate DOT workflow separately.
