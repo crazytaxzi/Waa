@@ -125,6 +125,7 @@ public sealed class MissingBolViewModel : ObservableObject
 
         try
         {
+            IsBusy = true;
             await Task.Run(() => _repository.RecordAction(item.Record.Id, outcome, note));
             await _onStateChanged(driver.DriverCode);
             if (_driver is not null &&
@@ -141,6 +142,10 @@ public sealed class MissingBolViewModel : ObservableObject
             AppLog.Write(exception, "Missing BOL action save failed");
             _reportStatus($"Missing BOL action was not saved: {exception.Message}");
             return false;
+        }
+        finally
+        {
+            IsBusy = false;
         }
     }
 
@@ -191,11 +196,12 @@ public sealed class MissingBolItemViewModel : ObservableObject
     public string SourceEvidence => FormatSourceEvidence(
         Record.SourceDriverCode,
         Record.SourceDriverName);
-    public string PresenceWarning => Record.ReturnedAfterResolution && Record.IsPresentInLatestImport
-        ? "Resolved — present again in latest report"
-        : Record.IsPresentInLatestImport
-            ? string.Empty
-            : "Not in latest report";
+    public string PresenceWarning =>
+        Record.IsResolved && Record.ReturnedAfterResolution && Record.IsPresentInLatestImport
+            ? "Resolved — present again in latest report"
+            : Record.IsPresentInLatestImport
+                ? string.Empty
+                : "Not in latest report";
     public bool HasPresenceWarning => PresenceWarning.Length > 0;
     public string NameWarning => Record.SourceNameDiffersFromDriver
         ? $"Exact Driver Code matched; source name “{Record.SourceDriverName}” differs from WAA name “{Record.MatchedDriverName}”."
