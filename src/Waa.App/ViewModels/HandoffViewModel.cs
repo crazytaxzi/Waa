@@ -16,6 +16,7 @@ public sealed class HandoffViewModel : ObservableObject
     private string _draftText = string.Empty;
     private string _summaryText = "Handoff has not been generated.";
     private bool _isBusy;
+    private bool _hasGenerated;
 
     public HandoffViewModel(
         WaaRepository repository,
@@ -40,6 +41,7 @@ public sealed class HandoffViewModel : ObservableObject
 
     public AsyncRelayCommand RegenerateCommand { get; }
     public AsyncRelayCommand CopyCommand { get; }
+    public bool HasGenerated => _hasGenerated;
 
     public string DraftText
     {
@@ -72,7 +74,7 @@ public sealed class HandoffViewModel : ObservableObject
         }
     }
 
-    public Task OpenAsync() => RegenerateAsync();
+    public Task OpenAsync() => _hasGenerated ? Task.CompletedTask : RegenerateAsync();
 
     public async Task RegenerateAsync()
     {
@@ -90,6 +92,8 @@ public sealed class HandoffViewModel : ObservableObject
                 $"{result.NeedsFollowUpCount} follow-up  •  " +
                 $"{result.WaitingCount} waiting  •  " +
                 $"{result.CompletedTodayCount} completed today";
+            _hasGenerated = true;
+            OnPropertyChanged(nameof(HasGenerated));
             _reportStatus($"Handoff regenerated from saved work for {day.LocalDate:M/d/yyyy}.");
         }
         catch (Exception exception)

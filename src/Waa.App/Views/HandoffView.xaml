@@ -1,0 +1,48 @@
+<UserControl x:Class="Waa.App.Views.HandoffView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Style="{StaticResource PanelCardStyle}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Shift Handoff" Style="{StaticResource PageTitleStyle}" />
+                    <TextBlock Margin="0,3,0,0"
+                               Text="{Binding DataContext.Handoff.SummaryText, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                               Style="{StaticResource SubtleTextStyle}" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button Margin="0,0,8,0"
+                            Content="Regenerate"
+                            Command="{Binding DataContext.Handoff.RegenerateCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                            automation:AutomationProperties.Name="Regenerate handoff from saved work" />
+                    <Button Content="Copy to Clipboard"
+                            Command="{Binding DataContext.Handoff.CopyCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            automation:AutomationProperties.Name="Copy current handoff draft to clipboard" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1" Margin="0,10,0,0" Style="{StaticResource PanelCardStyle}" Padding="10">
+            <TextBox AcceptsReturn="True"
+                     AcceptsTab="True"
+                     TextWrapping="NoWrap"
+                     VerticalContentAlignment="Top"
+                     VerticalScrollBarVisibility="Auto"
+                     HorizontalScrollBarVisibility="Auto"
+                     FontFamily="Consolas"
+                     Text="{Binding DataContext.Handoff.DraftText, RelativeSource={RelativeSource AncestorType={x:Type Window}}, UpdateSourceTrigger=PropertyChanged}"
+                     automation:AutomationProperties.Name="Editable shift handoff draft" />
+        </Border>
+    </Grid>
+</UserControl>

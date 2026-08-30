@@ -12,10 +12,12 @@ public sealed class MainViewModel : ObservableObject
     private readonly WaaRepository _repository;
     private readonly MissingBolRepository? _missingBolRepository;
     private readonly ReportUpdateService _updateService;
+    private readonly WorkspaceNavigator _navigator = new();
     private IReadOnlyList<FleetDriverRecord> _records = Array.Empty<FleetDriverRecord>();
     private MissingBolFleetState _missingBolFleetState = EmptyMissingBolFleetState();
     private decimal _threshold = 50m;
     private DriverRowViewModel? _selectedDriver;
+    private WorkspaceViewModel _currentWorkspace = new FleetQueueWorkspaceViewModel();
     private string _searchText = string.Empty;
     private string _thresholdText = "50.0";
     private string _contactNote = string.Empty;
@@ -28,8 +30,7 @@ public sealed class MainViewModel : ObservableObject
     private string _rosterSummaryText = "No roster loaded";
     private bool _isBusy;
     private bool _initialized;
-    private bool _isHandoffView;
-    private bool _isUnmatchedBolVisible;
+    private bool _suppressSelectionLoad;
 
     public MainViewModel(
         WaaRepository repository,
@@ -86,15 +87,48 @@ public sealed class MainViewModel : ObservableObject
         NextNeedingAttentionCommand = new AsyncRelayCommand(
             NextNeedingAttentionAsync,
             CanMoveNext);
+        NextWorkItemCommand = new AsyncRelayCommand(
+            NextWorkItemAsync,
+            CanMoveNext);
         OpenHandoffCommand = new AsyncRelayCommand(
             OpenHandoffAsync,
-            () => !IsBusy && !IsHandoffView);
+            () => !IsBusy && CurrentRoute != WorkspaceRoute.Handoff);
         BackToQueueCommand = new AsyncRelayCommand(
             BackToQueueAsync,
-            () => !IsBusy && IsHandoffView);
+            () => !IsBusy && CurrentRoute != WorkspaceRoute.FleetQueue);
+        BackCommand = new AsyncRelayCommand(
+            NavigateBackAsync,
+            () => !IsBusy && CanGoBack);
+        OpenUnmatchedBolCommand = new AsyncRelayCommand(
+            OpenUnmatchedBolAsync,
+            () => !IsBusy && HasUnmatchedBol);
         ToggleUnmatchedBolCommand = new AsyncRelayCommand(
             ToggleUnmatchedBolAsync,
-            () => !IsBusy && !IsHandoffView && HasUnmatchedBol);
+            () => !IsBusy && HasUnmatchedBol);
+        OpenDriverCommand = new AsyncRelayCommand<DriverRowViewModel>(
+            driver => driver is null
+                ? Task.CompletedTask
+                : NavigateToDriverAsync(driver.DriverCode),
+            driver => !IsBusy && driver is not null);
+        OpenDriverMissingBolCommand = new AsyncRelayCommand<DriverRowViewModel>(
+            driver => driver is null
+                ? Task.CompletedTask
+                : NavigateToDriverAsync(driver.DriverCode, DriverWorkspaceFocus.MissingBol),
+            driver => !IsBusy && driver is not null);
+        OpenDriverWorkCommand = new AsyncRelayCommand<DriverRowViewModel>(
+            driver => driver is null
+                ? Task.CompletedTask
+                : NavigateToDriverAsync(driver.DriverCode, DriverWorkspaceFocus.OpenWork),
+            driver => !IsBusy && driver is not null);
+        OpenAttentionItemCommand = new AsyncRelayCommand<DriverAttentionItemViewModel>(
+            item => item is null ? Task.CompletedTask : OpenAttentionItemAsync(item, addToHistory: true),
+            item => !IsBusy && item is not null);
+        OpenNewWorkCommand = new AsyncRelayCommand(
+            OpenNewWorkAsync,
+            () => !IsBusy && SelectedDriver is not null);
+        OpenActivityDetailCommand = new AsyncRelayCommand<WorkEntryItemViewModel>(
+            item => item is null ? Task.CompletedTask : OpenActivityDetailAsync(item),
+            item => !IsBusy && item is not null);
     }
 
     public ObservableCollection<DriverRowViewModel> Drivers { get; } = new();
@@ -108,22 +142,63 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand AttemptedCommand { get; }
     public AsyncRelayCommand FollowUpCommand { get; }
     public AsyncRelayCommand NextNeedingAttentionCommand { get; }
+    public AsyncRelayCommand NextWorkItemCommand { get; }
     public AsyncRelayCommand OpenHandoffCommand { get; }
     public AsyncRelayCommand BackToQueueCommand { get; }
+    public AsyncRelayCommand BackCommand { get; }
+    public AsyncRelayCommand OpenUnmatchedBolCommand { get; }
     public AsyncRelayCommand ToggleUnmatchedBolCommand { get; }
+    public AsyncRelayCommand<DriverRowViewModel> OpenDriverCommand { get; }
+    public AsyncRelayCommand<DriverRowViewModel> OpenDriverMissingBolCommand { get; }
+    public AsyncRelayCommand<DriverRowViewModel> OpenDriverWorkCommand { get; }
+    public AsyncRelayCommand<DriverAttentionItemViewModel> OpenAttentionItemCommand { get; }
+    public AsyncRelayCommand OpenNewWorkCommand { get; }
+    public AsyncRelayCommand<WorkEntryItemViewModel> OpenActivityDetailCommand { get; }
 
     public DriverRowViewModel? SelectedDriver
     {
         get => _selectedDriver;
         set
         {
+            var previousCode = _selectedDriver?.DriverCode;
             if (SetProperty(ref _selectedDriver, value))
             {
                 RefreshCommandStates();
-                BeginSelectedDriverLoad(value);
+                if (!_suppressSelectionLoad &&
+                    !string.Equals(previousCode, value?.DriverCode, StringComparison.OrdinalIgnoreCase))
+                {
+                    BeginSelectedDriverLoad(value);
+                }
             }
         }
     }
+
+    public WorkspaceViewModel CurrentWorkspace
+    {
+        get => _currentWorkspace;
+        private set
+        {
+            if (SetProperty(ref _currentWorkspace, value))
+            {
+                OnPropertyChanged(nameof(CurrentRoute));
+                OnPropertyChanged(nameof(CanGoBack));
+                OnPropertyChanged(nameof(BackLabel));
+                OnPropertyChanged(nameof(BreadcrumbText));
+                OnPropertyChanged(nameof(IsHandoffView));
+                OnPropertyChanged(nameof(IsUnmatchedBolVisible));
+                RefreshCommandStates();
+            }
+        }
+    }
+
+    public WorkspaceRoute CurrentRoute => CurrentWorkspace.Route;
+    public bool CanGoBack => CurrentRoute != WorkspaceRoute.FleetQueue && _navigator.CanGoBack;
+    public string BackLabel => CurrentWorkspace.BackLabel;
+    public string BreadcrumbText => CurrentWorkspace.Breadcrumb;
+    public bool IsHandoffView => CurrentRoute == WorkspaceRoute.Handoff;
+    public bool IsUnmatchedBolVisible => CurrentRoute == WorkspaceRoute.UnmatchedBol;
+    public bool HasVisibleDrivers => Drivers.Count > 0;
+    public bool HasNoVisibleDrivers => !HasVisibleDrivers;
 
     public string SearchText
     {
@@ -203,28 +278,10 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
-    public bool IsHandoffView
-    {
-        get => _isHandoffView;
-        private set
-        {
-            if (SetProperty(ref _isHandoffView, value))
-            {
-                RefreshCommandStates();
-            }
-        }
-    }
-
     public bool HasUnmatchedBol => UnmatchedBolItems.Count > 0;
 
     public string UnmatchedBolButtonText =>
         $"Unmatched BOL: {UnmatchedBolItems.Count.ToString(CultureInfo.CurrentCulture)}";
-
-    public bool IsUnmatchedBolVisible
-    {
-        get => _isUnmatchedBolVisible;
-        private set => SetProperty(ref _isUnmatchedBolVisible, value);
-    }
 
     public async Task InitializeAsync()
     {
@@ -246,6 +303,8 @@ public sealed class MainViewModel : ObservableObject
             _threshold = await Task.Run(_repository.GetIdleThreshold);
             ThresholdText = _threshold.ToString("0.0", CultureInfo.CurrentCulture);
             await ReloadFleetAsync();
+            _navigator.Reset();
+            CurrentWorkspace = new FleetQueueWorkspaceViewModel();
         }
         catch (Exception exception)
         {
@@ -261,6 +320,28 @@ public sealed class MainViewModel : ObservableObject
         await UpdateReportsAsync(isLaunchUpdate: true);
     }
 
+    public async Task NavigateToDriverAsync(
+        string driverCode,
+        DriverWorkspaceFocus focus = DriverWorkspaceFocus.General)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(driverCode);
+        await NavigateToLocationAsync(
+            new WorkspaceLocation(WorkspaceRoute.DriverWorkspace, driverCode, null, focus),
+            addToHistory: true);
+    }
+
+    public async Task NavigateBackAsync()
+    {
+        if (CurrentRoute is WorkspaceRoute.Handoff or WorkspaceRoute.UnmatchedBol)
+        {
+            await BackToQueueAsync();
+            return;
+        }
+
+        var target = _navigator.Back();
+        await ShowLocationAsync(target);
+    }
+
     private async Task UpdateReportsAsync(bool isLaunchUpdate)
     {
         if (IsBusy)
@@ -268,7 +349,8 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        var preserveCode = SelectedDriver?.DriverCode;
+        var preserveLocation = _navigator.Current;
+        var preserveCode = preserveLocation.DriverCode ?? SelectedDriver?.DriverCode;
         try
         {
             IsBusy = true;
@@ -278,13 +360,14 @@ public sealed class MainViewModel : ObservableObject
 
             var result = await _updateService.UpdateAsync();
             await ReloadFleetAsync(preserveCode);
+            await RestoreLocationAsync(preserveLocation);
             StatusMessage = result.Message;
             AppLog.Write(result.Message);
         }
         catch (Exception exception)
         {
             AppLog.Write(exception, "Report update failed");
-            StatusMessage = $"Report update failed: {exception.Message}. The saved roster, Missing BOL state, and work history were left unchanged.";
+            StatusMessage = $"Report update failed: {exception.Message}. The saved roster, Missing BOL state, work history, and unsaved notes were left unchanged.";
         }
         finally
         {
@@ -307,6 +390,7 @@ public sealed class MainViewModel : ObservableObject
             _threshold = threshold;
             ThresholdText = threshold.ToString("0.0", CultureInfo.CurrentCulture);
             RebuildVisibleRows(SelectedDriver?.DriverCode);
+            await RestoreLocationAsync(_navigator.Current);
             StatusMessage = $"Idle threshold changed to {threshold.ToString("0.0", CultureInfo.CurrentCulture)}%.";
         }
         catch (Exception exception)
@@ -329,6 +413,7 @@ public sealed class MainViewModel : ObservableObject
         }
 
         var currentCode = selected.DriverCode;
+        var preserveLocation = _navigator.Current;
         try
         {
             IsBusy = true;
@@ -339,11 +424,7 @@ public sealed class MainViewModel : ObservableObject
                 _threshold));
             ContactNote = string.Empty;
             await ReloadFleetAsync(currentCode);
-            var advanced = SelectNextNeedingAttention(currentCode, showEmptyStatus: false);
-            if (!advanced)
-            {
-                await Work.RefreshAsync();
-            }
+            await RestoreLocationAsync(preserveLocation);
 
             var outcomeText = outcome switch
             {
@@ -368,7 +449,15 @@ public sealed class MainViewModel : ObservableObject
     private async Task NextNeedingAttentionAsync()
     {
         await Task.Yield();
-        _ = SelectNextNeedingAttention(SelectedDriver?.DriverCode, showEmptyStatus: true);
+        var moved = SelectNextNeedingAttention(SelectedDriver?.DriverCode, showEmptyStatus: true);
+        if (moved && CurrentRoute != WorkspaceRoute.FleetQueue && SelectedDriver is not null)
+        {
+            _navigator.Reset();
+            _navigator.Navigate(new WorkspaceLocation(
+                WorkspaceRoute.DriverWorkspace,
+                SelectedDriver.DriverCode));
+            await ShowLocationAsync(_navigator.Current);
+        }
     }
 
     private bool SelectNextNeedingAttention(string? currentCode, bool showEmptyStatus)
@@ -416,34 +505,166 @@ public sealed class MainViewModel : ObservableObject
         return true;
     }
 
+    private async Task NextWorkItemAsync()
+    {
+        var driver = SelectedDriver;
+        if (driver is null)
+        {
+            return;
+        }
+
+        var items = BuildAttentionItems(driver);
+        var currentKey = CurrentWorkspace switch
+        {
+            IdleTaskWorkspaceViewModel => $"idle:{driver.DriverCode}",
+            MissingBolTaskWorkspaceViewModel bol => $"bol:{bol.Item.Record.Id}",
+            WorkItemTaskWorkspaceViewModel work => $"work:{work.Item.Record.Id}",
+            _ => null
+        };
+        DriverAttentionItemViewModel? next;
+        if (currentKey is null)
+        {
+            next = items.FirstOrDefault();
+        }
+        else
+        {
+            var index = items.ToList().FindIndex(item => item.Key == currentKey);
+            next = index >= 0 && index + 1 < items.Count ? items[index + 1] : null;
+        }
+
+        if (next is not null)
+        {
+            await OpenAttentionItemAsync(
+                next,
+                addToHistory: CurrentRoute == WorkspaceRoute.DriverWorkspace);
+            return;
+        }
+
+        var moved = SelectNextNeedingAttention(driver.DriverCode, showEmptyStatus: true);
+        if (!moved || SelectedDriver is null)
+        {
+            return;
+        }
+
+        _navigator.Reset();
+        _navigator.Navigate(new WorkspaceLocation(
+            WorkspaceRoute.DriverWorkspace,
+            SelectedDriver.DriverCode));
+        await ShowLocationAsync(_navigator.Current);
+    }
+
     private async Task OpenHandoffAsync()
     {
-        IsUnmatchedBolVisible = false;
-        IsHandoffView = true;
+        await NavigateToLocationAsync(new WorkspaceLocation(WorkspaceRoute.Handoff), addToHistory: true);
         await Handoff.OpenAsync();
     }
 
-    private Task BackToQueueAsync()
+    private async Task BackToQueueAsync()
     {
-        IsHandoffView = false;
-        StatusMessage = "Returned to the driver work queue.";
-        return Task.CompletedTask;
+        _navigator.Reset();
+        CurrentWorkspace = new FleetQueueWorkspaceViewModel();
+        StatusMessage = "Returned to the fleet queue.";
+        await Task.CompletedTask;
     }
 
-    private Task ToggleUnmatchedBolAsync()
+    private Task OpenUnmatchedBolAsync() =>
+        NavigateToLocationAsync(new WorkspaceLocation(WorkspaceRoute.UnmatchedBol), addToHistory: true);
+
+    private async Task ToggleUnmatchedBolAsync()
     {
-        IsUnmatchedBolVisible = !IsUnmatchedBolVisible;
-        StatusMessage = IsUnmatchedBolVisible
-            ? "Showing unmatched Missing BOL items. They remain read-only until an exact Driver Code exists in WAA."
-            : "Unmatched Missing BOL list hidden.";
-        return Task.CompletedTask;
+        if (CurrentRoute == WorkspaceRoute.UnmatchedBol)
+        {
+            await BackToQueueAsync();
+        }
+        else
+        {
+            await OpenUnmatchedBolAsync();
+        }
     }
 
-    private async Task OnWorkChangedAsync(string driverCode) =>
-        await ReloadFleetAsync(driverCode);
+    private Task OpenNewWorkAsync()
+    {
+        var driver = SelectedDriver;
+        return driver is null
+            ? Task.CompletedTask
+            : NavigateToLocationAsync(
+                new WorkspaceLocation(WorkspaceRoute.NewWork, driver.DriverCode),
+                addToHistory: true);
+    }
 
-    private async Task OnMissingBolChangedAsync(string driverCode) =>
+    private Task OpenActivityDetailAsync(WorkEntryItemViewModel item)
+    {
+        var driver = SelectedDriver;
+        return driver is null
+            ? Task.CompletedTask
+            : NavigateToLocationAsync(
+                new WorkspaceLocation(
+                    WorkspaceRoute.ActivityDetail,
+                    driver.DriverCode,
+                    item.Record.Id),
+                addToHistory: true);
+    }
+
+    private async Task OpenAttentionItemAsync(
+        DriverAttentionItemViewModel item,
+        bool addToHistory)
+    {
+        var driver = SelectedDriver;
+        if (driver is null)
+        {
+            return;
+        }
+
+        var location = item.Kind switch
+        {
+            DriverAttentionKind.Idle => new WorkspaceLocation(
+                WorkspaceRoute.IdleTask,
+                driver.DriverCode),
+            DriverAttentionKind.MissingBol when item.MissingBolItem is not null => new WorkspaceLocation(
+                WorkspaceRoute.MissingBolTask,
+                driver.DriverCode,
+                item.MissingBolItem.Record.Id),
+            DriverAttentionKind.ManualWork when item.WorkItem is not null => new WorkspaceLocation(
+                WorkspaceRoute.WorkItemTask,
+                driver.DriverCode,
+                item.WorkItem.Record.Id),
+            _ => null
+        };
+
+        if (location is not null)
+        {
+            await NavigateToLocationAsync(location, addToHistory);
+        }
+    }
+
+    private async Task OnWorkChangedAsync(string driverCode)
+    {
+        var preserveLocation = _navigator.Current;
         await ReloadFleetAsync(driverCode);
+        if (preserveLocation.Route == WorkspaceRoute.NewWork)
+        {
+            var parent = _navigator.Back();
+            if (parent.Route != WorkspaceRoute.DriverWorkspace ||
+                !string.Equals(parent.DriverCode, driverCode, StringComparison.OrdinalIgnoreCase))
+            {
+                _navigator.Replace(new WorkspaceLocation(
+                    WorkspaceRoute.DriverWorkspace,
+                    driverCode));
+            }
+
+            await ShowLocationAsync(_navigator.Current, Work.LastSavedWorkEntryId);
+            return;
+        }
+
+        await RestoreLocationAsync(preserveLocation);
+    }
+
+    private async Task OnMissingBolChangedAsync(string driverCode)
+    {
+        var preserveLocation = _navigator.Current;
+        await ReloadFleetAsync(driverCode);
+        await RestoreLocationAsync(preserveLocation);
+    }
 
     private async Task ReloadFleetAsync(string? preferredDriverCode = null)
     {
@@ -477,10 +698,6 @@ public sealed class MainViewModel : ObservableObject
 
         OnPropertyChanged(nameof(HasUnmatchedBol));
         OnPropertyChanged(nameof(UnmatchedBolButtonText));
-        if (!HasUnmatchedBol)
-        {
-            IsUnmatchedBolVisible = false;
-        }
 
         if (state.LastImportedUtc is null)
         {
@@ -495,6 +712,7 @@ public sealed class MainViewModel : ObservableObject
         }
 
         RebuildVisibleRows(preferredDriverCode);
+        await LoadSelectedDriverStateAsync(SelectedDriver);
     }
 
     private void RebuildVisibleRows(string? preferredDriverCode)
@@ -511,10 +729,18 @@ public sealed class MainViewModel : ObservableObject
             Drivers.Add(driver);
         }
 
-        SelectedDriver = previousCode is null
-            ? Drivers.FirstOrDefault()
-            : Drivers.FirstOrDefault(driver => driver.DriverCode.Equals(previousCode, StringComparison.OrdinalIgnoreCase))
-              ?? Drivers.FirstOrDefault();
+        _suppressSelectionLoad = true;
+        try
+        {
+            SelectedDriver = previousCode is null
+                ? Drivers.FirstOrDefault()
+                : Drivers.FirstOrDefault(driver => driver.DriverCode.Equals(previousCode, StringComparison.OrdinalIgnoreCase))
+                  ?? Drivers.FirstOrDefault();
+        }
+        finally
+        {
+            _suppressSelectionLoad = false;
+        }
 
         var allRows = _records.Select(CreateDriverRow).ToArray();
         var needContact = allRows.Count(driver => driver.NeedsIdleAttention);
@@ -528,6 +754,8 @@ public sealed class MainViewModel : ObservableObject
             $"{needContact.ToString(CultureInfo.CurrentCulture)} need  •  " +
             $"{spoken.ToString(CultureInfo.CurrentCulture)}/{aboveThreshold.ToString(CultureInfo.CurrentCulture)} spoken  •  " +
             $"{openWorkDrivers.ToString(CultureInfo.CurrentCulture)} with open work";
+        OnPropertyChanged(nameof(HasVisibleDrivers));
+        OnPropertyChanged(nameof(HasNoVisibleDrivers));
         RefreshCommandStates();
     }
 
@@ -552,18 +780,265 @@ public sealed class MainViewModel : ObservableObject
                driver.OrderSearchText.Contains(search, StringComparison.CurrentCultureIgnoreCase);
     }
 
+    private async Task NavigateToLocationAsync(
+        WorkspaceLocation location,
+        bool addToHistory)
+    {
+        if (location.DriverCode is not null)
+        {
+            var driver = FindDriver(location.DriverCode);
+            if (driver is not null)
+            {
+                _suppressSelectionLoad = true;
+                try
+                {
+                    SelectedDriver = driver;
+                }
+                finally
+                {
+                    _suppressSelectionLoad = false;
+                }
+
+                await LoadSelectedDriverStateAsync(driver);
+            }
+        }
+
+        _navigator.Navigate(location, addToHistory);
+        await ShowLocationAsync(location);
+    }
+
+    private async Task RestoreLocationAsync(WorkspaceLocation location)
+    {
+        _navigator.Replace(location);
+        if (location.DriverCode is not null)
+        {
+            var driver = FindDriver(location.DriverCode);
+            if (driver is not null)
+            {
+                _suppressSelectionLoad = true;
+                try
+                {
+                    SelectedDriver = driver;
+                }
+                finally
+                {
+                    _suppressSelectionLoad = false;
+                }
+
+                await LoadSelectedDriverStateAsync(driver);
+            }
+        }
+
+        await ShowLocationAsync(location);
+    }
+
+    private async Task ShowLocationAsync(
+        WorkspaceLocation location,
+        long? highlightedWorkEntryId = null)
+    {
+        CurrentWorkspace = await BuildWorkspaceAsync(location, highlightedWorkEntryId);
+    }
+
+    private async Task<WorkspaceViewModel> BuildWorkspaceAsync(
+        WorkspaceLocation location,
+        long? highlightedWorkEntryId)
+    {
+        if (location.Route == WorkspaceRoute.FleetQueue)
+        {
+            return new FleetQueueWorkspaceViewModel();
+        }
+
+        if (location.Route == WorkspaceRoute.Handoff)
+        {
+            return new HandoffWorkspaceViewModel();
+        }
+
+        if (location.Route == WorkspaceRoute.UnmatchedBol)
+        {
+            return new UnmatchedBolWorkspaceViewModel(UnmatchedBolItems.ToArray());
+        }
+
+        var driver = location.DriverCode is null ? null : FindDriver(location.DriverCode);
+        if (driver is null)
+        {
+            return new UnavailableWorkspaceViewModel(
+                "Workspace unavailable",
+                "Fleet > Unavailable",
+                "This driver is no longer available in the current fleet. Return to the fleet queue and choose another driver.",
+                "Back to Fleet");
+        }
+
+        return location.Route switch
+        {
+            WorkspaceRoute.DriverWorkspace => new DriverWorkspaceViewModel(
+                driver,
+                BuildAttentionItems(driver),
+                Work.TodayEntries.ToArray(),
+                location.Focus,
+                highlightedWorkEntryId),
+            WorkspaceRoute.IdleTask => new IdleTaskWorkspaceViewModel(driver),
+            WorkspaceRoute.MissingBolTask => await BuildMissingBolTaskWorkspaceAsync(driver, location.ItemId),
+            WorkspaceRoute.WorkItemTask => BuildWorkItemTaskWorkspace(driver, location.ItemId),
+            WorkspaceRoute.NewWork => new NewWorkWorkspaceViewModel(driver),
+            WorkspaceRoute.ActivityDetail => BuildActivityDetailWorkspace(driver, location.ItemId),
+            _ => new UnavailableWorkspaceViewModel(
+                "Workspace unavailable",
+                $"Fleet > {driver.DriverName} > Unavailable",
+                "This work item is no longer available. Return to the driver or fleet queue.",
+                "Back to Driver")
+        };
+    }
+
+    private IReadOnlyList<DriverAttentionItemViewModel> BuildAttentionItems(DriverRowViewModel driver)
+    {
+        var items = new List<DriverAttentionItemViewModel>();
+        var linkedIdle = Work.OpenEntries.FirstOrDefault(item =>
+            item.Record.Source == WorkEntrySource.IdleContact);
+        if (driver.NeedsIdleAttention || linkedIdle is not null)
+        {
+            items.Add(new DriverAttentionItemViewModel(
+                DriverAttentionKind.Idle,
+                $"idle:{driver.DriverCode}",
+                "IDLE",
+                $"{driver.Idle28Display} 28D / {driver.Idle7Display} 7D",
+                driver.ContactDisplay,
+                $"Threshold {driver.Threshold.ToString("0.0", CultureInfo.CurrentCulture)}%  •  Unit {driver.UnitCode}  •  Leader {driver.DriverLeader}",
+                driver.Record.ReportCycleDate.ToString("M/d/yyyy", CultureInfo.CurrentCulture),
+                driver.Record.LatestOutcome == IdleContactOutcome.SpokeFollowUp
+                    ? SemanticState.FollowUp
+                    : SemanticState.Warning,
+                linkedIdle));
+        }
+
+        if (MissingBol is not null)
+        {
+            foreach (var bol in MissingBol.Items.Where(item => !item.IsResolved))
+            {
+                items.Add(new DriverAttentionItemViewModel(
+                    DriverAttentionKind.MissingBol,
+                    $"bol:{bol.Record.Id}",
+                    "MISSING BOL",
+                    $"Order {bol.OrderNumber}",
+                    bol.StatusDisplay,
+                    $"Empty call {bol.EmptyCallDateDisplay}  •  {bol.RouteDisplay}",
+                    bol.EmptyCallDateDisplay,
+                    bol.SemanticState,
+                    missingBolItem: bol));
+            }
+        }
+
+        foreach (var work in Work.OpenEntries
+                     .Where(item => item.Record.Source == WorkEntrySource.Manual)
+                     .OrderBy(item => item.Record.Status == WorkEntryStatus.FollowUp ? 0 : 1)
+                     .ThenBy(item => item.Record.CreatedUtc)
+                     .ThenBy(item => item.Record.Id))
+        {
+            items.Add(new DriverAttentionItemViewModel(
+                DriverAttentionKind.ManualWork,
+                $"work:{work.Record.Id}",
+                work.StatusDisplay.ToUpperInvariant(),
+                Truncate(work.Text, 90),
+                work.StatusDisplay,
+                $"Open since {work.CreatedDisplay}  •  Unit {work.UnitCodeDisplay}",
+                work.CreatedDisplay,
+                work.SemanticState,
+                work));
+        }
+
+        return items;
+    }
+
+    private async Task<WorkspaceViewModel> BuildMissingBolTaskWorkspaceAsync(
+        DriverRowViewModel driver,
+        long? itemId)
+    {
+        if (itemId is null || MissingBol is null || _missingBolRepository is null)
+        {
+            return MissingTaskUnavailable(driver);
+        }
+
+        var item = MissingBol.FindItem(itemId.Value);
+        if (item is null)
+        {
+            return MissingTaskUnavailable(driver);
+        }
+
+        var history = await Task.Run(() => _missingBolRepository.LoadActionHistory(itemId.Value));
+        return new MissingBolTaskWorkspaceViewModel(
+            driver,
+            item,
+            history.Select(record => new MissingBolActionHistoryItemViewModel(record)).ToArray());
+    }
+
+    private WorkspaceViewModel BuildWorkItemTaskWorkspace(
+        DriverRowViewModel driver,
+        long? itemId)
+    {
+        var item = FindLoadedWorkItem(itemId);
+        return item is null
+            ? WorkTaskUnavailable(driver)
+            : new WorkItemTaskWorkspaceViewModel(driver, item);
+    }
+
+    private WorkspaceViewModel BuildActivityDetailWorkspace(
+        DriverRowViewModel driver,
+        long? itemId)
+    {
+        var item = Work.TodayEntries.FirstOrDefault(entry => entry.Record.Id == itemId);
+        return item is null
+            ? new UnavailableWorkspaceViewModel(
+                "Activity unavailable",
+                $"Fleet > {driver.DriverName} > Activity unavailable",
+                "This activity is no longer in the current local-day view. Return to the driver workspace.",
+                "Back to Driver")
+            : new ActivityDetailWorkspaceViewModel(driver, item);
+    }
+
+    private WorkEntryItemViewModel? FindLoadedWorkItem(long? itemId)
+    {
+        if (itemId is null)
+        {
+            return null;
+        }
+
+        return Work.OpenEntries.Concat(Work.TodayEntries)
+            .FirstOrDefault(item => item.Record.Id == itemId.Value);
+    }
+
+    private DriverRowViewModel? FindDriver(string driverCode) =>
+        Drivers.FirstOrDefault(driver =>
+            driver.DriverCode.Equals(driverCode, StringComparison.OrdinalIgnoreCase))
+        ?? _records
+            .Where(record => record.DriverCode.Equals(driverCode, StringComparison.OrdinalIgnoreCase))
+            .Select(CreateDriverRow)
+            .FirstOrDefault();
+
+    private async Task LoadSelectedDriverStateAsync(DriverRowViewModel? selectedDriver)
+    {
+        var workTask = Work.SetDriverAsync(selectedDriver?.Record);
+        if (MissingBol is null)
+        {
+            await workTask;
+            return;
+        }
+
+        await Task.WhenAll(
+            workTask,
+            MissingBol.SetDriverAsync(selectedDriver?.Record));
+    }
+
     private bool CanRecordContact() =>
         !IsBusy &&
         !Work.IsBusy &&
         MissingBol?.IsBusy != true &&
-        !IsHandoffView &&
+        CurrentRoute != WorkspaceRoute.Handoff &&
         SelectedDriver is not null;
 
     private bool CanMoveNext() =>
         !IsBusy &&
         !Work.IsBusy &&
         MissingBol?.IsBusy != true &&
-        !IsHandoffView &&
+        CurrentRoute != WorkspaceRoute.Handoff &&
         SelectedDriver is not null;
 
     private void RefreshCommandStates()
@@ -574,9 +1049,18 @@ public sealed class MainViewModel : ObservableObject
         AttemptedCommand.RaiseCanExecuteChanged();
         FollowUpCommand.RaiseCanExecuteChanged();
         NextNeedingAttentionCommand.RaiseCanExecuteChanged();
+        NextWorkItemCommand.RaiseCanExecuteChanged();
         OpenHandoffCommand.RaiseCanExecuteChanged();
         BackToQueueCommand.RaiseCanExecuteChanged();
+        BackCommand.RaiseCanExecuteChanged();
+        OpenUnmatchedBolCommand.RaiseCanExecuteChanged();
         ToggleUnmatchedBolCommand.RaiseCanExecuteChanged();
+        OpenDriverCommand.RaiseCanExecuteChanged();
+        OpenDriverMissingBolCommand.RaiseCanExecuteChanged();
+        OpenDriverWorkCommand.RaiseCanExecuteChanged();
+        OpenAttentionItemCommand.RaiseCanExecuteChanged();
+        OpenNewWorkCommand.RaiseCanExecuteChanged();
+        OpenActivityDetailCommand.RaiseCanExecuteChanged();
     }
 
     private void OnWorkPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -599,16 +1083,7 @@ public sealed class MainViewModel : ObservableObject
     {
         try
         {
-            var workTask = Work.SetDriverAsync(selectedDriver?.Record);
-            if (MissingBol is null)
-            {
-                await workTask;
-                return;
-            }
-
-            await Task.WhenAll(
-                workTask,
-                MissingBol.SetDriverAsync(selectedDriver?.Record));
+            await LoadSelectedDriverStateAsync(selectedDriver);
         }
         catch (Exception exception)
         {
@@ -616,6 +1091,20 @@ public sealed class MainViewModel : ObservableObject
             StatusMessage = $"Selected driver work could not be loaded: {exception.Message}";
         }
     }
+
+    private static WorkspaceViewModel MissingTaskUnavailable(DriverRowViewModel driver) =>
+        new UnavailableWorkspaceViewModel(
+            "Missing BOL unavailable",
+            $"Fleet > {driver.DriverName} > Missing BOL unavailable",
+            "This Missing BOL item is no longer available for this driver. Return to the driver workspace.",
+            "Back to Driver");
+
+    private static WorkspaceViewModel WorkTaskUnavailable(DriverRowViewModel driver) =>
+        new UnavailableWorkspaceViewModel(
+            "Work item unavailable",
+            $"Fleet > {driver.DriverName} > Work item unavailable",
+            "This work item is no longer available in the current driver view. Return to the driver workspace.",
+            "Back to Driver");
 
     private static MissingBolFleetState EmptyMissingBolFleetState() =>
         new(
@@ -634,4 +1123,7 @@ public sealed class MainViewModel : ObservableObject
             : $"{value.Value.ToString("0.0", CultureInfo.CurrentCulture)}%";
         return $"{percentage} ({included.ToString(CultureInfo.CurrentCulture)}/{total.ToString(CultureInfo.CurrentCulture)})";
     }
+
+    private static string Truncate(string value, int length) =>
+        value.Length <= length ? value : $"{value[..(length - 1)]}…";
 }
