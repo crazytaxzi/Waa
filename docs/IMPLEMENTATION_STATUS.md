@@ -2,15 +2,15 @@
 
 ## Current bounded release
 
-**WAA v0.4.3 — Fleet Queue Density + Stream Theme Refresh release candidate.**
+**WAA v0.4.4 — Driver Leader-Grouped Handoff + Dark Shell Fix, PR-tree Windows-validated.**
 
-This release is presentation-only. It changes Fleet Queue density/content presentation and refreshes the centralized Light/Dark palette. It does not change the database schema, report parsing, queue priority rules, work/BOL transactions, Handoff generation rules, route identity, or `%LOCALAPPDATA%\WAA` compatibility.
+This release is presentation-only. It changes Handoff grouping and closes an exposed MainWindow dark-theme surface. It does not change the database schema, report parsing, queue priority rules, durable identity, work/BOL transactions, exact-code Missing BOL matching, route identity, or `%LOCALAPPDATA%\WAA` compatibility.
 
-Current release branch implementation commit: `61e3550d4d75978b6581c6f30370b34a4750a9c6` before documentation alignment.
+Current release branch head before this validation-record commit: `fcc424059b8dde339ced9f2c7b009d11f096347e`.
 
-PR-tree and merged-main Windows validation are required before the v0.4.3 portable artifact is delivered.
+PR #6 Windows validation: **Windows build, test, and portable package #70**, run ID `33346533222`, August 31, 2026 — **success**.
 
-Prior validated baseline: **WAA v0.4.2**, merged to `main`, workflow **#62**, run ID `33342993413`, August 30, 2026 — **191 passed, 0 failed, 0 skipped**.
+Final delivery still requires this validation-record commit to pass on PR #6, then the merged `main` commit to pass the same Windows workflow before its portable artifact is delivered.
 
 ## Runtime and deployment
 
@@ -21,180 +21,106 @@ Prior validated baseline: **WAA v0.4.2**, merged to `main`, workflow **#62**, ru
 - no installer/admin/SDK/separate .NET/Excel/Office requirement in published build
 - one local desktop process
 - SQLite/preferences under `%LOCALAPPDATA%\WAA`
-- GitHub Actions restores, builds/WPF-compiles, tests, publishes, and uploads artifact
+- GitHub Actions restores, WPF-compiles, tests, publishes, and uploads artifact
 
-## v0.4.3 Fleet Queue density
+## v0.4.4 Driver Leader-grouped Handoff
 
-The Fleet Queue remains the full-width primary workspace and keeps the same data/query/priority behavior.
+The compact Handoff remains editable and deterministic, but represented drivers are now separated by Driver Leader.
 
-Presentation changes:
+Narrative layout:
 
-- the dedicated `Open` column is removed
-- the entire DataGrid row remains the mouse click target for Driver Workspace
-- native Up/Down DataGrid navigation remains intact
-- `Enter` still opens the focused row
-- Driver / Unit renders Driver Name on line one
-- Driver / Unit line two is `DriverCode • Unit ######`
-- Leader remains visible only in the dedicated `Leader` column in Fleet Queue
-- the original richer `IdentityLine` remains available to Driver/task workspaces, so Leader context outside Fleet Queue is preserved
-- Fleet Queue uses compact centralized DataGrid row/cell styles with a 36-pixel minimum row height and reduced vertical cell padding
-- search/threshold/metric/shell spacing is tightened without reducing ordinary text contrast
-- row and column virtualization, recycling, and content scrolling remain enabled
+- the editable `No open ACE/ACI's` opening remains unchanged; WAA still does not model or validate ACE/ACI state
+- represented Driver Leader headings are emitted as `Driver Leader: <leader>`
+- leader headings sort alphabetically
+- drivers within each leader sort by Driver Name then Driver Code
+- each driver still emits at most one compact narrative line
+- current fleet Driver Leader is preferred when available
+- historical/off-roster work falls back to the saved `driver_leader_snapshot`
+- blank/`*` leaders are not treated as valid headings; `Unassigned` is used only when neither current nor historical leader is meaningful
+- Driver Leader grouping is presentation only and never changes durable Driver Code ownership or rewrites historical snapshots
 
-No old split pane, per-row Open button, alternate routing path, or non-virtualized queue was introduced.
+The dedicated `Missing BOLs:` section remains, and its represented drivers use the same Driver Leader grouping/precedence rules. Each driver still appears once with all unresolved matched Order # values grouped on one line. Empty Call Date, route, and local BOL status remain omitted from copied Handoff and available in the focused BOL workspace.
 
-## v0.4.3 stream theme
+Existing compact narrative rules remain intact: current Unit/Name preference, historical useful Unit fallback, idle metric-boilerplate omission with human note retention, MissingBolAction note preference, duplicate collapse, local-calendar-day behavior, edited-draft preservation, Regenerate replacement, and Copy isolation.
 
-Theme ownership remains centralized in `LightColors.xaml`, `DarkColors.xaml`, and `BaseStyles.xaml`.
+## v0.4.4 dark MainWindow shell correction
 
-Dark-mode visual intent:
+`MainWindow.Background` and the root client Grid now explicitly consume `WindowBackgroundBrush` through `DynamicResource`.
 
-- gunmetal app/panel/raised/header surfaces
-- neon purple for primary/highlight/focus/selection/breadcrumb/Handoff roles
-- neon green for positive/completed/`Next Needing Attention` roles
-- neutral light ordinary text
-- no glow, blur, gradient, animation, or decorative effects
+This closes the visible margin/client-shell gap where a Windows/default light background could remain visible while the rest of the application had switched to dark mode.
 
-Light mode retains the same semantic accent roles on light neutral surfaces. Both palettes contain identical required key sets.
+The correction:
 
-Specific UI application:
+- introduces no new literal or one-off color
+- keeps all shell background color ownership in the existing centralized Light/Dark palettes
+- updates live with theme switching
+- preserves the DWM title-bar helper
+- preserves persisted Light/Dark preference and rollback-on-save-failure behavior
+- adds regression coverage so the MainWindow/root surface cannot silently fall back to a static/default background
 
-- Main shell/header uses centralized header surface
-- Handoff remains purple primary
-- `Next Needing Attention` uses the green success style
-- `Update Reports` and appearance toggle remain neutral controls
-- breadcrumbs use the purple breadcrumb role
-- fleet row hover/selection/focus use centralized resources
-- task, Driver Workspace, Handoff, status/editor, DataGrid, and semantic states continue to inherit theme resources
+## Preserved v0.4.3 presentation behavior
 
-Recommended literal palette values were adapted only where necessary for tested contrast. In particular, boundary colors were raised from the suggested dark border value so actual panel/control edges remain at least 3:1, while the requested purple/green accents remain recognizable.
+The denser virtualized Fleet Queue and stream palette remain unchanged:
 
-## Central workspace
+- no dedicated `Open` column
+- full-row click and Enter open Driver Workspace
+- native Up/Down navigation remains
+- Driver / Unit shows Driver Name then `DriverCode • Unit ######`
+- Leader remains in the dedicated Fleet Queue Leader column
+- row/column virtualization, recycling, and content scrolling remain enabled
+- gunmetal dark surfaces with purple selection/focus/breadcrumb/Handoff roles
+- green completed/positive/`Next Needing Attention` roles
+- ordinary text remains neutral and contrast-safe
+- no glow, blur, gradient, decorative animation, or browser/multi-window path
 
-Current same-window routes:
+## Central workspace and business/data behavior
 
-- FleetQueue
-- DriverWorkspace
-- IdleTask
-- MissingBolTask
-- WorkItemTask
-- NewWork
-- ActivityDetail
-- Handoff
-- UnmatchedBol
-- Unavailable
+All existing same-window routes and state preservation remain unchanged. Driver route identity remains durable Driver Code; task routes use persisted item/work IDs. Back/breadcrumb behavior, search/selection persistence, New Work drafts, BOL notes, Handoff draft state, report refresh restoration, stale-route handling, and `Next Work Item` ordering remain the validated v0.4.x behavior.
 
-The old fleet + selected-driver split pane is removed. Driver route identity is durable Driver Code; task routes use persisted item/work IDs. Fleet row click/Enter opens Driver Workspace. Back/breadcrumbs preserve real session context. Alt+Left is safe outside text editors. Search, selected driver, New Work drafts, BOL notes, and edited Handoff survive in-session navigation. Report refresh restores valid routes by stable IDs and stale entities fail to explicit Unavailable state.
+Still preserved:
 
-Driver Workspace is a compact work index. Idle and linked idle work appear once. Each unresolved BOL appears once rather than duplicating MissingBolTask as manual work. Manual Waiting/Follow-up appears once. Focused task pages preserve existing business/transaction rules.
+- Rolling 7 Day import/normalization and weighted idle calculations
+- threshold persistence/reranking
+- idle actions + linked work
+- unresolved carry-forward and Resolve/Reopen
+- Missing BOL XLSX parsing/import
+- normalized exact Driver Code BOL matching and unmatched preservation
+- one linked MissingBolTask per matched unresolved item
+- BOL actions/task synchronization/action history/source lifecycle
+- report launch/manual update restrictions and no watcher/polling path
+- theme-safe ordinary/generated/editor/selected/disabled/semantic text
+- centralized palette/source audit and deterministic contrast tests
+- v0.4.1 Run.Text startup binding safety
+- v0.4.2 compact Handoff content rules
+- v0.4.3 Fleet Queue density and stream palette
 
-`Next Work Item` ordering remains:
-
-1. unfinished idle contact
-2. unresolved Missing BOL, oldest Empty Call Date first
-3. manual Follow-up
-4. manual Waiting
-5. other supported unresolved manual work
-
-Then existing visible/search-respecting `Next Needing Attention` is reused.
-
-## Theme-safe text and startup binding safety
-
-- Light/Dark literal colors are centralized in palette dictionaries
-- BaseStyles consumes theme roles dynamically
-- ordinary/generated DataGrid/editor/button/selected/disabled/semantic text is theme-aware
-- live switching does not reset route/session state
-- appearance preference persists locally off UI thread with visible rollback on failure
-- repository source audit blocks inappropriate fixed theme colors
-- deterministic contrast tests cover normal/semantic/selected/editor/hover/button/breadcrumb/focus cases
-- all data-bound inline WPF `Run.Text` uses explicit one-way display binding
-- repository regression test prevents the v0.4 startup binding failure from returning
-
-## v0.4.2 compact Handoff preserved
-
-Runtime generated Handoff remains the compact operational shape introduced in v0.4.2.
-
-Opening convention:
-
-`No open ACE/ACI's`
-
-Important limitation: WAA does **not** model or validate ACE/ACI state. The line is intentionally editable and must be changed by the user when untrue.
-
-Driver narrative:
-
-- at most one narrative line per driver
-- alphabetical Driver Name / Driver Code ordering
-- current fleet Unit Code and Driver Name preferred when available
-- unresolved non-BOL work + current-day activity can combine on one driver line
-- idle prose retains concise action + human note but omits generated 28D/7D metric boilerplate from copied Handoff
-- underlying idle metric snapshots remain saved/intact
-- MissingBolAction narrative prefers human note when present
-- WAA does not invent coached/not-coached state or any unstored fact
-
-Missing BOL section:
-
-- dedicated `Missing BOLs:` heading
-- each driver appears once
-- all unresolved matched Order # values are grouped on that line
-- singular/plural wording handled automatically
-- deterministic oldest Empty Call Date then Order # ordering
-- copied section omits Empty Call Date, route, and local status; full details remain in Missing BOL Task
-- no fuzzy/manual assignment or BOL state logic changed
-
-Edited draft isolation remains unchanged: navigating away/back preserves edit, Regenerate intentionally replaces it, Copy copies current edit, and no Handoff edit mutates saved work/BOL/idle/report/settings state.
+No permanent exclusion was changed.
 
 ## Database compatibility
 
-v0.4.3 requires **no database schema change** and does not increment schema version.
+v0.4.4 requires **no database schema change** and does not increment schema version.
 
-Existing `%LOCALAPPDATA%\WAA` remains compatible and preserves:
+Existing `%LOCALAPPDATA%\WAA` remains compatible and preserves roster/import metadata/observations, idle contacts, work entries, Missing BOL state/actions/work links, threshold, Light/Dark preference, and Handoff source history. Replacing the portable application folder leaves the data folder intact.
 
-- roster/import metadata/observations
-- idle contacts
-- work entries and linked idle work
-- Missing BOL imports/items/actions/work links
-- threshold
-- Light/Dark preference
-- Handoff source history
+## Branch validation
 
-Replacing the portable application folder leaves the data folder intact.
+PR #6 release tree, workflow **#70**, run ID `33346533222`:
 
-## Preserved business/data regression requirements
+- restore: passed
+- warnings-as-errors Release build: passed
+- WPF/XAML compilation: passed
+- Core tests: **24 passed**
+- App/SQLite/navigation/theme/Handoff/integration tests: **193 passed**
+- total: **217 passed, 0 failed, 0 skipped**
+- build: **0 warnings, 0 errors**
+- self-contained win-x64 publish: passed
+- portable artifact upload: passed
 
-The v0.4.3 workflow must preserve the existing coverage for:
+An earlier PR run correctly caught a Windows newline-sensitive assertion in the new shell regression test; the test was corrected to normalize CRLF/LF without changing production behavior. The full release tree above is green.
 
-- Rolling 7 Day import/normalization
-- weighted 7-day and complete-coverage 28-day calculations
-- threshold persistence/reranking
-- idle actions + linked work
-- unresolved carry-forward
-- Resolve/Reopen
-- Missing BOL parsing/import
-- exact-code BOL matching and unmatched preservation
-- BOL actions/task synchronization/action history/source lifecycle
-- report launch/manual update restrictions
-- ten-character Driver Leader support
-- no watcher/polling path
-- portable Windows publish
-- theme/source audit/contrast
-- central navigation/state/keyboard/stale-route behavior
-- v0.4.1 Run.Text startup binding safety
-- v0.4.2 compact Handoff behavior
+## Final validation gate
 
-No permanent exclusion is changed by v0.4.3.
-
-## Validation gate
-
-Before delivery, the v0.4.3 release must have:
-
-- PR Windows restore/build/WPF compilation success
-- all Core/App/integration/navigation/theme/source-audit tests passing
-- zero build warnings/errors under the existing warnings-as-errors configuration
-- self-contained win-x64 publish success
-- portable artifact upload success
-- PR merged to `main`
-- merged `main` Windows workflow success
-- final merged-main portable artifact downloaded and hashed
+Before delivery, this validation-record commit must pass the full PR Windows workflow. PR #6 must then merge normally to `main`, and the exact merged-main commit must pass restore/build/test/publish/artifact upload again. Only that merged-main portable artifact is delivered and hashed.
 
 ## Remaining limitations
 
@@ -207,7 +133,7 @@ Before delivery, the v0.4.3 release must have:
 - no OCR/image recognition/document storage/uploads/attachments
 - no BOL analytics/revenue dashboard
 - no escalation/routing/approval engine
-- Maintenance and DOT are unimplemented separate evaluations
+- Maintenance and DOT remain separate unimplemented evaluations
 - no destructive work-entry deletion
 - no full corrective idle-event editing/audit UI
 - no dedicated Driver Leader filter
