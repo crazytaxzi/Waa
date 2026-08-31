@@ -42,13 +42,16 @@ WAA is a clean, driver-centric Windows work application. Current `main`, this fi
 - Handoff is generated only from saved work using the PC local-calendar-day boundary.
 - Editing/copying the draft never mutates work, BOL, idle, reports, settings, or identity.
 - An edited draft survives in-session navigation; `Regenerate` intentionally replaces it from current saved records.
-- v0.4.2+ runtime Handoff is compact and driver-grouped, not the old three visible database-state sections.
+- v0.4.2+ runtime Handoff is compact, not the old three visible database-state sections.
 - The generated opening `No open ACE/ACI's` is an editable user-requested convention only. WAA does **not** model or validate ACE/ACI state; never claim otherwise.
-- Runtime narrative emits at most one line per driver, ordered by Driver Name then Driver Code.
+- v0.4.4+ runtime Handoff separates represented drivers under `Driver Leader: ...` headings. Leader headings sort alphabetically; drivers within a leader sort by Driver Name then Driver Code.
+- Runtime narrative emits at most one line per driver.
+- Prefer current fleet Driver Leader for Handoff grouping when available; useful saved `driver_leader_snapshot` is fallback; blank/`*` leader is not a real group and falls back to `Unassigned` only when no meaningful leader exists.
 - Prefer current fleet Unit Code and Driver Name in Handoff identity when available. Useful historical Unit snapshot is only fallback; never print blank or `*` as a unit.
+- Driver Leader grouping is presentation only and never changes durable Driver Code ownership or historical snapshots.
 - Idle narrative may omit generated 28D/7D metric boilerplate but must preserve underlying saved metrics/events and retain the human note.
 - MissingBolAction narrative prefers the human-entered note when present; do not invent coaching state or other facts not stored.
-- Runtime Handoff contains a dedicated `Missing BOLs:` section. Each driver appears once there with all unresolved matched BOL Order # values grouped on one line.
+- Runtime Handoff contains a dedicated `Missing BOLs:` section. Its represented drivers use the same Driver Leader grouping rule; each driver appears once there with all unresolved matched BOL Order # values grouped on one line.
 - The compact Missing BOL Handoff intentionally omits Empty Call Date, route, and local status; those details stay in the focused BOL workspace.
 - Do not reintroduce visible `NEEDS FOLLOW-UP`, `WAITING / PENDING`, or `COMPLETED TODAY` sections into the runtime draft unless explicitly requested. Underlying deterministic classification may remain for tests/compatibility.
 
@@ -80,6 +83,7 @@ WAA is a clean, driver-centric Windows work application. Current `main`, this fi
 - Literal theme colors belong only in dedicated Light/Dark palettes or an explicitly equivalent centralized implementation.
 - Light/Dark palettes must contain matching required keys.
 - Theme styles use `DynamicResource` so live switching does not require restart/navigation reset.
+- MainWindow and its root client surface explicitly consume `WindowBackgroundBrush` through `DynamicResource`; exposed shell/margin space must switch with the active palette.
 - Subtle/Disabled/Primary/Selected/Link/semantic/focus/editor colors are theme-aware.
 - v0.4.3 purple is the primary selection/focus/breadcrumb/Handoff highlight role; green is the positive/completed/Next Needing Attention role; ordinary text remains neutral.
 - No glow, blur, decorative animation, or one-off view color is part of the stream palette.
@@ -162,7 +166,7 @@ Unless explicitly reversed by the user, do not add or create placeholders for:
 
 ## Current product sequence
 
-Implemented through **WAA v0.4.3**:
+Implemented through **WAA v0.4.4**:
 
 1. Rolling 7 Day ingestion, durable roster identity, weighted metrics, threshold, prioritized virtualized fleet.
 2. Current-cycle idle accountability and deterministic queue ordering.
@@ -174,8 +178,9 @@ Implemented through **WAA v0.4.3**:
 8. v0.4.1 startup binding hotfix: all data-bound inline WPF Run text is explicit one-way display binding with regression protection.
 9. v0.4.2 compact Handoff: alphabetical one-line driver narratives plus grouped `Missing BOLs:` order lists.
 10. v0.4.3 presentation refinement: denser virtualized Fleet Queue, compact Driver Code/Unit identity without duplicate Leader text, full-row click/Enter preserved, and centralized gunmetal/neon-purple/neon-green contrast-safe stream palette.
+11. v0.4.4 presentation refinement: Driver Leader-separated Handoff narrative/Missing BOL groups with current-leader preference and historical fallback, plus explicit MainWindow/root-shell dynamic background binding for complete dark-mode coverage.
 
 Future work remains separate unless explicitly requested:
 
-11. Maintenance evaluation.
-12. DOT evaluation.
+12. Maintenance evaluation.
+13. DOT evaluation.
