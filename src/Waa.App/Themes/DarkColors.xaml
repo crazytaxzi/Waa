@@ -1,39 +1,45 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#14191D" />
-    <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#1C2328" />
-    <SolidColorBrush x:Key="PanelSubtleBackgroundBrush" Color="#252D33" />
-    <SolidColorBrush x:Key="BorderBrush" Color="#73818A" />
-    <SolidColorBrush x:Key="ControlBorderBrush" Color="#73818A" />
-    <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#20282E" />
-    <SolidColorBrush x:Key="ControlHoverBackgroundBrush" Color="#2B353C" />
-    <SolidColorBrush x:Key="ControlDisabledBackgroundBrush" Color="#2A3238" />
-    <SolidColorBrush x:Key="PrimaryBrush" Color="#216684" />
-    <SolidColorBrush x:Key="PrimaryHoverBrush" Color="#2A7899" />
-    <SolidColorBrush x:Key="TextBrush" Color="#F1F4F6" />
-    <SolidColorBrush x:Key="SubtleTextBrush" Color="#BAC4CB" />
-    <SolidColorBrush x:Key="DisabledTextBrush" Color="#A7B1B8" />
-    <SolidColorBrush x:Key="PrimaryButtonTextBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="LinkTextBrush" Color="#83CAFF" />
-    <SolidColorBrush x:Key="SelectionBrush" Color="#315A70" />
-    <SolidColorBrush x:Key="DataGridRowBrush" Color="#1C2328" />
-    <SolidColorBrush x:Key="DataGridAlternateRowBrush" Color="#20282E" />
-    <SolidColorBrush x:Key="DataGridHeaderBrush" Color="#2A333A" />
-    <SolidColorBrush x:Key="DataGridHeaderTextBrush" Color="#F1F4F6" />
-    <SolidColorBrush x:Key="DataGridGridLineBrush" Color="#73818A" />
-    <SolidColorBrush x:Key="SelectedRowBrush" Color="#315A70" />
-    <SolidColorBrush x:Key="SelectedRowTextBrush" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="WarningTextBrush" Color="#FF9B91" />
+    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#11161B" />
+    <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#1A232C" />
+    <SolidColorBrush x:Key="PanelSubtleBackgroundBrush" Color="#24303A" />
+    <SolidColorBrush x:Key="HeaderBackgroundBrush" Color="#202A33" />
+    <SolidColorBrush x:Key="BorderBrush" Color="#6F8494" />
+    <SolidColorBrush x:Key="ControlBorderBrush" Color="#6F8494" />
+    <SolidColorBrush x:Key="ControlBackgroundBrush" Color="#202A33" />
+    <SolidColorBrush x:Key="ControlHoverBackgroundBrush" Color="#2D1F3A" />
+    <SolidColorBrush x:Key="ControlDisabledBackgroundBrush" Color="#2A333B" />
+    <SolidColorBrush x:Key="PrimaryBrush" Color="#B14DFF" />
+    <SolidColorBrush x:Key="PrimaryHoverBrush" Color="#C779FF" />
+    <SolidColorBrush x:Key="PrimaryButtonTextBrush" Color="#11161B" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="#39FF6A" />
+    <SolidColorBrush x:Key="SuccessHoverBrush" Color="#63FF8A" />
+    <SolidColorBrush x:Key="SuccessButtonTextBrush" Color="#11161B" />
+    <SolidColorBrush x:Key="TextBrush" Color="#F2F7FB" />
+    <SolidColorBrush x:Key="SubtleTextBrush" Color="#B8C7D3" />
+    <SolidColorBrush x:Key="DisabledTextBrush" Color="#A8B6C1" />
+    <SolidColorBrush x:Key="LinkTextBrush" Color="#C779FF" />
+    <SolidColorBrush x:Key="BreadcrumbTextBrush" Color="#C779FF" />
+    <SolidColorBrush x:Key="SelectionBrush" Color="#5A2E78" />
+    <SolidColorBrush x:Key="DataGridRowBrush" Color="#1A232C" />
+    <SolidColorBrush x:Key="DataGridAlternateRowBrush" Color="#202A33" />
+    <SolidColorBrush x:Key="DataGridHeaderBrush" Color="#202A33" />
+    <SolidColorBrush x:Key="DataGridHeaderTextBrush" Color="#F2F7FB" />
+    <SolidColorBrush x:Key="DataGridGridLineBrush" Color="#6F8494" />
+    <SolidColorBrush x:Key="DataGridHoverRowBrush" Color="#2D1F3A" />
+    <SolidColorBrush x:Key="SelectedRowBrush" Color="#2D1F3A" />
+    <SolidColorBrush x:Key="SelectedRowTextBrush" Color="#F2F7FB" />
+    <SolidColorBrush x:Key="WarningTextBrush" Color="#FFAAA1" />
     <SolidColorBrush x:Key="WarningBackgroundBrush" Color="#3A2728" />
     <SolidColorBrush x:Key="FollowUpTextBrush" Color="#FFD36A" />
     <SolidColorBrush x:Key="FollowUpBackgroundBrush" Color="#3A3220" />
-    <SolidColorBrush x:Key="CompletedTextBrush" Color="#82D89B" />
-    <SolidColorBrush x:Key="CompletedBackgroundBrush" Color="#20372A" />
-    <SolidColorBrush x:Key="QuietTextBrush" Color="#BAC4CB" />
-    <SolidColorBrush x:Key="QuietBackgroundBrush" Color="#293137" />
-    <SolidColorBrush x:Key="ErrorTextBrush" Color="#FF9B91" />
+    <SolidColorBrush x:Key="CompletedTextBrush" Color="#39FF6A" />
+    <SolidColorBrush x:Key="CompletedBackgroundBrush" Color="#1E3327" />
+    <SolidColorBrush x:Key="QuietTextBrush" Color="#8FA1AF" />
+    <SolidColorBrush x:Key="QuietBackgroundBrush" Color="#24303A" />
+    <SolidColorBrush x:Key="ErrorTextBrush" Color="#FFAAA1" />
     <SolidColorBrush x:Key="ErrorBackgroundBrush" Color="#3A2728" />
-    <SolidColorBrush x:Key="InformationTextBrush" Color="#83CAFF" />
-    <SolidColorBrush x:Key="InformationBackgroundBrush" Color="#203442" />
-    <SolidColorBrush x:Key="FocusBorderBrush" Color="#83CAFF" />
+    <SolidColorBrush x:Key="InformationTextBrush" Color="#C779FF" />
+    <SolidColorBrush x:Key="InformationBackgroundBrush" Color="#2D1F3A" />
+    <SolidColorBrush x:Key="FocusBorderBrush" Color="#B14DFF" />
 </ResourceDictionary>

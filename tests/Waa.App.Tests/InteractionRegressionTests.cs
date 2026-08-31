@@ -19,6 +19,56 @@ public sealed class InteractionRegressionTests
         Assert.Contains("PreviewKeyDown=\"OnFleetGridPreviewKeyDown\"", xaml, StringComparison.Ordinal);
         Assert.Contains("e.Key != Key.Enter", codeBehind, StringComparison.Ordinal);
         Assert.Contains("OpenDriverCommand", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("Key.Up", codeBehind, StringComparison.Ordinal);
+        Assert.DoesNotContain("Key.Down", codeBehind, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FleetQueue_RemovesDedicatedOpenColumnAndLeaderDuplication()
+    {
+        var xaml = ReadAppFile("Views", "FleetQueueView.xaml");
+        var rowViewModel = ReadAppFile("ViewModels", "DriverRowViewModel.cs");
+
+        Assert.DoesNotContain("Header=\"Open\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Open  ›", xaml, StringComparison.Ordinal);
+        Assert.Contains("<DataGridTemplateColumn Header=\"Driver / Unit\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding DriverName}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding FleetIdentityLine}\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Text=\"{Binding IdentityLine}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("FleetIdentityLine => $\"{DriverCode} • Unit {UnitCode}\"", rowViewModel, StringComparison.Ordinal);
+        Assert.Contains("IdentityLine => $\"{DriverCode}  •  Unit {UnitCode}  •  Leader {DriverLeader}\"", rowViewModel, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FleetQueue_UsesCompactStylesAndPreservesVirtualization()
+    {
+        var xaml = ReadAppFile("Views", "FleetQueueView.xaml");
+        var styles = ReadAppFile("Themes", "BaseStyles.xaml");
+
+        Assert.Contains("EnableRowVirtualization=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("EnableColumnVirtualization=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("VirtualizingPanel.IsVirtualizing=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("VirtualizingPanel.VirtualizationMode=\"Recycling\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("ScrollViewer.CanContentScroll=\"True\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("RowStyle=\"{StaticResource CompactFleetDataGridRowStyle}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("CellStyle=\"{StaticResource CompactFleetDataGridCellStyle}\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"CompactFleetDataGridRowStyle\"", styles, StringComparison.Ordinal);
+        Assert.Contains("x:Key=\"CompactFleetDataGridCellStyle\"", styles, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"MinHeight\" Value=\"36\" />", styles, StringComparison.Ordinal);
+        Assert.Contains("<Setter Property=\"Padding\" Value=\"8,2\" />", styles, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StreamAccentActions_UseSemanticThemeStyles()
+    {
+        var shell = ReadAppFile("MainWindow.xaml");
+        var fleet = ReadAppFile("Views", "FleetQueueView.xaml");
+
+        Assert.Contains("Content=\"Handoff\"", shell, StringComparison.Ordinal);
+        Assert.Contains("Style=\"{StaticResource PrimaryButtonStyle}\"", shell, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Next Needing Attention\"", fleet, StringComparison.Ordinal);
+        Assert.Contains("Style=\"{StaticResource SuccessButtonStyle}\"", fleet, StringComparison.Ordinal);
+        Assert.Contains("Style=\"{StaticResource BreadcrumbTextStyle}\"", shell, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -47,7 +97,7 @@ public sealed class InteractionRegressionTests
     }
 
     [Fact]
-    public void PrimaryButtonHover_IsNotOverriddenInsideBaseControlTemplate()
+    public void AccentButtonHover_IsNotOverriddenInsideBaseControlTemplate()
     {
         var styles = ReadAppFile("Themes", "BaseStyles.xaml");
 
@@ -58,6 +108,7 @@ public sealed class InteractionRegressionTests
         Assert.Contains("<Style.Triggers>", styles, StringComparison.Ordinal);
         Assert.Contains("Property=\"Background\" Value=\"{DynamicResource ControlHoverBackgroundBrush}\"", styles, StringComparison.Ordinal);
         Assert.Contains("Property=\"Background\" Value=\"{DynamicResource PrimaryHoverBrush}\"", styles, StringComparison.Ordinal);
+        Assert.Contains("Property=\"Background\" Value=\"{DynamicResource SuccessHoverBrush}\"", styles, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -65,6 +116,10 @@ public sealed class InteractionRegressionTests
     [InlineData("DarkColors.xaml", "TextBrush", "ControlHoverBackgroundBrush", 4.5d)]
     [InlineData("LightColors.xaml", "PrimaryButtonTextBrush", "PrimaryHoverBrush", 4.5d)]
     [InlineData("DarkColors.xaml", "PrimaryButtonTextBrush", "PrimaryHoverBrush", 4.5d)]
+    [InlineData("LightColors.xaml", "SuccessButtonTextBrush", "SuccessHoverBrush", 4.5d)]
+    [InlineData("DarkColors.xaml", "SuccessButtonTextBrush", "SuccessHoverBrush", 4.5d)]
+    [InlineData("LightColors.xaml", "SelectedRowTextBrush", "DataGridHoverRowBrush", 4.5d)]
+    [InlineData("DarkColors.xaml", "SelectedRowTextBrush", "DataGridHoverRowBrush", 4.5d)]
     public void HoverTextContrast_MeetsNormalTextRequirement(
         string paletteFile,
         string foregroundKey,
