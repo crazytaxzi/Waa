@@ -7,9 +7,11 @@
         Height="820"
         MinWidth="980"
         MinHeight="650"
+        Background="{DynamicResource WindowBackgroundBrush}"
         WindowStartupLocation="CenterScreen"
         PreviewKeyDown="OnPreviewKeyDown">
-    <Grid Margin="12">
+    <Grid Margin="12"
+          Background="{DynamicResource WindowBackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />

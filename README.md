@@ -4,9 +4,9 @@ WAA is a local, portable Windows application for working through a driver fleet,
 
 The application is driver-centric: **Driver Code** is durable identity. **Driver Name** is display identity. Unit Code and Driver Leader are operational/historical context and never define driver identity.
 
-## Current release line: v0.4.3
+## Current release line: v0.4.4
 
-v0.4 introduced the centralized one-window workspace and theme-safe text. v0.4.1 fixed the WPF inline `Run.Text` startup-binding issue. v0.4.2 changed generated Handoff presentation to a compact driver-grouped format. v0.4.3 is a presentation-only refinement: a denser Fleet Queue and a centralized gunmetal/neon-purple/neon-green stream palette. It does not change the database schema or validated report/work/BOL business rules.
+v0.4 introduced the centralized one-window workspace and theme-safe text. v0.4.1 fixed the WPF inline `Run.Text` startup-binding issue. v0.4.2 changed generated Handoff presentation to a compact driver-grouped format. v0.4.3 tightened Fleet Queue density and introduced the centralized gunmetal/neon-purple/neon-green stream palette. v0.4.4 is another presentation-only refinement: Handoff drivers are separated under Driver Leader headings, and the complete MainWindow client background now explicitly follows the active Light/Dark palette. It does not change the database schema or validated report/work/BOL business rules.
 
 Current UI/workflow highlights:
 
@@ -22,10 +22,12 @@ Current UI/workflow highlights:
 - safe `Alt+Left` Back outside text-editing controls
 - `Next Work Item` uses one deterministic within-driver order, then existing `Next Needing Attention`
 - Handoff and Unmatched Missing BOL are full-width same-window workspaces
+- Handoff narrative and Missing BOL drivers are separated under Driver Leader headings
 - edited Handoff text, New Work drafts, BOL notes, queue search, and selection survive in-session navigation
 - report updates rebuild valid routes by stable IDs and fail gracefully when an entity disappears
 - centralized Light/Dark palettes and automatic theme-safe ordinary/generated text
-- v0.4.3 dark mode uses gunmetal surfaces with restrained neon purple and neon green semantic accents
+- dark mode uses gunmetal surfaces with restrained neon purple and neon green semantic accents
+- MainWindow and its root client surface explicitly follow the active `WindowBackgroundBrush`
 - deterministic source-audit and contrast tests block inappropriate fixed UI colors
 
 The old giant selected-driver split pane is removed rather than retained in parallel.
@@ -82,7 +84,7 @@ Driver-owned navigation is keyed by durable Driver Code, never Unit Code or Driv
 
 See [`docs/CENTRAL_WORKSPACE.md`](docs/CENTRAL_WORKSPACE.md).
 
-## Compact Handoff in v0.4.2+
+## Compact Driver Leader-grouped Handoff in v0.4.4
 
 The generated Handoff is intentionally an operational turnover note rather than a verbose database report.
 
@@ -92,7 +94,13 @@ It begins with the editable line:
 
 WAA **does not currently model or verify ACE/ACI state**. This opening is a user-requested handoff convention. If it is not true for the shift, edit it before copying the handoff.
 
-Next, WAA produces at most one narrative line per driver, alphabetically by Driver Name. It combines relevant unresolved work and current-day activity into that driver line. Current fleet Unit Code and Driver Name are preferred when available.
+Narrative drivers are separated under headings such as:
+
+`Driver Leader: LEADER-A`
+
+Leader headings are alphabetical. Drivers within each leader are alphabetical by Driver Name, then Driver Code, and each driver still receives at most one compact narrative line. WAA prefers the current fleet Driver Leader; historical/off-roster work falls back to the saved Driver Leader snapshot. If neither is meaningful, the driver is grouped under `Unassigned`. Grouping is presentation only and never changes Driver Code ownership.
+
+Current fleet Unit Code and Driver Name remain preferred for the driver identity line when available.
 
 Idle activity keeps the useful human note and a concise action phrase instead of repeating 28-day/7-day metric boilerplate. The underlying saved metric snapshots remain intact in WAA.
 
@@ -102,17 +110,17 @@ The draft then contains:
 
 `Missing BOLs:`
 
-Each driver appears once in that section. All unresolved matched BOL order numbers for the driver are grouped onto one line, for example:
+Drivers in that section use the same Driver Leader grouping rule. Each driver appears once within its leader group. All unresolved matched BOL order numbers for the driver are grouped onto one line, for example:
 
 `242163 — Brad Example [ABC123]: Missing BOL for orders AST2543, ASU1575`
 
 The compact Handoff deliberately omits Empty Call Date, route, and local BOL status from that copied section; those details remain available in the focused Missing BOL workspace.
 
-The old visible `NEEDS FOLLOW-UP`, `WAITING / PENDING`, and `COMPLETED TODAY` headings are no longer used by the runtime draft. The underlying open/completed/local-day classification remains deterministic and regression-tested.
+The old visible `NEEDS FOLLOW-UP`, `WAITING / PENDING`, and `COMPLETED TODAY` headings are not used by the runtime draft. The underlying open/completed/local-day classification remains deterministic and regression-tested.
 
 See [`docs/WORK_LOG_HANDOFF.md`](docs/WORK_LOG_HANDOFF.md).
 
-## Automatic Light/Dark text and v0.4.3 stream palette
+## Automatic Light/Dark text and stream palette
 
 WAA has explicit Light and Dark modes. “Auto” text means ordinary controls inherit the active palette automatically; it does not add an OS/System appearance option.
 
@@ -124,7 +132,9 @@ Theme ownership is centralized in:
 
 `ThemeManager` swaps only the active palette. Styles use `DynamicResource`, so the visible fleet, driver/task workspaces, Handoff, inputs, DataGrid generated text, selected/disabled/hover/focus states, tooltips, and semantic text update live without restart or route reset.
 
-In v0.4.3, dark mode uses gunmetal app/panel/header surfaces. Purple is the primary semantic accent for selection, focus, breadcrumbs, Handoff, and highlighted actions. Green is the positive semantic accent for completed state and `Next Needing Attention`. Ordinary text remains neutral and readable; there is no glow, blur, gradient, or decorative animation. Light mode preserves the same semantic purple/green roles on light neutral surfaces.
+Dark mode uses gunmetal app/panel/header surfaces. Purple is the primary semantic accent for selection, focus, breadcrumbs, Handoff, and highlighted actions. Green is the positive semantic accent for completed state and `Next Needing Attention`. Ordinary text remains neutral and readable; there is no glow, blur, gradient, or decorative animation. Light mode preserves the same semantic purple/green roles on light neutral surfaces.
+
+v0.4.4 explicitly binds both the MainWindow background and its root client Grid to `WindowBackgroundBrush` through `DynamicResource`. This prevents an exposed default/light shell surface from remaining around the themed content when dark mode is active.
 
 Theme preference remains local SQLite. Preference writes occur off the UI thread and a failed write restores the prior visible theme.
 
@@ -214,7 +224,7 @@ Upgrade:
 4. Retain `%LOCALAPPDATA%\WAA`.
 5. Start `WAA.exe`.
 
-Application files and user data are separate. v0.4.3 requires no new database schema migration. Replacing the portable folder leaves roster, observations, contacts, work history, BOL state/actions, threshold, and appearance preference under `%LOCALAPPDATA%\WAA`.
+Application files and user data are separate. v0.4.4 requires no new database schema migration. Replacing the portable folder leaves roster, observations, contacts, work history, BOL state/actions, threshold, and appearance preference under `%LOCALAPPDATA%\WAA`.
 
 ## Permanent exclusions
 

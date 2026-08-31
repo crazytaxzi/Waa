@@ -1,4 +1,4 @@
-# WAA Work Log + Handoff v0.4.2 Presentation / v0.3 Data Contract
+# WAA Work Log + Handoff v0.4.4 Presentation / v0.3 Data Contract
 
 This document is authoritative for persistent driver work history and deterministic shift Handoff, including idle linkage and Missing BOL task/action integration. The v0.4.x presentation uses the central one-window workspace while preserving the validated v0.3 work/history/database rules.
 
@@ -43,7 +43,7 @@ Semantics:
 - work text is trimmed and may not be blank.
 - work entries are not destructively deleted.
 
-The current central-workspace and compact-Handoff changes require no database migration and do not increment schema version.
+The current central-workspace, compact-Handoff, Driver Leader grouping, and theme presentation changes require no database migration and do not increment schema version.
 
 ## Idle contact integration
 
@@ -149,7 +149,7 @@ Handoff is a focused full-width route in the same MainWindow. Controls remain:
 
 First Handoff entry in a session generates from saved work. Navigating away/back preserves the edited draft. Regenerate intentionally replaces it from current saved records. Editing/copying never mutates work, BOL, idle, reports, settings, or identity.
 
-## v0.4.2 compact Handoff format
+## v0.4.4 compact Driver Leader-grouped Handoff format
 
 The visible generated draft is deliberately closer to an operational human handoff than a database report.
 
@@ -161,9 +161,21 @@ The draft begins with:
 
 This is a **user-requested editable handoff convention**. WAA does not currently model or validate ACE/ACI state. If the statement is not true for the shift, the user must edit it before copying the handoff.
 
+### Driver Leader grouping
+
+After the opening line, WAA separates narrative drivers under deterministic Driver Leader headings:
+
+`Driver Leader: LEADER-A`
+
+Only leaders with at least one driver represented in the generated Handoff appear. Driver Leader headings are ordered alphabetically. Within each Driver Leader, driver lines are alphabetical by Driver Name, then Driver Code.
+
+WAA prefers the driver’s **current fleet Driver Leader** when the Driver Code is present in the current fleet. For historical/off-roster work where current leader context is unavailable, WAA falls back to the most useful saved `driver_leader_snapshot`. Blank or `*` leader values do not become headings; if no meaningful current or historical leader exists, the driver is grouped under `Driver Leader: Unassigned`.
+
+Driver Leader remains organizational context only. Grouping never changes durable Driver Code ownership or rewrites historical snapshots.
+
 ### Driver narrative lines
 
-After the opening line, WAA emits at most one narrative line per driver. Driver lines are alphabetical by Driver Name, then Driver Code.
+Within each Driver Leader section, WAA emits at most one narrative line per driver.
 
 Preferred identity:
 
@@ -193,7 +205,9 @@ The draft then contains:
 
 `Missing BOLs:`
 
-Each driver appears once. All unresolved MissingBolTask orders for that driver are grouped onto the same line.
+Unresolved Missing BOL drivers are separated under the same `Driver Leader: ...` heading convention used by the narrative. Each driver appears once within its leader section. All unresolved MissingBolTask orders for that driver are grouped onto the same line.
+
+The Missing BOL section uses the same leader precedence as the narrative: current fleet Driver Leader first, then historical work snapshot fallback, then `Unassigned` only when neither is meaningful.
 
 Singular example:
 
@@ -212,19 +226,19 @@ The compact section intentionally does **not** repeat:
 - local BOL status
 - one separate line per order
 
-Those details remain available in the focused Missing BOL workspace. Handoff only needs the driver and order list.
+Those details remain available in the focused Missing BOL workspace. Handoff only needs leader separation, driver identity, and the order list.
 
 If no unresolved matched BOL tasks exist, the section displays `None.`.
 
 ### Removed visible headings
 
-The v0.4.2 runtime draft no longer displays:
+The runtime draft does not display:
 
 - `NEEDS FOLLOW-UP`
 - `WAITING / PENDING`
 - `COMPLETED TODAY`
 
-The underlying open/resolved/local-day classification remains deterministic and is still regression-tested; the visible handoff is simply grouped by driver instead of by database-state section.
+The underlying open/resolved/local-day classification remains deterministic and is still regression-tested; the visible handoff is grouped by Driver Leader and then driver instead of by database-state section.
 
 ## Back/navigation and report refresh
 
@@ -249,4 +263,4 @@ Tests and fixtures use synthetic identities/data only. Never commit production r
 
 ## Validation coverage
 
-The Windows suite covers work migration/preservation, idle linkage, manual lifecycle, BOL task/action synchronization, queue aggregate counts/order/search, local-day activity, legacy classification regression, compact driver-grouped Handoff formatting, current-unit preference, BOL order aggregation, removal of BOL route/status boilerplate, editor isolation, failed-save retention, navigation/state restoration, theme/source audit, contrast, WPF/XAML compilation, and self-contained Windows x64 publishing.
+The Windows suite covers work migration/preservation, idle linkage, manual lifecycle, BOL task/action synchronization, queue aggregate counts/order/search, local-day activity, legacy classification regression, compact Driver Leader-grouped Handoff formatting, current-leader precedence, historical leader fallback, within-leader driver ordering, current-unit preference, BOL order aggregation, removal of BOL route/status boilerplate, editor isolation, failed-save retention, navigation/state restoration, theme/source audit, contrast, WPF/XAML compilation, and self-contained Windows x64 publishing.
