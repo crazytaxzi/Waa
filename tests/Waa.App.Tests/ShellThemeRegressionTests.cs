@@ -14,7 +14,8 @@ public sealed class ShellThemeRegressionTests
     [Fact]
     public void MainWindowAndRootClientSurface_ExplicitlyFollowWindowBackgroundBrush()
     {
-        var source = File.ReadAllText(MainWindowPath);
+        var source = File.ReadAllText(MainWindowPath)
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
 
         Assert.Contains(
             "Background=\"{DynamicResource WindowBackgroundBrush}\"\n        WindowStartupLocation",
