@@ -17,13 +17,14 @@ public sealed class ThemeAndSourceAuditTests
 
     private static readonly string[] RequiredBrushKeys =
     [
-        "WindowBackgroundBrush", "PanelBackgroundBrush", "PanelSubtleBackgroundBrush",
+        "WindowBackgroundBrush", "PanelBackgroundBrush", "PanelSubtleBackgroundBrush", "HeaderBackgroundBrush",
         "BorderBrush", "ControlBorderBrush", "ControlBackgroundBrush",
         "ControlHoverBackgroundBrush", "ControlDisabledBackgroundBrush",
-        "PrimaryBrush", "PrimaryHoverBrush", "TextBrush", "SubtleTextBrush",
-        "DisabledTextBrush", "PrimaryButtonTextBrush", "LinkTextBrush", "SelectionBrush",
+        "PrimaryBrush", "PrimaryHoverBrush", "PrimaryButtonTextBrush",
+        "SuccessBrush", "SuccessHoverBrush", "SuccessButtonTextBrush",
+        "TextBrush", "SubtleTextBrush", "DisabledTextBrush", "LinkTextBrush", "BreadcrumbTextBrush", "SelectionBrush",
         "DataGridRowBrush", "DataGridAlternateRowBrush", "DataGridHeaderBrush",
-        "DataGridHeaderTextBrush", "DataGridGridLineBrush", "SelectedRowBrush",
+        "DataGridHeaderTextBrush", "DataGridGridLineBrush", "DataGridHoverRowBrush", "SelectedRowBrush",
         "SelectedRowTextBrush", "WarningTextBrush", "WarningBackgroundBrush",
         "FollowUpTextBrush", "FollowUpBackgroundBrush", "CompletedTextBrush",
         "CompletedBackgroundBrush", "QuietTextBrush", "QuietBackgroundBrush",
@@ -50,6 +51,23 @@ public sealed class ThemeAndSourceAuditTests
 
         Assert.All(RequiredBrushKeys, key => Assert.Contains(key, light.Keys));
         Assert.All(RequiredBrushKeys, key => Assert.Contains(key, dark.Keys));
+    }
+
+    [Fact]
+    public void DarkPalette_UsesStreamGunmetalPurpleAndGreenCore()
+    {
+        var dark = LoadPalette(DarkPalettePath);
+
+        Assert.Equal("#11161B", dark["WindowBackgroundBrush"]);
+        Assert.Equal("#1A232C", dark["PanelBackgroundBrush"]);
+        Assert.Equal("#24303A", dark["PanelSubtleBackgroundBrush"]);
+        Assert.Equal("#202A33", dark["HeaderBackgroundBrush"]);
+        Assert.Equal("#B14DFF", dark["PrimaryBrush"]);
+        Assert.Equal("#C779FF", dark["PrimaryHoverBrush"]);
+        Assert.Equal("#39FF6A", dark["SuccessBrush"]);
+        Assert.Equal("#63FF8A", dark["SuccessHoverBrush"]);
+        Assert.Equal("#2D1F3A", dark["SelectedRowBrush"]);
+        Assert.Equal("#39FF6A", dark["CompletedTextBrush"]);
     }
 
     [Fact]
@@ -118,12 +136,13 @@ public sealed class ThemeAndSourceAuditTests
         var source = File.ReadAllText(BaseStylesPath);
         var requiredFragments = new[]
         {
-            "SelectedRowTextBrush", "SelectedRowBrush", "DataGridHeaderTextBrush",
+            "SelectedRowTextBrush", "SelectedRowBrush", "DataGridHoverRowBrush", "DataGridHeaderTextBrush",
             "DataGridHeaderBrush", "TargetType=\"{x:Type TextBox}\"",
             "Property=\"CaretBrush\" Value=\"{DynamicResource TextBrush}\"",
             "Property=\"SelectionBrush\" Value=\"{DynamicResource SelectionBrush}\"",
-            "x:Key=\"BaseButtonStyle\"", "x:Key=\"PrimaryButtonStyle\"",
-            "PrimaryButtonTextBrush", "DisabledTextBrush", "TargetType=\"{x:Type ToolTip}\""
+            "x:Key=\"BaseButtonStyle\"", "x:Key=\"PrimaryButtonStyle\"", "x:Key=\"SuccessButtonStyle\"",
+            "PrimaryButtonTextBrush", "SuccessButtonTextBrush", "x:Key=\"BreadcrumbTextStyle\"",
+            "DisabledTextBrush", "TargetType=\"{x:Type ToolTip}\""
         };
 
         Assert.All(requiredFragments, fragment => Assert.Contains(fragment, source, StringComparison.Ordinal));
@@ -161,6 +180,23 @@ public sealed class ThemeAndSourceAuditTests
                 Assert.DoesNotMatch("Foreground\\s*=", textBox.Value);
                 Assert.DoesNotMatch("CaretBrush\\s*=", textBox.Value);
             });
+        }
+    }
+
+    [Fact]
+    public void HandoffTaskAndWorkspaceViews_KeepThemeColorsCentralized()
+    {
+        foreach (var file in new[]
+                 {
+                     "FleetQueueView.xaml", "DriverWorkspaceView.xaml", "IdleTaskView.xaml", "MissingBolTaskView.xaml",
+                     "WorkItemTaskView.xaml", "NewWorkView.xaml", "ActivityDetailView.xaml", "HandoffView.xaml",
+                     "UnmatchedBolView.xaml", "UnavailableView.xaml"
+                 })
+        {
+            var source = ReadAppFile("Views", file);
+            Assert.DoesNotMatch("#[0-9A-Fa-f]{3,8}", source);
+            Assert.DoesNotContain("SolidColorBrush", source, StringComparison.Ordinal);
+            Assert.DoesNotContain("Brushes.", source, StringComparison.Ordinal);
         }
     }
 
@@ -285,13 +321,19 @@ public sealed class ThemeAndSourceAuditTests
             ("TextBrush", "WindowBackgroundBrush"),
             ("TextBrush", "PanelBackgroundBrush"),
             ("TextBrush", "PanelSubtleBackgroundBrush"),
+            ("TextBrush", "HeaderBackgroundBrush"),
             ("SubtleTextBrush", "WindowBackgroundBrush"),
             ("SubtleTextBrush", "PanelBackgroundBrush"),
             ("SubtleTextBrush", "PanelSubtleBackgroundBrush"),
             ("PrimaryButtonTextBrush", "PrimaryBrush"),
+            ("PrimaryButtonTextBrush", "PrimaryHoverBrush"),
+            ("SuccessButtonTextBrush", "SuccessBrush"),
+            ("SuccessButtonTextBrush", "SuccessHoverBrush"),
             ("SelectedRowTextBrush", "SelectedRowBrush"),
+            ("SelectedRowTextBrush", "DataGridHoverRowBrush"),
             ("DataGridHeaderTextBrush", "DataGridHeaderBrush"),
             ("TextBrush", "ControlBackgroundBrush"),
+            ("TextBrush", "ControlHoverBackgroundBrush"),
             ("DisabledTextBrush", "ControlDisabledBackgroundBrush"),
             ("WarningTextBrush", "WarningBackgroundBrush"),
             ("WarningTextBrush", "PanelBackgroundBrush"),
@@ -300,6 +342,7 @@ public sealed class ThemeAndSourceAuditTests
             ("CompletedTextBrush", "CompletedBackgroundBrush"),
             ("CompletedTextBrush", "PanelBackgroundBrush"),
             ("LinkTextBrush", "PanelBackgroundBrush"),
+            ("BreadcrumbTextBrush", "PanelSubtleBackgroundBrush"),
             ("QuietTextBrush", "QuietBackgroundBrush"),
             ("InformationTextBrush", "InformationBackgroundBrush")
         };

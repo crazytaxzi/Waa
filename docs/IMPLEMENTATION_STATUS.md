@@ -2,13 +2,15 @@
 
 ## Current bounded release
 
-**WAA v0.4.2 — compact driver-grouped Handoff, merged to `main` and Windows-validated.**
+**WAA v0.4.3 — Fleet Queue Density + Stream Theme Refresh release candidate.**
 
-Merged product commit: `f9ed536b6cb5ddf015cd2af3d342bfd70b669da6`.
+This release is presentation-only. It changes Fleet Queue density/content presentation and refreshes the centralized Light/Dark palette. It does not change the database schema, report parsing, queue priority rules, work/BOL transactions, Handoff generation rules, route identity, or `%LOCALAPPDATA%\WAA` compatibility.
 
-Merged-main validation: **Windows build, test, and portable package #62**, run ID `33342993413`, August 30, 2026 — success.
+Current release branch implementation commit: `61e3550d4d75978b6581c6f30370b34a4750a9c6` before documentation alignment.
 
-This status commit records that completed validation. Its own subsequent main workflow is the final documentation-aligned release gate/artifact source.
+PR-tree and merged-main Windows validation are required before the v0.4.3 portable artifact is delivered.
+
+Prior validated baseline: **WAA v0.4.2**, merged to `main`, workflow **#62**, run ID `33342993413`, August 30, 2026 — **191 passed, 0 failed, 0 skipped**.
 
 ## Runtime and deployment
 
@@ -20,6 +22,52 @@ This status commit records that completed validation. Its own subsequent main wo
 - one local desktop process
 - SQLite/preferences under `%LOCALAPPDATA%\WAA`
 - GitHub Actions restores, builds/WPF-compiles, tests, publishes, and uploads artifact
+
+## v0.4.3 Fleet Queue density
+
+The Fleet Queue remains the full-width primary workspace and keeps the same data/query/priority behavior.
+
+Presentation changes:
+
+- the dedicated `Open` column is removed
+- the entire DataGrid row remains the mouse click target for Driver Workspace
+- native Up/Down DataGrid navigation remains intact
+- `Enter` still opens the focused row
+- Driver / Unit renders Driver Name on line one
+- Driver / Unit line two is `DriverCode • Unit ######`
+- Leader remains visible only in the dedicated `Leader` column in Fleet Queue
+- the original richer `IdentityLine` remains available to Driver/task workspaces, so Leader context outside Fleet Queue is preserved
+- Fleet Queue uses compact centralized DataGrid row/cell styles with a 36-pixel minimum row height and reduced vertical cell padding
+- search/threshold/metric/shell spacing is tightened without reducing ordinary text contrast
+- row and column virtualization, recycling, and content scrolling remain enabled
+
+No old split pane, per-row Open button, alternate routing path, or non-virtualized queue was introduced.
+
+## v0.4.3 stream theme
+
+Theme ownership remains centralized in `LightColors.xaml`, `DarkColors.xaml`, and `BaseStyles.xaml`.
+
+Dark-mode visual intent:
+
+- gunmetal app/panel/raised/header surfaces
+- neon purple for primary/highlight/focus/selection/breadcrumb/Handoff roles
+- neon green for positive/completed/`Next Needing Attention` roles
+- neutral light ordinary text
+- no glow, blur, gradient, animation, or decorative effects
+
+Light mode retains the same semantic accent roles on light neutral surfaces. Both palettes contain identical required key sets.
+
+Specific UI application:
+
+- Main shell/header uses centralized header surface
+- Handoff remains purple primary
+- `Next Needing Attention` uses the green success style
+- `Update Reports` and appearance toggle remain neutral controls
+- breadcrumbs use the purple breadcrumb role
+- fleet row hover/selection/focus use centralized resources
+- task, Driver Workspace, Handoff, status/editor, DataGrid, and semantic states continue to inherit theme resources
+
+Recommended literal palette values were adapted only where necessary for tested contrast. In particular, boundary colors were raised from the suggested dark border value so actual panel/control edges remain at least 3:1, while the requested purple/green accents remain recognizable.
 
 ## Central workspace
 
@@ -58,13 +106,13 @@ Then existing visible/search-respecting `Next Needing Attention` is reused.
 - live switching does not reset route/session state
 - appearance preference persists locally off UI thread with visible rollback on failure
 - repository source audit blocks inappropriate fixed theme colors
-- deterministic contrast tests cover normal/semantic/selected/editor/hover/focus cases
+- deterministic contrast tests cover normal/semantic/selected/editor/hover/button/breadcrumb/focus cases
 - all data-bound inline WPF `Run.Text` uses explicit one-way display binding
 - repository regression test prevents the v0.4 startup binding failure from returning
 
-## v0.4.2 compact Handoff
+## v0.4.2 compact Handoff preserved
 
-Runtime generated Handoff now matches the requested operational shape rather than a verbose database report.
+Runtime generated Handoff remains the compact operational shape introduced in v0.4.2.
 
 Opening convention:
 
@@ -93,13 +141,11 @@ Missing BOL section:
 - copied section omits Empty Call Date, route, and local status; full details remain in Missing BOL Task
 - no fuzzy/manual assignment or BOL state logic changed
 
-The runtime draft no longer shows visible `NEEDS FOLLOW-UP`, `WAITING / PENDING`, or `COMPLETED TODAY` headings. Underlying deterministic open/completed/local-day classification remains regression-tested.
-
 Edited draft isolation remains unchanged: navigating away/back preserves edit, Regenerate intentionally replaces it, Copy copies current edit, and no Handoff edit mutates saved work/BOL/idle/report/settings state.
 
 ## Database compatibility
 
-v0.4.2 requires **no database schema change** and does not increment schema version.
+v0.4.3 requires **no database schema change** and does not increment schema version.
 
 Existing `%LOCALAPPDATA%\WAA` remains compatible and preserves:
 
@@ -113,9 +159,9 @@ Existing `%LOCALAPPDATA%\WAA` remains compatible and preserves:
 
 Replacing the portable application folder leaves the data folder intact.
 
-## Preserved business/data regression result
+## Preserved business/data regression requirements
 
-Still passing:
+The v0.4.3 workflow must preserve the existing coverage for:
 
 - Rolling 7 Day import/normalization
 - weighted 7-day and complete-coverage 28-day calculations
@@ -133,28 +179,22 @@ Still passing:
 - theme/source audit/contrast
 - central navigation/state/keyboard/stale-route behavior
 - v0.4.1 Run.Text startup binding safety
+- v0.4.2 compact Handoff behavior
 
-No permanent exclusion was introduced.
+No permanent exclusion is changed by v0.4.3.
 
-## Validation
+## Validation gate
 
-PR #4 release tree, workflow **#61**, run ID `33342917393`: success.
+Before delivery, the v0.4.3 release must have:
 
-Merged `main` product tree, workflow **#62**, run ID `33342993413`: success.
-
-Merged-main #62 result:
-
-- restore: passed
-- warnings-as-errors Release build: passed
-- WPF/XAML compilation: passed
-- core tests: **24 passed**
-- app/SQLite/navigation/theme/source-audit/Handoff/integration tests: **167 passed**
-- total: **191 passed, 0 failed, 0 skipped**
-- build: **0 warnings, 0 errors**
-- self-contained win-x64 publish: passed
-- portable artifact upload: passed
-
-The documentation-only commit containing this final status must pass the same full workflow; only that latest successful main artifact is delivered.
+- PR Windows restore/build/WPF compilation success
+- all Core/App/integration/navigation/theme/source-audit tests passing
+- zero build warnings/errors under the existing warnings-as-errors configuration
+- self-contained win-x64 publish success
+- portable artifact upload success
+- PR merged to `main`
+- merged `main` Windows workflow success
+- final merged-main portable artifact downloaded and hashed
 
 ## Remaining limitations
 

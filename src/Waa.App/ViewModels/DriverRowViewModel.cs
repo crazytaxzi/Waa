@@ -23,6 +23,7 @@ public sealed class DriverRowViewModel
     public string UnitCode => Record.UnitCode;
     public string DriverLeader => Record.DriverLeader;
     public string IdentityLine => $"{DriverCode}  •  Unit {UnitCode}  •  Leader {DriverLeader}";
+    public string FleetIdentityLine => $"{DriverCode} • Unit {UnitCode}";
     public int OpenWorkCount => Record.OpenWorkCount;
     public bool HasOpenWork => OpenWorkCount > 0;
     public string OpenWorkDisplay => HasOpenWork
