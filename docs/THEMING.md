@@ -1,4 +1,4 @@
-# WAA Theming v0.4.3
+# WAA Theming v0.4.4
 
 ## Meaning of Auto text
 
@@ -40,6 +40,14 @@ Accent ownership is semantic:
 Primary purple uses `PrimaryBrush` / `PrimaryHoverBrush`; positive green uses `SuccessBrush` / `SuccessHoverBrush`. The requested neon fills use a dark button foreground where needed so normal-text contrast remains compliant.
 
 There is no glow, blur, animation, gradient, or other decorative effect. Light mode keeps the same purple/green semantic roles on light neutral surfaces rather than forcing gunmetal backgrounds into the light palette.
+
+## v0.4.4 shell background correction
+
+`MainWindow` and its root client Grid explicitly bind their backgrounds to `WindowBackgroundBrush` through `DynamicResource`.
+
+This closes the exposed shell/margin gap where a Windows/default light surface could remain visible even while the rest of WAA had switched to the dark palette. The correction does not introduce a separate shell color or code-behind brush; the whole client background uses the same centralized palette role as the rest of the application and updates during live Light/Dark switching.
+
+The title bar continues to use the existing DWM helper where supported.
 
 ## Ordinary foreground inheritance
 
@@ -121,7 +129,7 @@ Completed/positive state uses the green palette role where appropriate. Status r
 
 `ThemeManager.Apply(bool darkMode)` loads the selected palette ResourceDictionary and replaces the current palette entry in `Application.Resources.MergedDictionaries`. Base styles and DataTemplates stay in place.
 
-Because style brushes are dynamic resources, visible controls update immediately without application restart or route recreation. Theme switching does not reset navigation, queue selection, search, notes, or Handoff draft state.
+Because style brushes and the explicit MainWindow/root-shell backgrounds are dynamic resources, visible controls and the full client background update immediately without application restart or route recreation. Theme switching does not reset navigation, queue selection, search, notes, or Handoff draft state.
 
 The Windows title bar is updated through the existing DWM helper where supported.
 
@@ -171,6 +179,7 @@ The audit also checks:
 - App.xaml uses palette + base style dictionaries
 - generated DataGrid text is theme-aware
 - Handoff/task/workspace XAML contains no one-off literal theme colors
+- MainWindow and its root client surface explicitly use the dynamic `WindowBackgroundBrush`
 - only MainWindow is a top-level Window
 - the central content host replaced the legacy split pane
 
