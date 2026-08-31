@@ -19,6 +19,7 @@ public sealed class HandoffService
     private const string MissingBolPrefix = "Missing BOL for order ";
     private const string EmptyCallMarker = ", empty call ";
     private const string NoteMarker = " Note: ";
+    private const string UnassignedDriverLeader = "Unassigned";
 
     public HandoffResult Generate(
         IEnumerable<WorkEntryRecord> workEntries,
@@ -66,7 +67,8 @@ public sealed class HandoffService
             .GroupBy(entry => entry.DriverCode, StringComparer.OrdinalIgnoreCase)
             .Select(group => BuildNarrativeGroup(group, currentByCode))
             .Where(group => group.Phrases.Count > 0)
-            .OrderBy(group => group.DriverName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.DriverLeader, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(group => group.DriverName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(group => group.DriverCode, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -77,7 +79,8 @@ public sealed class HandoffService
             .GroupBy(entry => entry.DriverCode, StringComparer.OrdinalIgnoreCase)
             .Select(group => BuildMissingBolGroup(group, currentByCode))
             .Where(group => group.Orders.Count > 0)
-            .OrderBy(group => group.DriverName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.DriverLeader, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(group => group.DriverName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(group => group.DriverCode, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -86,13 +89,7 @@ public sealed class HandoffService
         builder.AppendLine(DefaultAceAciLine);
         builder.AppendLine();
 
-        foreach (var group in narrativeGroups)
-        {
-            builder.Append(FormatIdentity(group.UnitCode, group.DriverName, group.DriverCode));
-            builder.Append(": ");
-            builder.AppendLine(string.Join(" ", group.Phrases));
-        }
-
+        AppendNarrativeLeaderGroups(builder, narrativeGroups);
         if (narrativeGroups.Length > 0)
         {
             builder.AppendLine();
@@ -105,13 +102,7 @@ public sealed class HandoffService
         }
         else
         {
-            foreach (var group in missingBolGroups)
-            {
-                builder.Append(FormatIdentity(group.UnitCode, group.DriverName, group.DriverCode));
-                builder.Append(": Missing BOL for ");
-                builder.Append(group.Orders.Count == 1 ? "order " : "orders ");
-                builder.AppendLine(string.Join(", ", group.Orders.Select(order => order.OrderNumber)));
-            }
+            AppendMissingBolLeaderGroups(builder, missingBolGroups);
         }
 
         return new HandoffResult(
@@ -184,12 +175,13 @@ public sealed class HandoffService
         currentByCode.TryGetValue(group.Key, out var current);
         var driverName = current?.DriverName ?? ordered.Last().DriverName;
         var unitCode = ChooseUnitCode(current, ordered);
+        var driverLeader = ChooseDriverLeader(current, ordered);
         var phrases = ordered
             .Select(FormatNarrativeText)
             .Where(text => text.Length > 0)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        return new NarrativeGroup(group.Key, driverName, unitCode, phrases);
+        return new NarrativeGroup(group.Key, driverName, unitCode, driverLeader, phrases);
     }
 
     private static MissingBolGroup BuildMissingBolGroup(
@@ -203,6 +195,7 @@ public sealed class HandoffService
         currentByCode.TryGetValue(group.Key, out var current);
         var driverName = current?.DriverName ?? entries.Last().DriverName;
         var unitCode = ChooseUnitCode(current, entries);
+        var driverLeader = ChooseDriverLeader(current, entries);
         var orders = entries
             .Select(entry => ParseMissingBolTask(entry.Text))
             .GroupBy(order => order.OrderNumber, StringComparer.OrdinalIgnoreCase)
@@ -213,7 +206,68 @@ public sealed class HandoffService
             .OrderBy(order => order.EmptyCallDate ?? DateOnly.MaxValue)
             .ThenBy(order => order.OrderNumber, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        return new MissingBolGroup(group.Key, driverName, unitCode, orders);
+        return new MissingBolGroup(group.Key, driverName, unitCode, driverLeader, orders);
+    }
+
+    private static void AppendNarrativeLeaderGroups(
+        StringBuilder builder,
+        IReadOnlyCollection<NarrativeGroup> groups)
+    {
+        var leaderGroups = groups
+            .GroupBy(group => group.DriverLeader, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        for (var index = 0; index < leaderGroups.Length; index++)
+        {
+            if (index > 0)
+            {
+                builder.AppendLine();
+            }
+
+            var leaderGroup = leaderGroups[index];
+            builder.Append("Driver Leader: ");
+            builder.AppendLine(leaderGroup.Key);
+            foreach (var group in leaderGroup
+                         .OrderBy(item => item.DriverName, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(item => item.DriverCode, StringComparer.OrdinalIgnoreCase))
+            {
+                builder.Append(FormatIdentity(group.UnitCode, group.DriverName, group.DriverCode));
+                builder.Append(": ");
+                builder.AppendLine(string.Join(" ", group.Phrases));
+            }
+        }
+    }
+
+    private static void AppendMissingBolLeaderGroups(
+        StringBuilder builder,
+        IReadOnlyCollection<MissingBolGroup> groups)
+    {
+        var leaderGroups = groups
+            .GroupBy(group => group.DriverLeader, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        for (var index = 0; index < leaderGroups.Length; index++)
+        {
+            if (index > 0)
+            {
+                builder.AppendLine();
+            }
+
+            var leaderGroup = leaderGroups[index];
+            builder.Append("Driver Leader: ");
+            builder.AppendLine(leaderGroup.Key);
+            foreach (var group in leaderGroup
+                         .OrderBy(item => item.DriverName, StringComparer.OrdinalIgnoreCase)
+                         .ThenBy(item => item.DriverCode, StringComparer.OrdinalIgnoreCase))
+            {
+                builder.Append(FormatIdentity(group.UnitCode, group.DriverName, group.DriverCode));
+                builder.Append(": Missing BOL for ");
+                builder.Append(group.Orders.Count == 1 ? "order " : "orders ");
+                builder.AppendLine(string.Join(", ", group.Orders.Select(order => order.OrderNumber)));
+            }
+        }
     }
 
     private static string FormatNarrativeText(WorkEntryRecord entry)
@@ -352,7 +406,27 @@ public sealed class HandoffService
             .Trim() ?? string.Empty;
     }
 
+    private static string ChooseDriverLeader(
+        FleetDriverRecord? current,
+        IEnumerable<WorkEntryRecord> entries)
+    {
+        if (IsMeaningfulLeader(current?.DriverLeader))
+        {
+            return current!.DriverLeader.Trim();
+        }
+
+        return entries
+            .OrderByDescending(GetNarrativeTimestamp)
+            .Select(entry => entry.DriverLeaderSnapshot)
+            .FirstOrDefault(IsMeaningfulLeader)?
+            .Trim() ?? UnassignedDriverLeader;
+    }
+
     private static bool IsMeaningfulUnit(string? value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        !value.Trim().Equals("*", StringComparison.Ordinal);
+
+    private static bool IsMeaningfulLeader(string? value) =>
         !string.IsNullOrWhiteSpace(value) &&
         !value.Trim().Equals("*", StringComparison.Ordinal);
 
@@ -440,12 +514,14 @@ public sealed class HandoffService
         string DriverCode,
         string DriverName,
         string UnitCode,
+        string DriverLeader,
         IReadOnlyList<string> Phrases);
 
     private sealed record MissingBolGroup(
         string DriverCode,
         string DriverName,
         string UnitCode,
+        string DriverLeader,
         IReadOnlyList<MissingBolOrder> Orders);
 
     private sealed record MissingBolOrder(
