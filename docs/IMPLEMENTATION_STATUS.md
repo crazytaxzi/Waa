@@ -2,15 +2,17 @@
 
 ## Current bounded release
 
-**WAA v0.4.4 — Driver Leader-Grouped Handoff + Dark Shell Fix, PR-tree Windows-validated.**
+**WAA v0.4.4 — Driver Leader-Grouped Handoff + Dark Shell Fix, merged to `main` and Windows-validated.**
 
 This release is presentation-only. It changes Handoff grouping and closes an exposed MainWindow dark-theme surface. It does not change the database schema, report parsing, queue priority rules, durable identity, work/BOL transactions, exact-code Missing BOL matching, route identity, or `%LOCALAPPDATA%\WAA` compatibility.
 
-Current release branch head before this validation-record commit: `fcc424059b8dde339ced9f2c7b009d11f096347e`.
+Merged product commit: `59820e0151d844ee423abe8c56cf9f2372e4bb74`.
 
-PR #6 Windows validation: **Windows build, test, and portable package #70**, run ID `33346533222`, August 31, 2026 — **success**.
+PR #6 documented release tree: workflow **#71**, run ID `33346655822` — success.
 
-Final delivery still requires this validation-record commit to pass on PR #6, then the merged `main` commit to pass the same Windows workflow before its portable artifact is delivered.
+Merged-main product validation: workflow **#72**, run ID `33346765923`, August 31, 2026 — success.
+
+This status-only commit records that completed validation. Its own Windows workflow is the final documentation-aligned artifact gate.
 
 ## Runtime and deployment
 
@@ -102,9 +104,14 @@ v0.4.4 requires **no database schema change** and does not increment schema vers
 
 Existing `%LOCALAPPDATA%\WAA` remains compatible and preserves roster/import metadata/observations, idle contacts, work entries, Missing BOL state/actions/work links, threshold, Light/Dark preference, and Handoff source history. Replacing the portable application folder leaves the data folder intact.
 
-## Branch validation
+## Validation
 
-PR #6 release tree, workflow **#70**, run ID `33346533222`:
+PR #6 implementation/documented tree:
+
+- workflow **#70**, run ID `33346533222`: success
+- workflow **#71**, run ID `33346655822`: success
+
+Merged `main` product tree, workflow **#72**, run ID `33346765923`:
 
 - restore: passed
 - warnings-as-errors Release build: passed
@@ -115,12 +122,11 @@ PR #6 release tree, workflow **#70**, run ID `33346533222`:
 - build: **0 warnings, 0 errors**
 - self-contained win-x64 publish: passed
 - portable artifact upload: passed
+- product artifact SHA-256: `ad0e64b1583057853fdbb12f8f888063bcac8578924749a1e89391ae9dc7f075`
 
-An earlier PR run correctly caught a Windows newline-sensitive assertion in the new shell regression test; the test was corrected to normalize CRLF/LF without changing production behavior. The full release tree above is green.
+An earlier PR run correctly caught a Windows newline-sensitive assertion in the new shell regression test; the test was corrected to normalize CRLF/LF without changing production behavior.
 
-## Final validation gate
-
-Before delivery, this validation-record commit must pass the full PR Windows workflow. PR #6 must then merge normally to `main`, and the exact merged-main commit must pass restore/build/test/publish/artifact upload again. Only that merged-main portable artifact is delivered and hashed.
+The documentation-only commit containing this final status must pass the same full workflow. Only that latest successful `main` artifact is delivered.
 
 ## Remaining limitations
 
