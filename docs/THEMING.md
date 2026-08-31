@@ -1,4 +1,4 @@
-# WAA Theming v0.4
+# WAA Theming v0.4.3
 
 ## Meaning of Auto text
 
@@ -19,6 +19,27 @@ Theme color ownership is centralized:
 Literal theme colors are not allowed in MainWindow, UserControls, view-models, converters, or task templates.
 
 The Light and Dark dictionaries must contain matching key sets. Missing keys are a test failure.
+
+## v0.4.3 stream palette
+
+The v0.4.3 presentation refresh keeps gunmetal/neutral surfaces as the visual foundation and uses the stream palette as restrained semantic accents rather than decorative fills.
+
+Dark-mode core surfaces are:
+
+- app background `#11161B`
+- panel background `#1A232C`
+- raised/subtle panel `#24303A`
+- header chrome `#202A33`
+
+Accent ownership is semantic:
+
+- purple is the primary accent for selection, focus, breadcrumbs, Handoff, and highlighted actions
+- green is the success/positive accent for completed state and `Next Needing Attention`
+- ordinary body text remains neutral/light rather than neon
+
+Primary purple uses `PrimaryBrush` / `PrimaryHoverBrush`; positive green uses `SuccessBrush` / `SuccessHoverBrush`. The requested neon fills use a dark button foreground where needed so normal-text contrast remains compliant.
+
+There is no glow, blur, animation, gradient, or other decorative effect. Light mode keeps the same purple/green semantic roles on light neutral surfaces rather than forcing gunmetal backgrounds into the light palette.
 
 ## Ordinary foreground inheritance
 
@@ -48,14 +69,23 @@ Theme-aware implicit/base styles currently cover the controls used by WAA, inclu
 
 `SubtleTextBrush` is used for secondary text. `DisabledTextBrush` is a dedicated disabled-state foreground; disabled readability does not rely on opacity or a Windows system default.
 
-## Buttons and selected rows
+## Buttons, breadcrumbs, hover, and selected rows
 
-Primary controls use a palette pair:
+Purple primary controls use:
 
 - `PrimaryBrush` / `PrimaryButtonTextBrush`
 - `PrimaryHoverBrush` / `PrimaryButtonTextBrush`
 
-The base button hover style updates the Button background property rather than overriding a named border inside the template. This lets `PrimaryButtonStyle` override hover background correctly and prevents a light generic hover surface from being combined with primary-button text.
+Green positive controls use:
+
+- `SuccessBrush` / `SuccessButtonTextBrush`
+- `SuccessHoverBrush` / `SuccessButtonTextBrush`
+
+`Handoff` uses the purple primary style. `Next Needing Attention` uses the green success style. Theme-mode and `Update Reports` buttons remain neutral controls.
+
+Breadcrumb text uses `BreadcrumbTextBrush`. Focus boundaries use `FocusBorderBrush`. Fleet row hover uses the dedicated `DataGridHoverRowBrush` rather than a one-off view color.
+
+The base button hover style updates the Button background property rather than overriding a named border inside the template. This lets both accent styles override hover background correctly and prevents a generic hover surface from being combined with accent-button text.
 
 Selected DataGrid rows use:
 
@@ -63,6 +93,8 @@ Selected DataGrid rows use:
 - `SelectedRowTextBrush`
 
 DataGrid cells inherit selected-row text state, and `DataGridTextColumn` uses explicit reusable dynamic element/editing styles so generated elements do not fall back to a WPF system foreground.
+
+The Fleet Queue uses compact row/cell styles derived from the central DataGrid styles. Density changes alter only row minimum height and cell padding; they do not bypass centralized selected/hover/focus/text resources or virtualization.
 
 ## Inputs
 
@@ -83,7 +115,7 @@ Current semantic palette pairs include:
 - `ErrorTextBrush` / `ErrorBackgroundBrush`
 - `InformationTextBrush` / `InformationBackgroundBrush`
 
-Status remains understandable through words first; color is supplemental.
+Completed/positive state uses the green palette role where appropriate. Status remains understandable through words first; color is supplemental.
 
 ## Live switching
 
@@ -101,21 +133,22 @@ Automated palette tests calculate WCAG-style relative luminance/contrast determi
 
 Normal and important text combinations require at least **4.5:1**, including:
 
-- `TextBrush` on window/panel/subtle panel surfaces
+- `TextBrush` on window/panel/subtle/header surfaces
 - `SubtleTextBrush` on its actual surfaces
 - ordinary button text on normal and hover control backgrounds
 - `PrimaryButtonTextBrush` on `PrimaryBrush` and `PrimaryHoverBrush`
-- selected-row text/background
+- `SuccessButtonTextBrush` on `SuccessBrush` and `SuccessHoverBrush`
+- selected-row and fleet-hover text/background
 - DataGrid header text/background
 - TextBox/editor text/background
 - disabled text/background
 - warning/follow-up/completed semantic text on its semantic and panel surfaces
-- link text on panel background
+- link and breadcrumb text on their actual surfaces
 - quiet/information semantic pairs
 
 Important UI boundaries/focus indicators require at least **3:1** where applicable, including panel/control borders and focus border against their surfaces.
 
-A contrast failure is fixed by adjusting the palette or style; tests are not removed to hide it.
+A contrast failure is fixed by adjusting the palette or style; tests are not removed to hide it. Recommended palette values may therefore be adapted when the literal value would fail the actual foreground/background pair.
 
 ## Source audit test
 
@@ -133,9 +166,11 @@ The audit also checks:
 
 - Light/Dark key sets match
 - every required palette key exists
+- the v0.4.3 stream palette retains the expected gunmetal/purple/green roles
 - ThemeManager does not recreate brushes in C#
 - App.xaml uses palette + base style dictionaries
 - generated DataGrid text is theme-aware
+- Handoff/task/workspace XAML contains no one-off literal theme colors
 - only MainWindow is a top-level Window
 - the central content host replaced the legacy split pane
 

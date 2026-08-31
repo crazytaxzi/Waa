@@ -4,15 +4,19 @@ WAA is a local, portable Windows application for working through a driver fleet,
 
 The application is driver-centric: **Driver Code** is durable identity. **Driver Name** is display identity. Unit Code and Driver Leader are operational/historical context and never define driver identity.
 
-## Current release line: v0.4.2
+## Current release line: v0.4.3
 
-v0.4 introduced the centralized one-window workspace and theme-safe text. v0.4.1 fixed the WPF inline `Run.Text` startup-binding issue. v0.4.2 changes only the generated Handoff presentation to a compact driver-grouped format; it does not change the database schema or validated report/work/BOL business rules.
+v0.4 introduced the centralized one-window workspace and theme-safe text. v0.4.1 fixed the WPF inline `Run.Text` startup-binding issue. v0.4.2 changed generated Handoff presentation to a compact driver-grouped format. v0.4.3 is a presentation-only refinement: a denser Fleet Queue and a centralized gunmetal/neon-purple/neon-green stream palette. It does not change the database schema or validated report/work/BOL business rules.
 
 Current UI/workflow highlights:
 
 - one native WPF `MainWindow` is the permanent operations shell
 - full-width Fleet Queue instead of an always-open split driver pane
 - single-click or keyboard `Enter` opens Driver Workspace by durable Driver Code
+- native Up/Down navigation remains in the Fleet Queue
+- Fleet Driver / Unit is compact: Driver Name, then `DriverCode • Unit ######`; Leader remains in its dedicated column
+- no separate per-row `Open` column; the whole row is the click target
+- tighter virtualized Fleet Queue rows, metrics, and shell spacing fit more drivers in the same viewport
 - actionable Idle, Missing BOL, and manual work rows open focused same-window task workspaces
 - Back/breadcrumb navigation returns to actual prior context
 - safe `Alt+Left` Back outside text-editing controls
@@ -21,6 +25,7 @@ Current UI/workflow highlights:
 - edited Handoff text, New Work drafts, BOL notes, queue search, and selection survive in-session navigation
 - report updates rebuild valid routes by stable IDs and fail gracefully when an entity disappears
 - centralized Light/Dark palettes and automatic theme-safe ordinary/generated text
+- v0.4.3 dark mode uses gunmetal surfaces with restrained neon purple and neon green semantic accents
 - deterministic source-audit and contrast tests block inappropriate fixed UI colors
 
 The old giant selected-driver split pane is removed rather than retained in parallel.
@@ -77,7 +82,7 @@ Driver-owned navigation is keyed by durable Driver Code, never Unit Code or Driv
 
 See [`docs/CENTRAL_WORKSPACE.md`](docs/CENTRAL_WORKSPACE.md).
 
-## Compact Handoff in v0.4.2
+## Compact Handoff in v0.4.2+
 
 The generated Handoff is intentionally an operational turnover note rather than a verbose database report.
 
@@ -103,11 +108,11 @@ Each driver appears once in that section. All unresolved matched BOL order numbe
 
 The compact Handoff deliberately omits Empty Call Date, route, and local BOL status from that copied section; those details remain available in the focused Missing BOL workspace.
 
-The old visible `NEEDS FOLLOW-UP`, `WAITING / PENDING`, and `COMPLETED TODAY` headings are no longer used by the v0.4.2 runtime draft. The underlying open/completed/local-day classification remains deterministic and regression-tested.
+The old visible `NEEDS FOLLOW-UP`, `WAITING / PENDING`, and `COMPLETED TODAY` headings are no longer used by the runtime draft. The underlying open/completed/local-day classification remains deterministic and regression-tested.
 
 See [`docs/WORK_LOG_HANDOFF.md`](docs/WORK_LOG_HANDOFF.md).
 
-## Automatic Light/Dark text
+## Automatic Light/Dark text and v0.4.3 stream palette
 
 WAA has explicit Light and Dark modes. “Auto” text means ordinary controls inherit the active palette automatically; it does not add an OS/System appearance option.
 
@@ -118,6 +123,8 @@ Theme ownership is centralized in:
 - `Themes/BaseStyles.xaml`
 
 `ThemeManager` swaps only the active palette. Styles use `DynamicResource`, so the visible fleet, driver/task workspaces, Handoff, inputs, DataGrid generated text, selected/disabled/hover/focus states, tooltips, and semantic text update live without restart or route reset.
+
+In v0.4.3, dark mode uses gunmetal app/panel/header surfaces. Purple is the primary semantic accent for selection, focus, breadcrumbs, Handoff, and highlighted actions. Green is the positive semantic accent for completed state and `Next Needing Attention`. Ordinary text remains neutral and readable; there is no glow, blur, gradient, or decorative animation. Light mode preserves the same semantic purple/green roles on light neutral surfaces.
 
 Theme preference remains local SQLite. Preference writes occur off the UI thread and a failed write restores the prior visible theme.
 
@@ -207,7 +214,7 @@ Upgrade:
 4. Retain `%LOCALAPPDATA%\WAA`.
 5. Start `WAA.exe`.
 
-Application files and user data are separate. v0.4.x navigation, theming, startup hotfix, and compact Handoff require no new database schema migration. Replacing the portable folder leaves roster, observations, contacts, work history, BOL state/actions, threshold, and appearance preference under `%LOCALAPPDATA%\WAA`.
+Application files and user data are separate. v0.4.3 requires no new database schema migration. Replacing the portable folder leaves roster, observations, contacts, work history, BOL state/actions, threshold, and appearance preference under `%LOCALAPPDATA%\WAA`.
 
 ## Permanent exclusions
 
@@ -232,7 +239,7 @@ This repository is public. Source/tests use synthetic identities, orders, routes
 ## Documentation
 
 - [`docs/CENTRAL_WORKSPACE.md`](docs/CENTRAL_WORKSPACE.md) — one-window navigation, state, keyboard, and performance contract
-- [`docs/THEMING.md`](docs/THEMING.md) — Auto text, palettes, semantic colors, contrast, and source audit
+- [`docs/THEMING.md`](docs/THEMING.md) — Auto text, stream palette, semantic colors, contrast, and source audit
 - [`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) — report contracts, precedence, and weighted calculations
 - [`docs/IDLE_WORKFLOW.md`](docs/IDLE_WORKFLOW.md) — current-cycle idle accountability and queue ordering
 - [`docs/MISSING_BOL_WORKFLOW.md`](docs/MISSING_BOL_WORKFLOW.md) — authoritative Missing BOL workflow
