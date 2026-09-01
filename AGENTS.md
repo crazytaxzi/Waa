@@ -87,9 +87,11 @@ WAA is a clean, driver-centric Windows work application. Current `main`, this fi
 - Subtle/Disabled/Primary/Selected/Link/semantic/focus/editor colors are theme-aware.
 - Purple is the primary selection/focus/breadcrumb/Handoff highlight role; green is the positive/completed/Next Needing Attention role; ordinary text remains neutral.
 - v0.4.5 permits only the bounded ambient-motion layer approved by the user: one faint scanline, a small fixed set of sparse electric-blue motes, and restrained button hover/press motion.
-- Ambient effects run only in Dark mode, only when the persisted WAA preference is enabled, and only when Windows `SystemParameters.ClientAreaAnimation` permits client animation.
+- Ambient effects run only in Dark mode and only when the current WAA ambient-motion state is enabled.
+- When no WAA ambient-motion preference has ever been saved, Windows `SystemParameters.ClientAreaAnimation` may seed the initial runtime default. It must never permanently disable or grey out the WAA motion control.
+- Once the user explicitly chooses motion on/off, that persisted WAA preference is authoritative on later launches even when Windows/RDP/enterprise policy reports client-area animation disabled.
 - Ambient motion must remain non-interactive, palette-driven, timer-free, dependency-free, and cheap on low-spec hardware. No per-frame particle creation, blur, glow, shader, background worker, or animation over DataGrid rows/editable text.
-- The ambient-motion preference uses the existing `settings` table, defaults enabled when absent, and requires no database schema version change.
+- The ambient-motion preference uses the existing `settings` table and requires no database schema version change.
 - Button motion must remain render-only and subtle; do not alter layout, keyboard behavior, hit targets, commands, or semantic colors.
 - DataGrid generated text explicitly follows active cell/theme foreground and must not fall back to system black.
 - Semantic state belongs in flags/enums; view-models do not expose WPF Brush/Color objects.
@@ -170,7 +172,7 @@ Unless explicitly reversed by the user, do not add or create placeholders for:
 
 ## Current product sequence
 
-Implemented through **WAA v0.4.5**:
+Implemented through **WAA v0.4.5.1**:
 
 1. Rolling 7 Day ingestion, durable roster identity, weighted metrics, threshold, prioritized virtualized fleet.
 2. Current-cycle idle accountability and deterministic queue ordering.
@@ -183,9 +185,10 @@ Implemented through **WAA v0.4.5**:
 9. v0.4.2 compact Handoff: alphabetical one-line driver narratives plus grouped `Missing BOLs:` order lists.
 10. v0.4.3 presentation refinement: denser virtualized Fleet Queue, compact Driver Code/Unit identity without duplicate Leader text, full-row click/Enter preserved, and centralized gunmetal/neon-purple/neon-green contrast-safe stream palette.
 11. v0.4.4 presentation refinement: Driver Leader-separated Handoff narrative/Missing BOL groups with current-leader preference and historical fallback, plus explicit MainWindow/root-shell dynamic background binding for complete dark-mode coverage.
-12. v0.4.5 ambient motion: dark-only faint scanline, eight sparse electric-blue motes, persisted Motion toggle with Windows reduced-motion gating, and restrained template-local button hover/press feedback.
+12. v0.4.5 ambient motion: dark-only faint scanline, eight sparse electric-blue motes, persisted Motion control, and restrained template-local button hover/press feedback.
+13. v0.4.5.1 motion-control hotfix: Windows reduced-animation state seeds only the unsaved first-run default; the WAA Motion button always remains usable and an explicit WAA on/off choice overrides later Windows/RDP animation flags.
 
 Future work remains separate unless explicitly requested:
 
-13. Maintenance evaluation.
-14. DOT evaluation.
+14. Maintenance evaluation.
+15. DOT evaluation.
