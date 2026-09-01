@@ -10,6 +10,8 @@
                 <ResourceDictionary Source="Themes/BaseStyles.xaml" />
             </ResourceDictionary.MergedDictionaries>
 
+            <vm:MissingBolSummaryDisplayConverter x:Key="MissingBolSummaryDisplayConverter" />
+
             <DataTemplate DataType="{x:Type vm:FleetQueueWorkspaceViewModel}">
                 <views:FleetQueueView />
             </DataTemplate>
