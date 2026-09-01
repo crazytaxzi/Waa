@@ -50,7 +50,7 @@ public sealed class WorkLogMigrationTests
             Assert.Equal(
                 1L,
                 ScalarLong(connection, "SELECT COUNT(*) FROM work_entries WHERE linked_idle_contact_event_id = 1;"));
-            Assert.Equal(3L, ScalarLong(connection, "PRAGMA user_version;"));
+            Assert.Equal(2L, ScalarLong(connection, "PRAGMA user_version;"));
             Assert.Equal(
                 0L,
                 ScalarLong(
