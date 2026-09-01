@@ -24,7 +24,8 @@ public partial class MainWindow : Window
         InitializeComponent();
         _viewModel = viewModel;
         _themePreferenceStore = themePreferenceStore;
-        _ambientMotionEnabled = themePreferenceStore.GetAmbientMotionEnabled();
+        var storedAmbientMotionPreference = themePreferenceStore.GetAmbientMotionPreference();
+        _ambientMotionEnabled = storedAmbientMotionPreference ?? SystemParameters.ClientAreaAnimation;
         DataContext = viewModel;
         Loaded += OnLoaded;
         SourceInitialized += OnSourceInitialized;
@@ -94,12 +95,6 @@ public partial class MainWindow : Window
 
     private async void OnAmbientMotionToggleClicked(object sender, RoutedEventArgs e)
     {
-        if (!SystemParameters.ClientAreaAnimation)
-        {
-            UpdateAmbientMotionState();
-            return;
-        }
-
         var previous = _ambientMotionEnabled;
         _ambientMotionEnabled = !previous;
         AmbientMotionToggleButton.IsEnabled = false;
@@ -160,9 +155,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var shouldRun = _ambientMotionEnabled &&
-                        ThemeManager.IsDarkMode &&
-                        SystemParameters.ClientAreaAnimation;
+        var shouldRun = _ambientMotionEnabled && ThemeManager.IsDarkMode;
         var storyboard = (Storyboard)FindResource("AmbientMotionStoryboard");
 
         if (shouldRun)
@@ -192,13 +185,6 @@ public partial class MainWindow : Window
     {
         if (AmbientMotionToggleButton is null)
         {
-            return;
-        }
-
-        if (!SystemParameters.ClientAreaAnimation)
-        {
-            AmbientMotionToggleButton.Content = "Motion reduced";
-            AmbientMotionToggleButton.IsEnabled = false;
             return;
         }
 
