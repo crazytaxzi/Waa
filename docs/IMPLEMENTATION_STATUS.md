@@ -2,17 +2,19 @@
 
 ## Current bounded release
 
-**WAA v0.4.5 — Ambient Motion Theme Layer, PR-tree Windows-validated.**
+**WAA v0.4.5 — Ambient Motion Theme Layer, merged to `main` and Windows-validated.**
 
 This release is presentation-only. It adds bounded ambient shell motion, a persisted Motion setting, and restrained button feedback. It does not change database schema/version, report parsing, queue priority, durable identity, work/BOL/Handoff behavior, route identity, or `%LOCALAPPDATA%\WAA` compatibility.
 
-Validated release branch head before this status commit: `472fd8fbb6aa318c6e1761403c7ecb81ae77dcfe`.
+Merged product commit: `0d9a55ebf54c2feb955e5332c299bfa894118af5`.
 
-PR #7 Windows validation: **Windows build, test, and portable package #76**, run ID `33536942344`, September 1, 2026 — **success**.
+Merged-main Windows validation: **Windows build, test, and portable package #81**, run ID `33537683886`, September 1, 2026 — **success**.
+
+This documentation-only status commit must pass the same workflow; its resulting portable artifact is the final documentation-aligned delivery build.
 
 ## v0.4.5 ambient shell
 
-Dark mode now has a deliberately faint decorative layer:
+Dark mode has a deliberately faint decorative layer:
 
 - one slow rolling scanline
 - eight sparse 2–3 pixel electric-blue motes
@@ -56,9 +58,11 @@ Still preserved:
 - `%LOCALAPPDATA%\WAA` data and preference compatibility
 - self-contained Windows x64 portable deployment
 
-## Branch validation
+## Validation
 
-PR #7 release tree, workflow **#76**, run ID `33536942344`:
+PR #7 release tree, workflow **#76**, run ID `33536942344`: success.
+
+Merged product `main`, workflow **#81**, run ID `33537683886`:
 
 - restore: passed
 - warnings-as-errors Release build: passed
@@ -69,13 +73,9 @@ PR #7 release tree, workflow **#76**, run ID `33536942344`:
 - build: **0 warnings, 0 errors**
 - self-contained win-x64 publish: passed
 - portable artifact upload: passed
-- branch artifact SHA-256: `622231f126a0c45c5990e4ff99484098c82de30772c9617801a7d91e97970c3e`
+- merged-product artifact SHA-256: `74647439fd8b1c383f2839ac0196c10370e7010e2acdc16b2fad448fb9f0bb9f`
 
 An earlier PR run correctly caught an old shell-theme regression assertion that depended on the pre-overlay XAML indentation/layout. The test was changed to validate dynamic shell-background usage semantically; production dark-shell behavior was not weakened. Button motion was also tightened to a template-local transform before final branch validation.
-
-## Final validation gate
-
-This documentation-aligned PR head must pass the same full Windows workflow. PR #7 must then merge normally to `main`, and the exact merged-main commit must pass restore/build/test/publish/artifact upload again. Only the validated merged-main portable artifact is delivered.
 
 ## Database compatibility
 
