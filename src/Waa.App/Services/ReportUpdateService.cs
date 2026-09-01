@@ -95,44 +95,15 @@ public sealed class ReportUpdateService
                 ? NotConfiguredMissingBol()
                 : new ReportSourceUpdateResult(
                     ReportSourceUpdateState.Failed,
-                    false,
-                    $"Downloads folder was not found: {downloads}",
+                    _missingBolRepository.ClearCurrent(),
+                    $"Downloads folder was not found: {downloads}; no Missing BOL rows shown",
                     null,
                     null);
             return Combine(rollingFailure, bolFailure);
         }
 
         var rolling = UpdateRollingSevenDay(downloads);
-        string? attachMessage = null;
-        var attachFailed = false;
-        if (_missingBolRepository is not null)
-        {
-            try
-            {
-                var attachedTasks = _missingBolRepository.AttachExactMatchesAndCreateTasks();
-                if (attachedTasks > 0)
-                {
-                    attachMessage =
-                        $"Attached {attachedTasks.ToString(CultureInfo.InvariantCulture)} previously unmatched item(s) by exact Driver Code.";
-                }
-            }
-            catch (Exception exception) when (exception is SqliteException or InvalidOperationException)
-            {
-                attachFailed = true;
-                attachMessage = $"Exact-code attachment failed: {exception.Message}";
-            }
-        }
-
         var missingBol = UpdateMissingBol(downloads);
-        if (attachMessage is not null)
-        {
-            missingBol = missingBol with
-            {
-                State = attachFailed ? ReportSourceUpdateState.Failed : missingBol.State,
-                Message = $"{missingBol.Message} {attachMessage}"
-            };
-        }
-
         return Combine(rolling, missingBol);
     }
 
@@ -240,10 +211,11 @@ public sealed class ReportUpdateService
             .ToArray();
         if (paths.Length == 0)
         {
+            var changed = _missingBolRepository.ClearCurrent();
             return new ReportSourceUpdateResult(
                 ReportSourceUpdateState.NotFound,
-                false,
-                "No Missing BOL workbook found; saved BOL state preserved",
+                changed,
+                "No Missing BOL workbook found; no Missing BOL rows shown",
                 null,
                 null);
         }
@@ -263,7 +235,7 @@ public sealed class ReportUpdateService
                     return new ReportSourceUpdateResult(
                         ReportSourceUpdateState.Current,
                         false,
-                        $"Missing BOL already current{warning}",
+                        $"Missing BOL view already matches {Path.GetFileName(path)}{warning}",
                         Path.GetFileName(path),
                         null);
                 }
@@ -279,29 +251,26 @@ public sealed class ReportUpdateService
                     ? $"; ignored {failures.Count.ToString(CultureInfo.InvariantCulture)} newer invalid candidate(s)"
                     : string.Empty;
                 return new ReportSourceUpdateResult(
-                    result.AlreadyAccepted
-                        ? ReportSourceUpdateState.Current
-                        : ReportSourceUpdateState.Imported,
+                    ReportSourceUpdateState.Imported,
                     result.Imported,
-                    result.AlreadyAccepted
-                        ? $"Missing BOL already current{ignored}"
-                        : $"Updated {result.ItemCount.ToString(CultureInfo.InvariantCulture)} Missing BOL order(s) from {Path.GetFileName(path)}; created {result.CreatedTaskCount.ToString(CultureInfo.InvariantCulture)} linked task(s){ignored}",
+                    $"Showing {result.ItemCount.ToString(CultureInfo.InvariantCulture)} Missing BOL order(s) from {Path.GetFileName(path)} — read-only, not stored{ignored}",
                     Path.GetFileName(path),
                     null);
             }
             catch (Exception exception) when (
                 exception is IOException or UnauthorizedAccessException or ReportValidationException or
-                InvalidOperationException or SqliteException)
+                InvalidOperationException)
             {
                 failures.Add($"{Path.GetFileName(path)}: {exception.Message}");
             }
         }
 
+        var cleared = _missingBolRepository.ClearCurrent();
         var detail = failures.Count > 0 ? failures[0] : "No candidate could be read.";
         return new ReportSourceUpdateResult(
             ReportSourceUpdateState.Failed,
-            false,
-            $"Missing BOL update failed — {detail}; last accepted BOL state preserved",
+            cleared,
+            $"Missing BOL view could not be loaded — {detail}; no Missing BOL rows shown",
             null,
             null);
     }
