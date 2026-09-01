@@ -149,7 +149,12 @@ public sealed record MissingBolUnmatchedRecord(
 public sealed record MissingBolDriverSummary(
     int OpenCount,
     DateOnly? OldestOpenEmptyCallDate,
-    string OrderSearchText);
+    string OrderSearchText)
+{
+    // Upgrade-only metadata. Old v0.3-v0.4.5 BOL tasks remain in SQLite for
+    // non-destructive compatibility, but they are excluded from current Open Work.
+    public int LegacyOpenTaskCount { get; init; }
+}
 
 public sealed record MissingBolFleetState(
     IReadOnlyDictionary<string, MissingBolDriverSummary> DriverSummaries,
