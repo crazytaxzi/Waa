@@ -27,23 +27,26 @@ public sealed class AmbientMotionRegressionTests
     }
 
     [Fact]
-    public void AmbientMotion_OnlyRunsForDarkModeUserPreferenceAndWindowsAnimations()
+    public void AmbientMotion_UsesWindowsOnlyAsInitialDefaultAndKeepsUserControlAuthoritative()
     {
         var code = ReadAppFile("MainWindow.xaml.cs");
 
-        Assert.Contains("_ambientMotionEnabled", code, StringComparison.Ordinal);
-        Assert.Contains("ThemeManager.IsDarkMode", code, StringComparison.Ordinal);
-        Assert.Contains("SystemParameters.ClientAreaAnimation", code, StringComparison.Ordinal);
+        Assert.Contains("GetAmbientMotionPreference()", code, StringComparison.Ordinal);
+        Assert.Contains("storedAmbientMotionPreference ?? SystemParameters.ClientAreaAnimation", code, StringComparison.Ordinal);
+        Assert.Contains("var shouldRun = _ambientMotionEnabled && ThemeManager.IsDarkMode;", code, StringComparison.Ordinal);
+        Assert.Contains("AmbientMotionToggleButton.IsEnabled = true", code, StringComparison.Ordinal);
         Assert.Contains("AmbientMotionLayer.Visibility = Visibility.Visible", code, StringComparison.Ordinal);
         Assert.Contains("AmbientMotionLayer.Visibility = Visibility.Collapsed", code, StringComparison.Ordinal);
         Assert.Contains("storyboard.Begin", code, StringComparison.Ordinal);
         Assert.Contains("storyboard.Stop", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("if (!SystemParameters.ClientAreaAnimation)", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("Motion reduced", code, StringComparison.Ordinal);
         Assert.DoesNotContain("DispatcherTimer", code, StringComparison.Ordinal);
         Assert.DoesNotContain("System.Timers", code, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void AmbientMotionPreference_DefaultsOnAndPersistsWithoutSchemaChange()
+    public void AmbientMotionPreference_ExposesMissingValueAndPersistsWithoutSchemaChange()
     {
         var root = Path.Combine(Path.GetTempPath(), "WaaAmbientMotionTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -51,10 +54,15 @@ public sealed class AmbientMotionRegressionTests
         {
             var store = new ThemePreferenceStore(Path.Combine(root, "waa.db"));
 
+            Assert.Null(store.GetAmbientMotionPreference());
             Assert.True(store.GetAmbientMotionEnabled());
+
             store.SetAmbientMotionEnabled(false);
+            Assert.False(store.GetAmbientMotionPreference());
             Assert.False(store.GetAmbientMotionEnabled());
+
             store.SetAmbientMotionEnabled(true);
+            Assert.True(store.GetAmbientMotionPreference());
             Assert.True(store.GetAmbientMotionEnabled());
         }
         finally
