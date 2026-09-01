@@ -425,6 +425,7 @@ public sealed class WorkspaceNavigationTests
 
         environment.ViewModel.NextWorkItemCommand.Execute(null);
         await WaitUntilAsync(() => environment.ViewModel.CurrentRoute == WorkspaceRoute.IdleTask);
+        await WaitUntilAsync(() => environment.ViewModel.NextWorkItemCommand.CanExecute(null));
 
         environment.ViewModel.NextWorkItemCommand.Execute(null);
         await WaitUntilAsync(() => environment.ViewModel.CurrentRoute == WorkspaceRoute.WorkItemTask);
