@@ -196,7 +196,7 @@ public sealed class DriverWorkspaceViewModel : WorkspaceViewModel
     public string ActivityEmptyText => "No activity recorded today.";
     public string FocusDescription => Focus switch
     {
-        DriverWorkspaceFocus.MissingBol => "Missing BOL work is in focus.",
+        DriverWorkspaceFocus.MissingBol => "Current Missing BOL report is in focus.",
         DriverWorkspaceFocus.OpenWork => "Open manual work is in focus.",
         _ => string.Empty
     };
@@ -220,6 +220,8 @@ public sealed class IdleTaskWorkspaceViewModel : WorkspaceViewModel
     public string ReportCycleDisplay => Driver.Record.ReportCycleDate.ToString("M/d/yyyy", CultureInfo.CurrentCulture);
 }
 
+// Kept only so upgraded legacy BOL action rows can still be represented internally
+// if encountered. v0.4.6 does not create or display current BOL action history.
 public sealed class MissingBolActionHistoryItemViewModel
 {
     public MissingBolActionHistoryItemViewModel(MissingBolActionRecord record)
