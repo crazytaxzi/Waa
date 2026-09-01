@@ -1,197 +1,127 @@
-# WAA Theming v0.4.4
+# WAA Theming v0.4.5
 
 ## Meaning of Auto text
 
-“Auto” text in WAA means ordinary UI text automatically follows the currently selected Light or Dark palette through WPF resource inheritance and `DynamicResource` references.
-
-It does **not** mean an OS-synchronized/System appearance option. WAA keeps the existing explicit Light mode / Dark mode choice and stores that preference locally.
+“Auto” text in WAA means ordinary UI text automatically follows the currently selected Light or Dark palette through WPF resource inheritance and `DynamicResource` references. It does **not** mean an OS-synchronized/System appearance mode. WAA keeps the explicit Light/Dark choice and stores that preference locally.
 
 ## Resource ownership
 
-Theme color ownership is centralized:
+Theme color ownership remains centralized:
 
 - `Themes/LightColors.xaml` — literal colors for Light mode
 - `Themes/DarkColors.xaml` — literal colors for Dark mode
-- `Themes/BaseStyles.xaml` — control styles that consume palette keys through `DynamicResource`
-- `App.xaml` — merges the active palette plus base styles and workspace DataTemplates
+- `Themes/BaseStyles.xaml` — control styles consuming palette keys through `DynamicResource`
+- `App.xaml` — active palette, base styles, and workspace DataTemplates
 - `ThemeManager` — replaces only the active palette dictionary
 
-Literal theme colors are not allowed in MainWindow, UserControls, view-models, converters, or task templates.
+Literal theme colors are not allowed in MainWindow, UserControls, view-models, converters, or task templates. Light and Dark dictionaries must contain matching key sets.
 
-The Light and Dark dictionaries must contain matching key sets. Missing keys are a test failure.
+## Stream palette
 
-## v0.4.3 stream palette
-
-The v0.4.3 presentation refresh keeps gunmetal/neutral surfaces as the visual foundation and uses the stream palette as restrained semantic accents rather than decorative fills.
-
-Dark-mode core surfaces are:
+Dark mode uses gunmetal/neutral surfaces as the foundation:
 
 - app background `#11161B`
 - panel background `#1A232C`
 - raised/subtle panel `#24303A`
 - header chrome `#202A33`
 
-Accent ownership is semantic:
+Purple remains the primary selection/focus/breadcrumb/Handoff accent. Green remains the positive/completed/`Next Needing Attention` accent. Ordinary body text remains neutral/light rather than neon. Light mode preserves the same semantic accent roles on light neutral surfaces.
 
-- purple is the primary accent for selection, focus, breadcrumbs, Handoff, and highlighted actions
-- green is the success/positive accent for completed state and `Next Needing Attention`
-- ordinary body text remains neutral/light rather than neon
+## Complete shell background
 
-Primary purple uses `PrimaryBrush` / `PrimaryHoverBrush`; positive green uses `SuccessBrush` / `SuccessHoverBrush`. The requested neon fills use a dark button foreground where needed so normal-text contrast remains compliant.
+`MainWindow`, the outer shell Grid, and the inner client Grid explicitly consume `WindowBackgroundBrush` through `DynamicResource`. This prevents a Windows/default light surface from remaining visible around dark-themed content. The Windows title bar continues to use the existing DWM helper where supported.
 
-There is no glow, blur, animation, gradient, or other decorative effect. Light mode keeps the same purple/green semantic roles on light neutral surfaces rather than forcing gunmetal backgrounds into the light palette.
+## v0.4.5 ambient motion
 
-## v0.4.4 shell background correction
+Ambient motion is an intentionally bounded visual layer, not a general animation framework.
 
-`MainWindow` and its root client Grid explicitly bind their backgrounds to `WindowBackgroundBrush` through `DynamicResource`.
+Dark-mode ambient effects consist of:
 
-This closes the exposed shell/margin gap where a Windows/default light surface could remain visible even while the rest of WAA had switched to the dark palette. The correction does not introduce a separate shell color or code-behind brush; the whole client background uses the same centralized palette role as the rest of the application and updates during live Light/Dark switching.
+- one faint rolling scanline using `AmbientScanlineBrush`
+- eight fixed sparse 2–3 pixel electric-blue motes using `AmbientParticleBrush`
+- very low opacity and slow 11–19 second movement
 
-The title bar continues to use the existing DWM helper where supported.
+The ambient overlay is clipped to the MainWindow client area, sits above the shell visually, and is `IsHitTestVisible=False`. It cannot intercept mouse input or alter workspace routing, selection, text editing, or button hit targets.
+
+Ambient motion runs only when all three conditions are true:
+
+1. the user’s persisted Ambient Motion preference is enabled
+2. Dark mode is active
+3. Windows `SystemParameters.ClientAreaAnimation` permits client-area animation
+
+If Windows disables client-area animation, WAA suppresses the effect and the shell control reports `Motion reduced` rather than overriding the operating-system accessibility preference.
+
+The user control displays `Motion off` while the persisted preference is enabled and `Motion on` while disabled. The preference defaults enabled when no value exists and is stored as `appearance_ambient_motion` in the existing `settings` table. No schema version or migration is introduced. Preference writes run off the UI thread; a failed save restores the previous visible state.
+
+Ambient motion is intentionally cheap:
+
+- no DispatcherTimer or recurring polling
+- no particle engine or per-frame particle allocation
+- no background worker
+- no blur, glow, shadow, shader, or external graphics dependency
+- no animation inside DataGrid rows or editable text controls
+- one fixed Storyboard starts/stops with theme/preference/accessibility state
+
+## Button motion
+
+`BaseButtonStyle` adds restrained template-local render feedback:
+
+- hover scales the template border to only `1.012x`
+- leaving hover returns it to `1.0x`
+- press uses a slight opacity reduction
+- the ScaleTransform belongs to each button template instance rather than a shared style transform
+
+The transform is render-only. It does not change layout measurement, commands, keyboard accessibility, semantic colors, focus boundaries, or click targets. Existing neutral/purple/green hover colors remain authoritative.
 
 ## Ordinary foreground inheritance
 
-`TextBrush` is the default ordinary-text foreground. Implicit styles make it the normal foreground for text-bearing WPF controls rather than requiring every TextBlock to set a foreground individually.
+`TextBrush` is the default ordinary-text foreground. Implicit styles cover Window, TextBlock, Label, ContentControl, Button, TextBox, RichTextBox, ToolTip, DataGrid, generated DataGrid text/edit elements, ListBox/ListView, ComboBox, CheckBox, RadioButton, GroupBox, TabItem, MenuItem, and Hyperlink.
 
-Theme-aware implicit/base styles currently cover the controls used by WAA, including:
+`SubtleTextBrush` handles secondary text. `DisabledTextBrush` is a dedicated disabled-state foreground rather than relying on opacity or Windows defaults.
 
-- Window
-- TextBlock
-- Label
-- ContentControl
-- Button
-- TextBox
-- RichTextBox
-- ToolTip
-- DataGrid, DataGridRow, DataGridCell, DataGridColumnHeader
-- DataGridTextColumn generated display/edit elements
-- ListBox/ListBoxItem
-- ListView/ListViewItem
-- ComboBox/ComboBoxItem
-- CheckBox
-- RadioButton
-- GroupBox
-- TabItem
-- MenuItem
-- Hyperlink
+## Selected rows, inputs, and semantic state
 
-`SubtleTextBrush` is used for secondary text. `DisabledTextBrush` is a dedicated disabled-state foreground; disabled readability does not rely on opacity or a Windows system default.
+Selected DataGrid rows use `SelectedRowBrush` / `SelectedRowTextBrush`. Generated DataGrid text follows the active cell foreground so selection never falls back to system black.
 
-## Buttons, breadcrumbs, hover, and selected rows
+TextBox/RichTextBox text, caret, selection, backgrounds, borders, focus borders, and disabled state remain palette driven. Handoff, New Work, idle notes, and Missing BOL notes do not inject fixed foreground/caret colors.
 
-Purple primary controls use:
-
-- `PrimaryBrush` / `PrimaryButtonTextBrush`
-- `PrimaryHoverBrush` / `PrimaryButtonTextBrush`
-
-Green positive controls use:
-
-- `SuccessBrush` / `SuccessButtonTextBrush`
-- `SuccessHoverBrush` / `SuccessButtonTextBrush`
-
-`Handoff` uses the purple primary style. `Next Needing Attention` uses the green success style. Theme-mode and `Update Reports` buttons remain neutral controls.
-
-Breadcrumb text uses `BreadcrumbTextBrush`. Focus boundaries use `FocusBorderBrush`. Fleet row hover uses the dedicated `DataGridHoverRowBrush` rather than a one-off view color.
-
-The base button hover style updates the Button background property rather than overriding a named border inside the template. This lets both accent styles override hover background correctly and prevents a generic hover surface from being combined with accent-button text.
-
-Selected DataGrid rows use:
-
-- `SelectedRowBrush`
-- `SelectedRowTextBrush`
-
-DataGrid cells inherit selected-row text state, and `DataGridTextColumn` uses explicit reusable dynamic element/editing styles so generated elements do not fall back to a WPF system foreground.
-
-The Fleet Queue uses compact row/cell styles derived from the central DataGrid styles. Density changes alter only row minimum height and cell padding; they do not bypass centralized selected/hover/focus/text resources or virtualization.
-
-## Inputs
-
-TextBox/RichTextBox text, caret, selection, backgrounds, borders, focus borders, and disabled state are palette driven.
-
-Handoff, New Work, idle note, and Missing BOL note editors rely on the implicit TextBox style; their XAML does not inject fixed foreground/caret colors.
-
-## Semantic state
-
-View-models expose semantic state rather than WPF Brush objects. XAML styles/triggers translate semantic state into palette resources.
-
-Current semantic palette pairs include:
-
-- `WarningTextBrush` / `WarningBackgroundBrush`
-- `FollowUpTextBrush` / `FollowUpBackgroundBrush`
-- `CompletedTextBrush` / `CompletedBackgroundBrush`
-- `QuietTextBrush` / `QuietBackgroundBrush`
-- `ErrorTextBrush` / `ErrorBackgroundBrush`
-- `InformationTextBrush` / `InformationBackgroundBrush`
-
-Completed/positive state uses the green palette role where appropriate. Status remains understandable through words first; color is supplemental.
+Semantic state remains word-first and palette-assisted through warning, follow-up, completed, quiet, error, and information resources. View-models expose semantic state rather than WPF Brush/Color objects.
 
 ## Live switching
 
-`ThemeManager.Apply(bool darkMode)` loads the selected palette ResourceDictionary and replaces the current palette entry in `Application.Resources.MergedDictionaries`. Base styles and DataTemplates stay in place.
+`ThemeManager.Apply(bool darkMode)` swaps the active palette dictionary. Base styles and DataTemplates remain in place. Because brushes and explicit shell backgrounds use dynamic resources, the visible application updates without restart or navigation reset.
 
-Because style brushes and the explicit MainWindow/root-shell backgrounds are dynamic resources, visible controls and the full client background update immediately without application restart or route recreation. Theme switching does not reset navigation, queue selection, search, notes, or Handoff draft state.
-
-The Windows title bar is updated through the existing DWM helper where supported.
-
-Theme preference persistence remains SQLite-backed. The preference write runs off the UI thread; if it fails, WAA restores the prior visible theme and reports the error rather than leaving an unsaved appearance active.
+Switching to Light mode immediately stops/collapses the ambient layer. Returning to Dark mode restarts it only when the user preference and Windows animation permission allow it. Navigation, queue selection, search, notes, and Handoff drafts are not reset.
 
 ## Contrast requirements
 
-Automated palette tests calculate WCAG-style relative luminance/contrast deterministically from the actual palette values.
+Normal and important text combinations require at least **4.5:1**. Relevant boundaries/focus indicators require at least **3:1**. Ambient brushes are decorative only and never carry text/status meaning, so they do not replace contrast-tested foreground/background pairs.
 
-Normal and important text combinations require at least **4.5:1**, including:
+A contrast failure is fixed by adjusting the palette or style; tests are not removed to hide it.
 
-- `TextBrush` on window/panel/subtle/header surfaces
-- `SubtleTextBrush` on its actual surfaces
-- ordinary button text on normal and hover control backgrounds
-- `PrimaryButtonTextBrush` on `PrimaryBrush` and `PrimaryHoverBrush`
-- `SuccessButtonTextBrush` on `SuccessBrush` and `SuccessHoverBrush`
-- selected-row and fleet-hover text/background
-- DataGrid header text/background
-- TextBox/editor text/background
-- disabled text/background
-- warning/follow-up/completed semantic text on its semantic and panel surfaces
-- link and breadcrumb text on their actual surfaces
-- quiet/information semantic pairs
+## Source and motion audit
 
-Important UI boundaries/focus indicators require at least **3:1** where applicable, including panel/control borders and focus border against their surfaces.
+Repository tests enforce that:
 
-A contrast failure is fixed by adjusting the palette or style; tests are not removed to hide it. Recommended palette values may therefore be adapted when the literal value would fail the actual foreground/background pair.
-
-## Source audit test
-
-The repository-level theme audit scans application `.xaml` and `.cs` files, not just one screen. Outside the explicitly allowed palette files it rejects inappropriate fixed color patterns including:
-
-- hard-coded foreground/background/border/caret/selection hex values
-- named fixed foregrounds such as Black/White/Gray
-- `Brushes.*` UI color use
-- arbitrary `new SolidColorBrush(...)`
-- fixed Color construction
-- theme brush use through `StaticResource` where live switching requires `DynamicResource`
-- literal hex theme values outside the palette dictionaries
-
-The audit also checks:
-
-- Light/Dark key sets match
+- Light/Dark palette key sets match
 - every required palette key exists
-- the v0.4.3 stream palette retains the expected gunmetal/purple/green roles
-- ThemeManager does not recreate brushes in C#
-- App.xaml uses palette + base style dictionaries
-- generated DataGrid text is theme-aware
-- Handoff/task/workspace XAML contains no one-off literal theme colors
-- MainWindow and its root client surface explicitly use the dynamic `WindowBackgroundBrush`
+- literal UI colors remain confined to palette dictionaries
+- MainWindow/root client surfaces use dynamic `WindowBackgroundBrush`
+- ambient brushes are centralized palette resources
+- ambient layer is non-interactive and bounded to a fixed small number of motes
+- ambient code respects Dark mode, persisted preference, and Windows client-animation permission
+- no timer, blur, glow, or particle-engine path is introduced
+- button motion remains restrained and render-only
+- generated DataGrid/editor/button/selected/disabled text stays theme-safe
 - only MainWindow is a top-level Window
-- the central content host replaced the legacy split pane
+- the central content host remains the one-window workspace
 
 ## Adding a new visual state
 
-When new UI requires a color:
-
 1. Prefer existing semantic/ordinary resources.
-2. If a genuinely new theme role is needed, add the same key to both Light and Dark palettes.
-3. Reference the key through `DynamicResource` in BaseStyles or the focused view.
-4. Add the real foreground/background pair to contrast tests.
+2. If a new color role is genuinely needed, add the same key to both Light and Dark palettes.
+3. Reference it through `DynamicResource`.
+4. Add the real text/boundary pair to contrast tests when applicable.
 5. Do not expose Brush/Color from a view-model.
-6. Do not add a one-off literal color to a view.
-
-This keeps Light and Dark mode one coherent system instead of two slowly diverging sets of exceptions.
+6. Do not add one-off literal colors to views.
+7. Do not expand ambient motion beyond the bounded v0.4.5 layer without explicit user approval.
