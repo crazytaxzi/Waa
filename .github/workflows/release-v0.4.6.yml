@@ -1,0 +1,117 @@
+name: Publish WAA v0.4.6 Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release-v0.4.6.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-2025
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore Waa.sln
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build Waa.sln --configuration Release --no-restore
+
+      - name: Test
+        shell: pwsh
+        run: dotnet test Waa.sln --configuration Release --no-build
+
+      - name: Publish portable win-x64 application
+        shell: pwsh
+        run: |
+          $output = Join-Path $PWD 'artifacts\WAA-Portable-win-x64'
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+          dotnet publish src\Waa.App\Waa.App.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:PublishTrimmed=false `
+            -p:PublishReadyToRun=false `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            --output $output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item portable\README-FIRST.txt (Join-Path $output 'README-FIRST.txt')
+          @(
+            'WAA portable build',
+            'Release: v0.4.6',
+            'Product commit: 06d17181c214f1ead72b1d8331f8d79de258cb5b',
+            "Built from workflow commit: $env:GITHUB_SHA",
+            "Built UTC: $([DateTime]::UtcNow.ToString('O'))",
+            '.NET 8 Windows x64 self-contained'
+          ) | Set-Content -Path (Join-Path $output 'BUILD.txt') -Encoding UTF8
+
+      - name: Package release ZIP and checksum
+        shell: pwsh
+        run: |
+          $zip = Join-Path $PWD 'artifacts\WAA-Portable-win-x64-v0.4.6.zip'
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path (Join-Path $PWD 'artifacts\WAA-Portable-win-x64\*') -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  WAA-Portable-win-x64-v0.4.6.zip" | Set-Content -Path (Join-Path $PWD 'artifacts\WAA-Portable-win-x64-v0.4.6.sha256') -Encoding ascii
+          Write-Host "SHA256=$hash"
+
+      - name: Write release notes
+        shell: pwsh
+        run: |
+          @'
+          WAA v0.4.6 — Source-Only Missing BOL
+
+          Missing BOL is now a read-only view of the current `Order Details Missing BOL*.xlsx` file rather than a persisted workflow.
+
+          - Current BOL rows are held in memory only and are not stored in SQLite.
+          - No Missing BOL tasks, statuses, action history, notes, or resolution state are created.
+          - Exact normalized Driver Code matching remains unchanged.
+          - Current BOL rows are shown separately from actionable work and do not affect Open Work, Next Work Item, or queue priority.
+          - Unmatched current rows remain visible read-only.
+          - Handoff projects the current workbook's BOL rows transiently without persisting them.
+          - Legacy BOL database artifacts from earlier versions are left physically untouched for non-destructive upgrade safety but are no longer active product state.
+          - Report scanning remains once at launch plus explicit Update Reports.
+          - Existing idle/work history, theme settings, and ambient motion settings remain intact.
+
+          Windows x64 self-contained portable build. Close WAA before replacing the application folder. Keep `%LOCALAPPDATA%\WAA` unchanged.
+          '@ | Set-Content -Path release-notes.md -Encoding UTF8
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          $tag = 'v0.4.6'
+          $target = '06d17181c214f1ead72b1d8331f8d79de258cb5b'
+          $zip = 'artifacts\WAA-Portable-win-x64-v0.4.6.zip'
+          $checksum = 'artifacts\WAA-Portable-win-x64-v0.4.6.sha256'
+
+          gh release view $tag --repo $repo *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip $checksum --clobber --repo $repo
+          }
+          else {
+            gh release create $tag $zip $checksum `
+              --repo $repo `
+              --target $target `
+              --title 'WAA v0.4.6 — Source-Only Missing BOL' `
+              --notes-file release-notes.md
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
