@@ -10,108 +10,230 @@
         Background="{DynamicResource WindowBackgroundBrush}"
         WindowStartupLocation="CenterScreen"
         PreviewKeyDown="OnPreviewKeyDown">
-    <Grid Margin="12"
-          Background="{DynamicResource WindowBackgroundBrush}">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+    <Window.Resources>
+        <Storyboard x:Key="AmbientMotionStoryboard">
+            <DoubleAnimation Storyboard.TargetName="AmbientScanlineTransform"
+                             Storyboard.TargetProperty="Y"
+                             From="-90"
+                             To="980"
+                             Duration="0:0:19"
+                             RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="DustOneTransform"
+                             Storyboard.TargetProperty="Y"
+                             From="0"
+                             To="-18"
+                             Duration="0:0:11"
+                             AutoReverse="True"
+                             RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="DustTwoTransform"
+                             Storyboard.TargetProperty="X"
+                             From="0"
+                             To="16"
+                             Duration="0:0:13"
+                             AutoReverse="True"
+                             RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="DustThreeTransform"
+                             Storyboard.TargetProperty="Y"
+                             From="0"
+                             To="22"
+                             Duration="0:0:15"
+                             AutoReverse="True"
+                             RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="DustFourTransform"
+                             Storyboard.TargetProperty="X"
+                             From="0"
+                             To="-14"
+                             Duration="0:0:12"
+                             AutoReverse="True"
+                             RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="DustFiveTransform"
+                             Storyboard.TargetProperty="Y"
+                             From="0"
+                             To="-16"
+                             Duration="0:0:17"
+                             AutoReverse="True"
+                             RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="DustSixTransform"
+                             Storyboard.TargetProperty="X"
+                             From="0"
+                             To="18"
+                             Duration="0:0:14"
+                             AutoReverse="True"
+                             RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="DustSevenTransform"
+                             Storyboard.TargetProperty="Y"
+                             From="0"
+                             To="19"
+                             Duration="0:0:16"
+                             AutoReverse="True"
+                             RepeatBehavior="Forever" />
+            <DoubleAnimation Storyboard.TargetName="DustEightTransform"
+                             Storyboard.TargetProperty="X"
+                             From="0"
+                             To="-17"
+                             Duration="0:0:18"
+                             AutoReverse="True"
+                             RepeatBehavior="Forever" />
+        </Storyboard>
+    </Window.Resources>
 
-        <Border Grid.Row="0"
-                Style="{StaticResource PanelCardStyle}"
-                Padding="12,9"
-                Background="{DynamicResource HeaderBackgroundBrush}">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
+    <Grid Background="{DynamicResource WindowBackgroundBrush}">
+        <Grid Margin="12"
+              Background="{DynamicResource WindowBackgroundBrush}">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
 
-                <StackPanel Grid.Column="0" VerticalAlignment="Center">
-                    <TextBlock Text="WAA" FontSize="23" FontWeight="SemiBold" />
-                    <TextBlock Text="Work Accountability Assistant"
-                               Style="{StaticResource SubtleTextStyle}" />
-                </StackPanel>
+            <Border Grid.Row="0"
+                    Style="{StaticResource PanelCardStyle}"
+                    Padding="12,9"
+                    Background="{DynamicResource HeaderBackgroundBrush}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
 
-                <StackPanel Grid.Column="1" Margin="26,0" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding RosterSummaryText}" FontWeight="SemiBold" />
-                    <TextBlock Style="{StaticResource SubtleTextStyle}">
-                        <Run Text="Cycle " />
-                        <Run Text="{Binding ReportCycleText, Mode=OneWay}" />
-                        <Run Text="  •  " />
-                        <Run Text="{Binding MissingBolSummaryText, Mode=OneWay}" />
-                    </TextBlock>
-                </StackPanel>
+                    <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                        <TextBlock Text="WAA" FontSize="23" FontWeight="SemiBold" />
+                        <TextBlock Text="Work Accountability Assistant"
+                                   Style="{StaticResource SubtleTextStyle}" />
+                    </StackPanel>
 
-                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button x:Name="ThemeToggleButton"
-                            Margin="0,0,8,0"
-                            Click="OnThemeToggleClicked"
-                            automation:AutomationProperties.Name="Switch light or dark appearance" />
-                    <Button Margin="0,0,8,0"
-                            Content="Update Reports"
-                            Command="{Binding UpdateReportsCommand}"
-                            automation:AutomationProperties.Name="Update reports from Downloads" />
-                    <Button Content="Handoff"
-                            Command="{Binding OpenHandoffCommand}"
-                            Style="{StaticResource PrimaryButtonStyle}"
-                            automation:AutomationProperties.Name="Open shift handoff workspace" />
-                </StackPanel>
-            </Grid>
-        </Border>
+                    <StackPanel Grid.Column="1" Margin="26,0" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding RosterSummaryText}" FontWeight="SemiBold" />
+                        <TextBlock Style="{StaticResource SubtleTextStyle}">
+                            <Run Text="Cycle " />
+                            <Run Text="{Binding ReportCycleText, Mode=OneWay}" />
+                            <Run Text="  •  " />
+                            <Run Text="{Binding MissingBolSummaryText, Mode=OneWay}" />
+                        </TextBlock>
+                    </StackPanel>
 
-        <Border Grid.Row="1"
-                Margin="0,8,0,0"
-                Padding="9,6"
-                Background="{DynamicResource PanelSubtleBackgroundBrush}"
-                BorderBrush="{DynamicResource BorderBrush}"
-                BorderThickness="1"
-                CornerRadius="4"
-                Visibility="{Binding CanGoBack, Converter={StaticResource BooleanToVisibilityConverter}}">
-            <DockPanel LastChildFill="True">
-                <Button DockPanel.Dock="Left"
-                        Margin="0,0,10,0"
-                        Content="{Binding BackLabel}"
-                        Command="{Binding BackCommand}"
-                        Style="{StaticResource LinkButtonStyle}"
-                        automation:AutomationProperties.Name="{Binding BackLabel}" />
-                <TextBlock Text="{Binding BreadcrumbText}"
-                           VerticalAlignment="Center"
-                           FontWeight="SemiBold"
-                           TextTrimming="CharacterEllipsis"
-                           Style="{StaticResource BreadcrumbTextStyle}"
-                           automation:AutomationProperties.Name="Current workspace breadcrumb" />
-            </DockPanel>
-        </Border>
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button x:Name="AmbientMotionToggleButton"
+                                Margin="0,0,8,0"
+                                Click="OnAmbientMotionToggleClicked"
+                                automation:AutomationProperties.Name="Enable or disable ambient motion" />
+                        <Button x:Name="ThemeToggleButton"
+                                Margin="0,0,8,0"
+                                Click="OnThemeToggleClicked"
+                                automation:AutomationProperties.Name="Switch light or dark appearance" />
+                        <Button Margin="0,0,8,0"
+                                Content="Update Reports"
+                                Command="{Binding UpdateReportsCommand}"
+                                automation:AutomationProperties.Name="Update reports from Downloads" />
+                        <Button Content="Handoff"
+                                Command="{Binding OpenHandoffCommand}"
+                                Style="{StaticResource PrimaryButtonStyle}"
+                                automation:AutomationProperties.Name="Open shift handoff workspace" />
+                    </StackPanel>
+                </Grid>
+            </Border>
 
-        <ContentControl Grid.Row="2"
-                        Margin="0,8,0,8"
-                        Content="{Binding CurrentWorkspace}"
-                        HorizontalContentAlignment="Stretch"
-                        VerticalContentAlignment="Stretch"
-                        automation:AutomationProperties.Name="Central operations workspace" />
+            <Border Grid.Row="1"
+                    Margin="0,8,0,0"
+                    Padding="9,6"
+                    Background="{DynamicResource PanelSubtleBackgroundBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4"
+                    Visibility="{Binding CanGoBack, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <DockPanel LastChildFill="True">
+                    <Button DockPanel.Dock="Left"
+                            Margin="0,0,10,0"
+                            Content="{Binding BackLabel}"
+                            Command="{Binding BackCommand}"
+                            Style="{StaticResource LinkButtonStyle}"
+                            automation:AutomationProperties.Name="{Binding BackLabel}" />
+                    <TextBlock Text="{Binding BreadcrumbText}"
+                               VerticalAlignment="Center"
+                               FontWeight="SemiBold"
+                               TextTrimming="CharacterEllipsis"
+                               Style="{StaticResource BreadcrumbTextStyle}"
+                               automation:AutomationProperties.Name="Current workspace breadcrumb" />
+                </DockPanel>
+            </Border>
 
-        <Border Grid.Row="3"
-                Padding="9,6"
-                Background="{DynamicResource PanelSubtleBackgroundBrush}"
-                BorderBrush="{DynamicResource BorderBrush}"
-                BorderThickness="1"
-                CornerRadius="4">
-            <DockPanel LastChildFill="True">
-                <TextBlock DockPanel.Dock="Right"
-                           Margin="16,0,0,0"
-                           Text="{Binding ContactProgressText}"
-                           Style="{StaticResource SubtleTextStyle}"
-                           VerticalAlignment="Center" />
-                <TextBlock Text="{Binding StatusMessage}"
-                           VerticalAlignment="Center"
-                           TextTrimming="CharacterEllipsis"
-                           automation:AutomationProperties.LiveSetting="Polite"
-                           automation:AutomationProperties.Name="Application status" />
-            </DockPanel>
-        </Border>
+            <ContentControl Grid.Row="2"
+                            Margin="0,8,0,8"
+                            Content="{Binding CurrentWorkspace}"
+                            HorizontalContentAlignment="Stretch"
+                            VerticalContentAlignment="Stretch"
+                            automation:AutomationProperties.Name="Central operations workspace" />
+
+            <Border Grid.Row="3"
+                    Padding="9,6"
+                    Background="{DynamicResource PanelSubtleBackgroundBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                <DockPanel LastChildFill="True">
+                    <TextBlock DockPanel.Dock="Right"
+                               Margin="16,0,0,0"
+                               Text="{Binding ContactProgressText}"
+                               Style="{StaticResource SubtleTextStyle}"
+                               VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding StatusMessage}"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"
+                               automation:AutomationProperties.LiveSetting="Polite"
+                               automation:AutomationProperties.Name="Application status" />
+                </DockPanel>
+            </Border>
+        </Grid>
+
+        <Grid x:Name="AmbientMotionLayer"
+              Panel.ZIndex="20"
+              IsHitTestVisible="False"
+              ClipToBounds="True"
+              Visibility="Collapsed"
+              automation:AutomationProperties.Name="Ambient motion decoration">
+            <Rectangle Height="54"
+                       VerticalAlignment="Top"
+                       Fill="{DynamicResource AmbientScanlineBrush}"
+                       Opacity="0.045">
+                <Rectangle.RenderTransform>
+                    <TranslateTransform x:Name="AmbientScanlineTransform" />
+                </Rectangle.RenderTransform>
+            </Rectangle>
+
+            <Ellipse Width="3" Height="3" HorizontalAlignment="Left" VerticalAlignment="Top"
+                     Margin="96,164,0,0" Fill="{DynamicResource AmbientParticleBrush}" Opacity="0.16">
+                <Ellipse.RenderTransform><TranslateTransform x:Name="DustOneTransform" /></Ellipse.RenderTransform>
+            </Ellipse>
+            <Ellipse Width="2" Height="2" HorizontalAlignment="Left" VerticalAlignment="Top"
+                     Margin="284,628,0,0" Fill="{DynamicResource AmbientParticleBrush}" Opacity="0.12">
+                <Ellipse.RenderTransform><TranslateTransform x:Name="DustTwoTransform" /></Ellipse.RenderTransform>
+            </Ellipse>
+            <Ellipse Width="3" Height="3" HorizontalAlignment="Left" VerticalAlignment="Top"
+                     Margin="470,278,0,0" Fill="{DynamicResource AmbientParticleBrush}" Opacity="0.14">
+                <Ellipse.RenderTransform><TranslateTransform x:Name="DustThreeTransform" /></Ellipse.RenderTransform>
+            </Ellipse>
+            <Ellipse Width="2" Height="2" HorizontalAlignment="Right" VerticalAlignment="Top"
+                     Margin="0,190,178,0" Fill="{DynamicResource AmbientParticleBrush}" Opacity="0.15">
+                <Ellipse.RenderTransform><TranslateTransform x:Name="DustFourTransform" /></Ellipse.RenderTransform>
+            </Ellipse>
+            <Ellipse Width="3" Height="3" HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                     Margin="0,0,112,126" Fill="{DynamicResource AmbientParticleBrush}" Opacity="0.13">
+                <Ellipse.RenderTransform><TranslateTransform x:Name="DustFiveTransform" /></Ellipse.RenderTransform>
+            </Ellipse>
+            <Ellipse Width="2" Height="2" HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                     Margin="188,0,0,94" Fill="{DynamicResource AmbientParticleBrush}" Opacity="0.17">
+                <Ellipse.RenderTransform><TranslateTransform x:Name="DustSixTransform" /></Ellipse.RenderTransform>
+            </Ellipse>
+            <Ellipse Width="3" Height="3" HorizontalAlignment="Right" VerticalAlignment="Top"
+                     Margin="0,392,410,0" Fill="{DynamicResource AmbientParticleBrush}" Opacity="0.11">
+                <Ellipse.RenderTransform><TranslateTransform x:Name="DustSevenTransform" /></Ellipse.RenderTransform>
+            </Ellipse>
+            <Ellipse Width="2" Height="2" HorizontalAlignment="Left" VerticalAlignment="Top"
+                     Margin="760,112,0,0" Fill="{DynamicResource AmbientParticleBrush}" Opacity="0.14">
+                <Ellipse.RenderTransform><TranslateTransform x:Name="DustEightTransform" /></Ellipse.RenderTransform>
+            </Ellipse>
+        </Grid>
     </Grid>
 </Window>

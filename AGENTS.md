@@ -11,7 +11,7 @@ WAA is a clean, driver-centric Windows work application. Current `main`, this fi
 - `docs/WORK_LOG_HANDOFF.md` owns work history and Handoff behavior.
 - `docs/MISSING_BOL_WORKFLOW.md` owns Missing BOL import/matching/tasks/actions/source lifecycle.
 - `docs/CENTRAL_WORKSPACE.md` owns one-window routing/state/keyboard responsibilities.
-- `docs/THEMING.md` owns theme resources, Auto text, stream palette, semantic colors, contrast, and source auditing.
+- `docs/THEMING.md` owns theme resources, Auto text, stream palette, ambient motion, semantic colors, contrast, and source auditing.
 
 ## Driver/history invariants
 
@@ -76,7 +76,7 @@ WAA is a clean, driver-centric Windows work application. Current `main`, this fi
 - Fleet Queue Up/Down remains native DataGrid row navigation; Enter opens the focused row.
 - Fleet Queue keeps row/column virtualization, recycling, and content scrolling enabled.
 
-## Theme invariants
+## Theme and motion invariants
 
 - Ordinary text inherits active theme through `TextBrush` and implicit/base WPF styles.
 - No fixed ordinary text colors in MainWindow/UserControls/view-models/converters/code-behind/templates.
@@ -85,12 +85,16 @@ WAA is a clean, driver-centric Windows work application. Current `main`, this fi
 - Theme styles use `DynamicResource` so live switching does not require restart/navigation reset.
 - MainWindow and its root client surface explicitly consume `WindowBackgroundBrush` through `DynamicResource`; exposed shell/margin space must switch with the active palette.
 - Subtle/Disabled/Primary/Selected/Link/semantic/focus/editor colors are theme-aware.
-- v0.4.3 purple is the primary selection/focus/breadcrumb/Handoff highlight role; green is the positive/completed/Next Needing Attention role; ordinary text remains neutral.
-- No glow, blur, decorative animation, or one-off view color is part of the stream palette.
+- Purple is the primary selection/focus/breadcrumb/Handoff highlight role; green is the positive/completed/Next Needing Attention role; ordinary text remains neutral.
+- v0.4.5 permits only the bounded ambient-motion layer approved by the user: one faint scanline, a small fixed set of sparse electric-blue motes, and restrained button hover/press motion.
+- Ambient effects run only in Dark mode, only when the persisted WAA preference is enabled, and only when Windows `SystemParameters.ClientAreaAnimation` permits client animation.
+- Ambient motion must remain non-interactive, palette-driven, timer-free, dependency-free, and cheap on low-spec hardware. No per-frame particle creation, blur, glow, shader, background worker, or animation over DataGrid rows/editable text.
+- The ambient-motion preference uses the existing `settings` table, defaults enabled when absent, and requires no database schema version change.
+- Button motion must remain render-only and subtle; do not alter layout, keyboard behavior, hit targets, commands, or semantic colors.
 - DataGrid generated text explicitly follows active cell/theme foreground and must not fall back to system black.
 - Semantic state belongs in flags/enums; view-models do not expose WPF Brush/Color objects.
 - Theme preference remains explicit Light/Dark. “Auto text” means inheritance, not a third System/Auto mode.
-- Preference persistence must not block UI; failed save restores prior visible theme.
+- Preference persistence must not block UI; failed save restores prior visible state.
 - Normal text contrast >= 4.5:1; relevant boundaries/focus >= 3:1.
 - Keep the repository-wide hard-coded-theme source audit and contrast tests; fix causes rather than weakening tests.
 - Any data-bound WPF `Run.Text` must explicitly use a safe one-way display binding; repository regression coverage protects this startup/runtime rule.
@@ -150,12 +154,12 @@ Unless explicitly reversed by the user, do not add or create placeholders for:
 - complex escalation trees, routing engines, approval workflows
 - browser/WebView/local server/Node/cloud/helper processes
 - background report polling/watchers
-- decorative animation, blur, glow, or gamification
+- heavy decorative animation, blur, glow, shaders, particle engines, or gamification beyond the explicitly approved bounded v0.4.5 ambient layer
 
 ## Product/performance discipline
 
 - Keep operational work inside one restrained native WPF MainWindow.
-- Target low-spec Windows hardware with virtualized rows, indexed aggregate queries, bounded selected-entity reads, and short transactions.
+- Target low-spec Windows hardware with virtualized rows, indexed aggregate queries, bounded selected-entity reads, short transactions, and bounded ambient rendering.
 - No one-query-per-row work/history/BOL count paths.
 - Selected-driver work/BOL state loads only on selection/saved-state/route refresh, not each keystroke.
 - Load focused task detail only when task opens.
@@ -166,7 +170,7 @@ Unless explicitly reversed by the user, do not add or create placeholders for:
 
 ## Current product sequence
 
-Implemented through **WAA v0.4.4**:
+Implemented through **WAA v0.4.5**:
 
 1. Rolling 7 Day ingestion, durable roster identity, weighted metrics, threshold, prioritized virtualized fleet.
 2. Current-cycle idle accountability and deterministic queue ordering.
@@ -179,8 +183,9 @@ Implemented through **WAA v0.4.4**:
 9. v0.4.2 compact Handoff: alphabetical one-line driver narratives plus grouped `Missing BOLs:` order lists.
 10. v0.4.3 presentation refinement: denser virtualized Fleet Queue, compact Driver Code/Unit identity without duplicate Leader text, full-row click/Enter preserved, and centralized gunmetal/neon-purple/neon-green contrast-safe stream palette.
 11. v0.4.4 presentation refinement: Driver Leader-separated Handoff narrative/Missing BOL groups with current-leader preference and historical fallback, plus explicit MainWindow/root-shell dynamic background binding for complete dark-mode coverage.
+12. v0.4.5 ambient motion: dark-only faint scanline, eight sparse electric-blue motes, persisted Motion toggle with Windows reduced-motion gating, and restrained template-local button hover/press feedback.
 
 Future work remains separate unless explicitly requested:
 
-12. Maintenance evaluation.
-13. DOT evaluation.
+13. Maintenance evaluation.
+14. DOT evaluation.

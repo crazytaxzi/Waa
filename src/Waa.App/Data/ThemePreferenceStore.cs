@@ -5,6 +5,7 @@ namespace Waa.App.Data;
 public sealed class ThemePreferenceStore
 {
     private const string ThemeSettingKey = "appearance_theme";
+    private const string AmbientMotionSettingKey = "appearance_ambient_motion";
     private readonly string _connectionString;
 
     public ThemePreferenceStore(string databasePath)
@@ -20,16 +21,33 @@ public sealed class ThemePreferenceStore
 
     public bool GetDarkMode()
     {
+        var value = GetSetting(ThemeSettingKey);
+        return string.Equals(value, "dark", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void SetDarkMode(bool darkMode) =>
+        SetSetting(ThemeSettingKey, darkMode ? "dark" : "light");
+
+    public bool GetAmbientMotionEnabled()
+    {
+        var value = GetSetting(AmbientMotionSettingKey);
+        return !string.Equals(value, "off", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public void SetAmbientMotionEnabled(bool enabled) =>
+        SetSetting(AmbientMotionSettingKey, enabled ? "on" : "off");
+
+    private string? GetSetting(string key)
+    {
         using var connection = OpenConnection();
         EnsureSettingsTable(connection);
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT value FROM settings WHERE key = $key LIMIT 1;";
-        command.Parameters.AddWithValue("$key", ThemeSettingKey);
-        var value = command.ExecuteScalar() as string;
-        return string.Equals(value, "dark", StringComparison.OrdinalIgnoreCase);
+        command.Parameters.AddWithValue("$key", key);
+        return command.ExecuteScalar() as string;
     }
 
-    public void SetDarkMode(bool darkMode)
+    private void SetSetting(string key, string value)
     {
         using var connection = OpenConnection();
         EnsureSettingsTable(connection);
@@ -39,8 +57,8 @@ public sealed class ThemePreferenceStore
             VALUES ($key, $value)
             ON CONFLICT(key) DO UPDATE SET value = excluded.value;
             """;
-        command.Parameters.AddWithValue("$key", ThemeSettingKey);
-        command.Parameters.AddWithValue("$value", darkMode ? "dark" : "light");
+        command.Parameters.AddWithValue("$key", key);
+        command.Parameters.AddWithValue("$value", value);
         command.ExecuteNonQuery();
     }
 
