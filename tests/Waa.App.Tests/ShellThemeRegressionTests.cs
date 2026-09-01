@@ -21,14 +21,28 @@ public sealed class ShellThemeRegressionTests
             "Background=\"{DynamicResource WindowBackgroundBrush}\"\n        WindowStartupLocation",
             source,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "<Grid Margin=\"12\"\n          Background=\"{DynamicResource WindowBackgroundBrush}\"",
-            source,
-            StringComparison.Ordinal);
+        Assert.Contains("<Grid Background=\"{DynamicResource WindowBackgroundBrush}\">", source, StringComparison.Ordinal);
+        Assert.Contains("<Grid Margin=\"12\"", source, StringComparison.Ordinal);
+        Assert.True(
+            CountOccurrences(source, "Background=\"{DynamicResource WindowBackgroundBrush}\"") >= 3,
+            "Window, outer shell, and inner client surface must all follow WindowBackgroundBrush.");
         Assert.DoesNotContain(
             "Background=\"{StaticResource WindowBackgroundBrush}\"",
             source,
             StringComparison.Ordinal);
+    }
+
+    private static int CountOccurrences(string source, string value)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = source.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+
+        return count;
     }
 
     private static string FindRepositoryRoot()
