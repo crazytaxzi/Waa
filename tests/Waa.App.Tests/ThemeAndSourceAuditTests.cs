@@ -163,9 +163,9 @@ public sealed class ThemeAndSourceAuditTests
     }
 
     [Fact]
-    public void HandoffAndTaskEditors_RelyOnImplicitThemeAwareTextBoxStyle()
+    public void EditableWorkAndHandoffViews_RelyOnImplicitThemeAwareTextBoxStyle()
     {
-        foreach (var file in new[] { "HandoffView.xaml", "IdleTaskView.xaml", "MissingBolTaskView.xaml", "NewWorkView.xaml" })
+        foreach (var file in new[] { "HandoffView.xaml", "IdleTaskView.xaml", "NewWorkView.xaml" })
         {
             var source = ReadAppFile("Views", file);
             var textBoxes = Regex.Matches(
@@ -181,6 +181,10 @@ public sealed class ThemeAndSourceAuditTests
                 Assert.DoesNotMatch("CaretBrush\\s*=", textBox.Value);
             });
         }
+
+        var missingBol = ReadAppFile("Views", "MissingBolTaskView.xaml");
+        Assert.DoesNotContain("<TextBox", missingBol, StringComparison.Ordinal);
+        Assert.Contains("Read-only current report row", missingBol, StringComparison.Ordinal);
     }
 
     [Fact]

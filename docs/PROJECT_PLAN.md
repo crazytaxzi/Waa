@@ -2,7 +2,7 @@
 
 ## Product goal
 
-WAA is a personal driver-support work-through and shift-Handoff tool. It must make the current fleet easy to work, prevent missed follow-up, preserve historical context, and generate an accurate handoff without forcing the user to reread every driver.
+WAA is a personal driver-support work-through and shift-Handoff tool. It must make the current fleet easy to work, prevent missed saved follow-up, preserve historical work context, show the current Missing BOL report without inventing a second workflow, and generate an accurate handoff without forcing the user to reread every driver.
 
 Driver Code is durable identity. Unit Code and Driver Leader are context that may change without splitting history. The application remains compact, professional, readable in Light/Dark modes, and responsive on a low-end Windows office PC.
 
@@ -11,14 +11,14 @@ Driver Code is durable identity. Unit Code and Driver Leader are context that ma
 1. Fleet Queue is fresh-launch home.
 2. One `MainWindow` is the operations shell; driver/task/Handoff/unmatched work uses one central content host.
 3. Driver identity and routes use durable Driver Code, never truck, leader, or name similarity.
-4. Ordinary unresolved work carries forward until explicitly resolved.
+4. Ordinary saved unresolved work carries forward until explicitly resolved.
 5. Idle accountability is keyed by Driver Code + Report Cycle Date.
-6. An idle action creates exactly one linked work entry in the same transaction.
-7. A matched unresolved Missing BOL item owns at most one linked task.
-8. Missing BOL matches only exact normalized source Driver Code to exact durable Driver Code.
-9. Handoff is generated from saved work, remains editable, and editing/copying never mutates saved history.
-10. Reports update once at launch and thereafter only through explicit `Update Reports`.
-11. Failed imports/migrations never silently wipe last-known-good state.
+6. An idle action creates exactly one linked saved work entry in the same transaction.
+7. Missing BOL is a read-only current-workbook view and does not own a persisted WAA work/status/action lifecycle.
+8. Missing BOL matches only exact normalized source Driver Code to exact **current** durable Driver Code.
+9. Handoff is generated from saved non-BOL work plus a transient projection of the current Missing BOL workbook; editing/copying never mutates saved/source state.
+10. Reports scan once at launch and thereafter only through explicit `Update Reports`.
+11. Failed Rolling imports/migrations never silently wipe last-known-good saved state; invalid Missing BOL files never restore invented DB BOL state.
 12. Ordinary text inherits the active Light/Dark theme; fixed UI text colors outside palettes are prohibited.
 13. Status uses words first and semantic color second.
 14. Repository fixtures are synthetic only.
@@ -26,39 +26,28 @@ Driver Code is durable identity. Unit Code and Driver Leader are context that ma
 
 ## Permanent exclusions
 
-Unless explicitly reversed, WAA does not add or prepare architecture for:
-
-- emailing/transmitting documents
-- automatic calling, messaging, or driver contact
-- OCR/image recognition
-- document upload/storage/attachment management
-- giant Missing BOL dashboards or BOL analytics/financial portals
-- fuzzy/name/unit/truck/leader/probabilistic identity matching
-- complex escalation trees, routing engines, or approval workflows
-- browser/WebView/local HTTP server/Node/cloud/helper processes
-- report watchers/background polling
-- decorative animation, blur, glow, or gamification
-
-Missing BOL remains an exact-code local work workflow inside the central driver/task flow, work log, and Handoff.
+Unless explicitly reversed, WAA does not add or prepare architecture for emailing/transmitting documents, automatic calling/messaging, OCR/image recognition, document upload/storage/attachment management, giant Missing BOL dashboards/financial analytics, fuzzy/name/unit/truck/leader/probabilistic identity matching, complex escalation/routing/approval engines, browser/WebView/local HTTP server/Node/cloud/helper processes, report watchers/background polling, or heavy decorative animation beyond the explicitly approved bounded ambient layer.
 
 ## Runtime/performance boundary
 
 - .NET 8 native WPF
 - one top-level `MainWindow`
 - Windows x64 self-contained portable publish
-- SQLite under `%LOCALAPPDATA%\WAA`
+- SQLite under `%LOCALAPPDATA%\WAA` for durable roster/work/idle/settings state
+- current Missing BOL workbook snapshot held only in memory
 - no installer/admin requirement
 - one local desktop process
 - no Excel/Office/COM/browser/local-server/Node/cloud/helper process
 - no FileSystemWatcher/recurring scan/polling timer
 - one central `ContentControl`; no hidden legacy split pane
 - virtualized/recycling Fleet rows
-- indexed aggregate fleet/unresolved/BOL reads, never one query per row
+- indexed aggregate saved-work reads, never one query per row
+- one bounded current BOL in-memory snapshot, no per-row BOL DB queries
 - selected-driver state loads only for selection/state/route refresh, not keystrokes
-- focused task detail loads only when opened
+- focused detail loads only when opened
 - database/report work runs off UI thread where blocking is possible
 - Handoff generates only on first session entry or explicit Regenerate
-- short transactional writes
+- short transactional saved-state writes
 
 ## Implemented milestones
 
@@ -70,77 +59,48 @@ Validated Rolling 7 Day ingestion, durable Driver Code identity, Unit/Leader con
 
 Validated Not Contacted / Attempted / Spoke / Spoke — Follow-up, saved metric/threshold/unit/leader/source context, same-cycle preservation, new-cycle rollover, unfinished high-idle priority, and atomic event persistence.
 
-### Phase 3 — Driver work log v0.2
+### Phase 3 — Driver work log
 
 Validated Done / Waiting / FollowUp, UTC creation/resolution timestamps, unresolved carry-forward, Resolve/Reopen history preservation, context snapshots, linked idle work, legacy backfill, per-driver Open Work/Today’s Activity, aggregate fleet counts, queue integration, and search-respecting Next Needing Attention.
 
-### Phase 4 — Deterministic editable Handoff v0.2
+### Phase 4 — Deterministic editable Handoff
 
-Established saved-work Handoff generation, local-day grouping, linked-activity deduplication, Regenerate, Copy to Clipboard, and editor isolation. The visible presentation was later compacted in v0.4.2 without changing the saved work model.
+Established saved-work Handoff generation, local-day grouping, Regenerate, Copy to Clipboard, and editor isolation; later compacted and grouped by Driver Leader.
 
-### Phase 5 — Missing BOL v0.3
+### Phase 5 — Missing BOL parser/exact matching
 
-Validated managed read-only XLSX ingestion, worksheet/header normalization, supported cell/date formats, atomic source snapshots, exact Driver Code matching only, unmatched preservation/later exact attachment, one linked task, Requested/Attempted/Follow-up/Resolved/Reopen, append-only actions, synchronized item/task/action/activity writes, source-disappearance behavior, reassignment-conflict rejection, queue/search/Handoff integration, and no fuzzy matching.
+Validated managed read-only XLSX parsing, worksheet/header normalization, supported cell/date forms, exact Driver Code matching, unmatched visibility, Order # validation, and no fuzzy matching.
 
-### Phase 6 — Central Workspace + Theme-Safe Text v0.4
+The original v0.3–v0.4.5 persisted BOL task/action lifecycle has been superseded by v0.4.6 source-only behavior. Legacy DB artifacts are retained non-destructively on upgrades but are dormant.
 
-Delivered:
+### Phase 6 — Central Workspace + Theme-Safe Text
 
-- persistent one-window shell and central content host
-- full-width Fleet Queue replacing the split pane
-- single-click/Enter Driver Workspace navigation by durable Driver Code
-- focused DriverWorkspace / IdleTask / MissingBolTask / WorkItemTask / NewWork / ActivityDetail / Handoff / UnmatchedBol / Unavailable routes
-- real Back stack, breadcrumbs, and safe Alt+Left
-- Driver Workspace as compact work index
-- deduplicated idle/BOL linked-work presentation
-- Add Work, Next Work Item, Next Needing Attention, BOL/Open Work focus actions
-- New Work success returning to same driver
-- read-only Activity Detail and Unmatched BOL
-- Handoff draft preservation across navigation
-- queue search/selection and unsaved New Work/BOL note preservation
-- stable-ID route restoration after report refresh and graceful stale-item handling
-- centralized Light/Dark palettes and dynamic base styles
-- DataGrid generated-text theme handling
-- live Light/Dark switching and local preference persistence
-- fixed-color source audit and deterministic contrast tests
+Delivered one-window Fleet → Driver → focused work/detail routing, real Back stack/breadcrumbs, state preservation, centralized Light/Dark resources, complete dark shell, virtualized Fleet Queue, compact Handoff, Driver Leader grouping, theme-safe generated text, contrast/source audits, and graceful stale routes.
 
-Validated v0.4 branch baseline: 24 core + 165 app tests = 189 total, zero failures/skips and zero build warnings/errors.
+### Phase 6.1–6.5 — presentation/runtime refinements
 
-### Phase 6.1 — v0.4.1 startup binding hotfix
+- v0.4.1 safe one-way inline `Run.Text` binding hotfix
+- v0.4.2 compact one-line-per-driver Handoff + dedicated Missing BOL section
+- v0.4.3 denser Fleet Queue + gunmetal/neon-purple/neon-green stream palette
+- v0.4.4 Driver Leader-grouped Handoff + complete dark-shell background fix
+- v0.4.5 bounded ambient scanline/electric-blue motes + subtle button motion
+- v0.4.5.1 user-authoritative Ambient Motion toggle hotfix
 
-A real portable-startup failure exposed a WPF `Run.Text` binding default that XAML compilation did not catch. v0.4.1:
+### Phase 6.6 — v0.4.6 Source-Only Missing BOL
 
-- makes every data-bound inline `Run.Text` explicitly one-way for display
-- adds repository-wide regression coverage for that rule
-- preserves database/business behavior
+Current Missing BOL behavior is intentionally simpler:
 
-Validated v0.4.1: 24 core + 166 app tests = 190 total, zero failures/skips and zero build warnings/errors.
-
-### Phase 6.2 — v0.4.2 compact driver-grouped Handoff
-
-Changes only the generated Handoff presentation:
-
-- opening editable convention: `No open ACE/ACI's`
-- WAA does **not** model or validate ACE/ACI state; user edits the opening when untrue
-- one alphabetical narrative line per driver rather than visible state-section duplication
-- current fleet Unit/Driver Name preferred for handoff identity
-- idle Handoff prose keeps concise action + human note instead of repeating 28D/7D metric boilerplate
-- Missing BOL action narrative prefers human note when available
-- dedicated `Missing BOLs:` section
-- one line per driver with all unresolved order numbers grouped together
-- singular/plural `order` / `orders`
-- no Empty Call Date, route, or local BOL status repeated in the copied BOL section
-- old visible `NEEDS FOLLOW-UP`, `WAITING / PENDING`, and `COMPLETED TODAY` headings removed from runtime draft
-- underlying deterministic work/local-day classification remains intact and regression-tested
-- no schema migration, priority change, source-rule change, or BOL-state change
-
-Code-format validation on PR #4 run #53 passed 24 core + 167 app tests = **191 total**, zero failures/skips, zero build warnings/errors, with successful win-x64 publish. Final documented-tree and merged-main validation remain release gates.
-
-## Regression baseline
-
-The v0.3 product entered central-workspace work with 89 validated tests. v0.4.x preserves those data/business rules and expands coverage for navigation, theme/source audits, contrast, keyboard/back behavior, runtime binding safety, stale routes, compact Handoff grouping, current-unit preference, and BOL aggregation.
-
-No v0.4.x database schema migration is required.
+- current accepted workbook is the source of truth
+- parsed rows/hash live in memory only for the current session
+- no current `missing_bol_*` DB tables on fresh installs
+- no current BOL task/status/action/note/history writes
+- exact match against current durable Driver Code only
+- unmatched current rows remain visible/read-only
+- driver has separate `CURRENT MISSING BOL` report section
+- BOL presence does not increase Open Work/priority or enter `Next Work Item`/Today’s Activity
+- read-only BOL detail replaces the old action editor
+- Handoff Missing BOL section is regenerated transiently from current workbook rows
+- old v0.3–v0.4.5 BOL tables/generated work remain physically untouched on upgrade but are classified/excluded from current work/priority/Handoff
 
 ## Future phases
 
@@ -158,23 +118,23 @@ DOT data/workflow are not implemented. Evaluate separately before adding schema 
 - full corrective idle-event editing/audit UI
 - dedicated Driver Leader filter
 - representative low-end office-PC benchmark outside GitHub-hosted validation
-- manual association of unmatched BOL; exact Driver Code remains required
 - maintenance workflow
 - DOT workflow
 
+Manual/fuzzy association of unmatched BOL is not a deferred refinement; it is explicitly excluded. Exact current Driver Code remains required.
+
 ## Failure behavior
 
-- invalid/locked Rolling report: reject and retain last-known-good roster
-- invalid/locked/conflicting BOL workbook: reject and retain last accepted BOL state
-- one source failing: preserve/report independent result of the other
-- missing BOL workbook: preserve known BOL/local work state
-- source disappearance: mark absent, never resolve automatically
-- source reassignment conflict: reject and preserve prior item/task/history
+- invalid/locked Rolling report: reject and retain last-known-good saved roster
+- missing Missing BOL workbook: clear current in-memory BOL view
+- invalid/conflicting BOL candidates with no valid fallback: report failure and show no invented/restored BOL DB state
+- newer invalid BOL candidate with older valid candidate: use the valid candidate and report the ignored failure
+- one source failing: preserve/report the independent result of the other
+- current BOL row disappearance: remove from current view after next accepted scan; do not carry forward/resolve locally
 - missing 28-day period: show incomplete coverage
 - zero denominator: show `N/A`
-- manual/BOL save failure: retain typed text/note
+- manual work save failure: retain typed text
 - linked idle failure: roll back event/work
-- BOL action failure: roll back item/task/action/activity together
 - migration failure: surface actual error; never replace database
 - clipboard failure: preserve editor and report error
 - appearance-save failure: restore prior visible theme and report error

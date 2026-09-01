@@ -110,7 +110,7 @@
                             <Run Text="Cycle " />
                             <Run Text="{Binding ReportCycleText, Mode=OneWay}" />
                             <Run Text="  •  " />
-                            <Run Text="{Binding MissingBolSummaryText, Mode=OneWay}" />
+                            <Run Text="{Binding MissingBolSummaryText, Mode=OneWay, Converter={StaticResource MissingBolSummaryDisplayConverter}}" />
                         </TextBlock>
                     </StackPanel>
 

@@ -88,11 +88,56 @@
 
             <Border Margin="0,10,0,0" Style="{StaticResource PanelCardStyle}">
                 <StackPanel>
+                    <TextBlock Text="CURRENT MISSING BOL" Style="{StaticResource SectionTitleStyle}" />
+                    <TextBlock Margin="0,2,0,8"
+                               Text="Current workbook only — read-only and not stored as work or history."
+                               Style="{StaticResource SubtleTextStyle}" />
+                    <ItemsControl ItemsSource="{Binding DataContext.MissingBol.Items, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                  Visibility="{Binding DataContext.MissingBol.HasItems, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Button Command="{Binding DataContext.OpenAttentionItemCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                        CommandParameter="{Binding AttentionItem}"
+                                        Style="{StaticResource ClickableRowButtonStyle}"
+                                        automation:AutomationProperties.Name="{Binding OrderNumber}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="120" /><ColumnDefinition Width="*" /><ColumnDefinition Width="160" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="{Binding OrderNumber}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" Margin="10,0">
+                                            <TextBlock Text="{Binding RouteDisplay}" />
+                                            <TextBlock Margin="0,2,0,0" Text="{Binding CustomerDisplay}" Style="{StaticResource SubtleTextStyle}" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="2" Margin="8,0" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding StatusDisplay}" HorizontalAlignment="Right" Foreground="{DynamicResource InformationTextBrush}" FontWeight="SemiBold" />
+                                            <TextBlock Margin="0,2,0,0" Text="{Binding EmptyCallDateDisplay}" HorizontalAlignment="Right" Style="{StaticResource SubtleTextStyle}" />
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="3" Margin="10,0,0,0" Text="›" FontSize="22" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    </Grid>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Text="No Missing BOL orders for this driver in the current workbook.">
+                        <TextBlock.Style>
+                            <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource SubtleTextStyle}">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding DataContext.MissingBol.HasItems, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" Value="True">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+
+            <Border Margin="0,10,0,0" Style="{StaticResource PanelCardStyle}">
+                <StackPanel>
                     <TextBlock Text="QUICK ACTIONS" Style="{StaticResource SectionTitleStyle}" />
                     <WrapPanel>
                         <Button Margin="0,0,8,8" Content="Add Work" Command="{Binding DataContext.OpenNewWorkCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" Style="{StaticResource PrimaryButtonStyle}" automation:AutomationProperties.Name="Add manual work for this driver" />
                         <Button Margin="0,0,8,8" Content="Next Work Item" Command="{Binding DataContext.NextWorkItemCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" automation:AutomationProperties.Name="Open next work item for this driver" />
-                        <Button Margin="0,0,8,8" Content="Missing BOL" Command="{Binding DataContext.OpenDriverMissingBolCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" CommandParameter="{Binding Driver}" automation:AutomationProperties.Name="Focus Missing BOL work" />
+                        <Button Margin="0,0,8,8" Content="Missing BOL" Command="{Binding DataContext.OpenDriverMissingBolCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" CommandParameter="{Binding Driver}" automation:AutomationProperties.Name="Focus current Missing BOL report" />
                         <Button Margin="0,0,8,8" Content="Open Work" Command="{Binding DataContext.OpenDriverWorkCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" CommandParameter="{Binding Driver}" automation:AutomationProperties.Name="Focus open manual work" />
                         <Button Margin="0,0,0,8" Content="Next Needing Attention" Command="{Binding DataContext.NextNeedingAttentionCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}" automation:AutomationProperties.Name="Open next visible driver needing attention" />
                     </WrapPanel>

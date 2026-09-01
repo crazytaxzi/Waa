@@ -24,7 +24,9 @@ public sealed class DriverRowViewModel
     public string DriverLeader => Record.DriverLeader;
     public string IdentityLine => $"{DriverCode}  •  Unit {UnitCode}  •  Leader {DriverLeader}";
     public string FleetIdentityLine => $"{DriverCode} • Unit {UnitCode}";
-    public int OpenWorkCount => Record.OpenWorkCount;
+    public int OpenWorkCount => Math.Max(
+        0,
+        Record.OpenWorkCount - (MissingBolSummary?.LegacyOpenTaskCount ?? 0));
     public bool HasOpenWork => OpenWorkCount > 0;
     public string OpenWorkDisplay => HasOpenWork
         ? $"{OpenWorkCount.ToString(CultureInfo.CurrentCulture)} open"

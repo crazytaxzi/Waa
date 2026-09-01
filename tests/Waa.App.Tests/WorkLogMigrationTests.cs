@@ -50,22 +50,12 @@ public sealed class WorkLogMigrationTests
             Assert.Equal(
                 1L,
                 ScalarLong(connection, "SELECT COUNT(*) FROM work_entries WHERE linked_idle_contact_event_id = 1;"));
-            Assert.Equal(3L, ScalarLong(connection, "PRAGMA user_version;"));
+            Assert.Equal(2L, ScalarLong(connection, "PRAGMA user_version;"));
             Assert.Equal(
-                1L,
+                0L,
                 ScalarLong(
                     connection,
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'missing_bol_imports';"));
-            Assert.Equal(
-                1L,
-                ScalarLong(
-                    connection,
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'missing_bol_items';"));
-            Assert.Equal(
-                1L,
-                ScalarLong(
-                    connection,
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'missing_bol_action_events';"));
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'missing_bol_%';"));
 
             Assert.Equal(47.5m, restarted.GetIdleThreshold());
             Assert.True(new ThemePreferenceStore(databasePath).GetDarkMode());
@@ -74,6 +64,7 @@ public sealed class WorkLogMigrationTests
             Assert.Equal("LEADER0001", fleetDriver.DriverLeader);
             Assert.Equal(IdleContactOutcome.Attempted, fleetDriver.LatestOutcome);
             Assert.Equal(1, fleetDriver.OpenWorkCount);
+            Assert.False(restartedMissingBol.HasCurrentSnapshot);
             Assert.Empty(restartedMissingBol.LoadFleetState().UnmatchedItems);
         }
         finally
@@ -87,7 +78,7 @@ public sealed class WorkLogMigrationTests
     }
 
     [Fact]
-    public void MissingBolMigrationFailure_ThrowsClearlyAndLeavesExistingDataIntact()
+    public void LegacyMalformedBolTables_DoNotBlockStartupAndRemainUntouched()
     {
         var root = Path.Combine(Path.GetTempPath(), "WaaMigrationTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -107,15 +98,14 @@ public sealed class WorkLogMigrationTests
                     CREATE TABLE missing_bol_items (
                         wrong_column TEXT NOT NULL
                     );
+                    INSERT INTO missing_bol_items(wrong_column) VALUES ('legacy untouched');
                     """;
                 command.ExecuteNonQuery();
             }
 
-            var exception = Assert.Throws<InvalidOperationException>(() =>
-                new MissingBolRepository(databasePath).Initialize());
-
-            Assert.Contains("could not migrate Missing BOL data", exception.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains(databasePath, exception.Message, StringComparison.Ordinal);
+            var sourceOnly = new MissingBolRepository(databasePath);
+            sourceOnly.Initialize();
+            Assert.False(sourceOnly.HasCurrentSnapshot);
 
             var restarted = new WaaRepository(databasePath);
             restarted.Initialize();
@@ -128,6 +118,7 @@ public sealed class WorkLogMigrationTests
                 ScalarLong(
                     verify,
                     "SELECT COUNT(*) FROM pragma_table_info('missing_bol_items') WHERE name = 'wrong_column';"));
+            Assert.Equal(1L, ScalarLong(verify, "SELECT COUNT(*) FROM missing_bol_items;"));
             Assert.Equal(
                 0L,
                 ScalarLong(

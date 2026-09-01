@@ -1,12 +1,20 @@
-# WAA Missing BOL Workflow v0.4.2 Presentation / v0.3 Data Contract
+# WAA Missing BOL Workflow v0.4.6
 
-This document is authoritative for Missing BOL ingestion, exact-code matching, source lifecycle, local states/actions, linked work, queue behavior, Handoff integration, unmatched handling, and permanent scope boundaries. v0.4.x changes presentation/navigation only; the validated v0.3 BOL data/business contract remains authoritative.
+This document is authoritative for Missing BOL source reading, exact Driver Code matching, current-file display, unmatched handling, Handoff integration, upgrade compatibility, and scope boundaries.
 
-## Purpose and scope
+## Purpose
 
-Missing BOL is a small local work queue integrated into Fleet Queue, Driver Workspace, one-order-at-a-time Missing BOL Task workspaces, unified work history, and Handoff.
+Missing BOL is a **read-only view of the current `Order Details Missing BOL*.xlsx` workbook**.
 
-It is not a document repository, communication system, OCR tool, analytics dashboard, revenue report, fuzzy matcher, or escalation platform. WAA never sends requests, calls drivers, stores attachments, reads images, or guesses identity.
+WAA does not own a Missing BOL lifecycle. It does not store BOL rows, local BOL status, actions, notes, resolution state, action history, import history, or linked Missing BOL work tasks.
+
+The workbook is the truth:
+
+- if an order is in the current accepted workbook, WAA shows it
+- if an order is not in the current accepted workbook, WAA does not show it after the next launch/manual report scan
+- restarting WAA does not restore BOL rows from SQLite; the workbook is scanned again
+
+Missing BOL remains a current operational reference integrated into Fleet Queue, Driver Workspace, read-only order detail, Unmatched Missing BOL, search, and the generated Handoff Missing BOL section.
 
 ## Runtime source contract
 
@@ -14,9 +22,9 @@ Expected Downloads filename family:
 
 `Order Details Missing BOL*.xlsx`
 
-Temporary Office lock files beginning with `~$` are ignored. Runtime workbooks are read-only evidence and are never modified, renamed, moved, deleted, or saved over.
+Temporary Office lock files beginning with `~$` are ignored. Runtime workbooks are read-only and are never modified, renamed, moved, deleted, or saved over.
 
-WAA uses a bounded managed ZIP/XML XLSX reader with no Excel/Office/COM/browser/helper-process dependency.
+WAA uses a managed ZIP/XML XLSX reader with no Excel/Office/COM/browser/helper-process dependency.
 
 Supported cells include shared/inline strings, ordinary strings/formula results, numeric cells, zero-padded identifiers according to number format, Excel serial dates, and blanks. Numeric identifiers are rendered as full text without scientific notation and meaningful leading zeros are preserved.
 
@@ -47,30 +55,32 @@ Required headers:
 
 Repeated irrelevant `Terminal Leader` columns are tolerated. A duplicated required header after normalization rejects the workbook as ambiguous. Revenue/financial columns are not required or used.
 
-## Row validation and identity
+## Row validation
 
-`Order #` is the durable Missing BOL source-item key.
+`Order #` is the current source-row identity used to collapse/validate workbook duplicates.
 
 - trim source text
 - normalize uniqueness as uppercase-invariant exact text
 - preserve display text
-- blank Order # rejects complete workbook
+- blank Order # rejects the workbook
 - identical duplicate rows collapse
-- conflicting duplicate rows reject complete workbook
+- conflicting duplicate rows reject the workbook
 
-`Empty Call Date` is required and stored as `DateOnly`; accepted source forms include text date formats and Excel serial dates. Invalid required values reject the complete workbook before mutation.
+`Empty Call Date` is required and parsed as `DateOnly`; accepted source forms include supported text dates and Excel serial dates.
 
-Origin/destination/customer/miles/source-name/source-code context may be blank. Blank/unknown source Driver Code makes the item unmatched; it does not invalidate the order.
+All rows are parsed and validated in memory before the current in-memory BOL view is replaced.
 
-All rows are parsed/validated in temporary memory before a database transaction begins.
+No BOL row is persisted to SQLite.
 
 ## Exact Driver Code matching
 
 The only association rule is:
 
-`TrimUpper(Last Dispatch Driver cd) == TrimUpper(Driver Code)`
+`TrimUpper(Last Dispatch Driver cd) == TrimUpper(current Driver Code)`
 
-Both sides stay text. Leading zeros are preserved. Matching uses all durable known drivers, not only current roster rows.
+Both sides stay text. Leading zeros are preserved.
+
+Missing BOL current-file matching is against the **current durable fleet roster**. A row whose exact Driver Code is not currently present remains unmatched.
 
 Never match BOL by:
 
@@ -80,171 +90,136 @@ Never match BOL by:
 - substring/prefix
 - punctuation invention
 - similarity/fuzzy/probabilistic logic
-- manual automatic association
+- manual assignment
 
 `Last Dispatch Driver nm` is evidence only. Exact-code name mismatch keeps the code association, preserves both names, shows a restrained warning, and never overwrites durable Driver Name.
 
-## Unmatched items
+## Current matched rows
+
+Matched workbook rows contribute:
+
+- a compact Missing BOL count on the driver/fleet presentation
+- Order # search text
+- a dedicated **CURRENT MISSING BOL** read-only section in Driver Workspace
+- a read-only same-window order detail when opened
+- the current-file Missing BOL section of generated Handoff
+
+They do **not**:
+
+- increase Open Work
+- make a driver need attention by themselves
+- enter `Next Work Item`
+- create work entries
+- create Today’s Activity
+- create local Requested/Attempted/Follow-up/Resolved/Reopen state
+- survive when the current workbook no longer contains them
+
+The read-only order detail may show Order #, Empty Call Date, route, customer, miles, exact source Driver Code/name, current Unit, current Driver Leader, and source-name mismatch warning.
+
+## Unmatched rows
 
 Blank/unknown normalized source Driver Code remains unmatched.
 
-The same-window read-only Unmatched Missing BOL route shows Order #, Empty Call Date, source code/name, route, latest-source presence, and exact-match explanation.
+The same-window read-only Unmatched Missing BOL route shows current workbook Order #, Empty Call Date, source code/name, route, and exact-match explanation.
 
-Unmatched items:
+Unmatched rows:
 
-- create no driver-owned task
+- create no driver-owned work
 - do not affect driver priority
 - do not enter Handoff
 - cannot be manually/fuzzily assigned
 
-If a later Rolling 7 Day import introduces the exact Driver Code, the existing item attaches and its linked task is created exactly once. Repeated checks are idempotent.
+A later report scan may match the row if the current durable roster then contains that exact Driver Code.
 
-## Database/source lifecycle
+## Source lifecycle and memory ownership
 
-Established non-destructive tables:
+Missing BOL has no current database tables or current BOL database lifecycle.
+
+At launch and explicit `Update Reports`:
+
+1. resolve the Downloads folder
+2. enumerate matching non-lock XLSX candidates newest first
+3. stable-read candidate bytes
+4. compute SHA-256 for same-session change detection
+5. parse/validate fully in memory
+6. replace the current in-memory BOL view with the accepted workbook rows
+7. derive matched/unmatched presentation from the current durable roster
+
+Same-session identical bytes may be recognized as already current. The hash is not persisted.
+
+If no matching workbook exists, the current BOL view is cleared. If no candidate can be validated, WAA reports the failure and does not invent or restore BOL rows from SQLite.
+
+Rolling 7 Day persistence remains independent.
+
+## Legacy v0.3-v0.4.5 compatibility
+
+Older WAA releases may already have created:
 
 - `missing_bol_imports`
 - `missing_bol_items`
 - `missing_bol_action_events`
 - `missing_bol_work_links`
+- generated `MissingBolTask` / `MissingBolAction` work rows
 
-Indexes support exact source code, matched-driver unresolved reads, status/date/presence, action history, aggregate counts, and task/action links.
+v0.4.6 does **not** destructively drop or rewrite those legacy tables/history during upgrade.
 
-v0.4.x adds no BOL schema migration and does not increment schema version.
+They are dormant compatibility data:
 
-Accepted workbook lifecycle:
+- they are not used to repopulate current Missing BOL rows
+- old generated BOL task/action work is classified and excluded from current Open Work and Today’s Activity
+- old generated BOL task/action work is excluded from current Handoff
+- legacy unresolved BOL task counts are subtracted from current Open Work presentation
 
-1. resolve actual Downloads known folder
-2. enumerate matching non-lock XLSX candidates newest first
-3. stable-read candidate
-4. SHA-256 complete bytes
-5. skip accepted hash
-6. parse/validate fully in memory
-7. begin transaction
-8. insert import metadata
-9. mark previous items absent from newest accepted source
-10. upsert by exact normalized Order #
-11. update source/last-seen context
-12. preserve local status/resolution/task/action history
-13. attach exact Driver Codes
-14. create task only for matched unresolved item without one
-15. commit entire snapshot
+This preserves the user’s existing database without letting obsolete BOL workflow state continue driving the current application.
 
-Database failure rolls back entire snapshot.
+Fresh v0.4.6 databases do not create Missing BOL tables.
 
-## Source disappearance, return, conflict
+## Driver Workspace
 
-Disappearance from a later accepted workbook never resolves or deletes an item/task.
+Driver Workspace separates actual work from report information:
 
-Unresolved absent item keeps local state/task and shows `Not in latest report`.
+- `NEEDS ATTENTION` contains idle/manual work that can actually be worked
+- `CURRENT MISSING BOL` contains the selected driver’s current workbook rows
 
-Resolved item that reappears stays resolved, is flagged present again, and may be explicitly reopened; it is never reopened automatically.
+BOL rows remain clickable for read-only detail but are not work items.
 
-If an existing Order # later arrives under a different normalized source Driver Code, reject the new snapshot rather than moving driver-owned history.
+The old BOL note editor, Requested, Attempted, Follow-up, Resolved, Reopen controls, and BOL action history are removed.
 
-## Linked task
+## Next Work Item and queue behavior
 
-A newly matched unresolved item owns exactly one linked open FollowUp `MissingBolTask` work entry.
+`Next Work Item` walks actual actionable driver work only. Current Missing BOL report rows are skipped.
 
-Persisted task text includes deterministic source context, e.g.:
+Fleet priority remains based on unfinished idle accountability and real unresolved saved work. Current Missing BOL presence alone does not elevate driver priority.
 
-`Missing BOL for order SYN1001, empty call 8/27/2026, Boise, ID → Auburn, WA. Status: Open.`
+Search may still find a driver by a current attached BOL Order #.
 
-The task snapshots Driver Code, Unit, Leader, report cycle when available, source import, and creation UTC. Reimport updates source/status wording on the same task. Resolve resolves the same task. Reopen reopens the same task. No operation creates a duplicate.
+## Handoff
 
-Driver Workspace renders one Missing BOL attention row per unresolved order and does not duplicate the linked task as manual work. Generic Work Item Resolve/Reopen cannot bypass BOL synchronization; UI and database guard require Missing BOL actions.
+Handoff continues to have a compact dedicated `Missing BOLs:` section because the current report is useful at shift change.
 
-## Local statuses/actions
+The BOL section is generated **transiently from the current workbook at Regenerate time**, not from saved BOL work history.
 
-Statuses:
-
-- Open
-- Requested
-- Attempted
-- FollowUp (display Follow-up)
-- Resolved
-
-Reopen is an action returning Resolved → Open.
-
-Each Requested/Attempted/Follow-up/Resolved/Reopen:
-
-- changes current item/task state as appropriate
-- appends one action event
-- creates one completed `MissingBolAction` activity entry
-- retains optional trimmed note
-- saves item/task/action/activity atomically
-
-Failure rolls the entire action back. Duplicate submit is disabled while saving and failed-save note text is retained. Unsaved BOL note drafts also survive in-session navigation/report refresh.
-
-## Queue/search integration
-
-Fleet rows expose aggregate Open Work and unresolved matched BOL counts. Counts/oldest dates/Order # search text are indexed aggregate reads, not one query per row.
-
-Priority remains:
-
-1. unfinished high-idle contact
-2. above-threshold Spoke, unresolved work before clear
-3. remaining unresolved work including MissingBolTask
-4. clear drivers
-
-Missing BOL never buries unfinished high-idle accountability. Within otherwise equal ordinary unresolved work, older Empty Call Date may break ties. Search includes attached Order # by deterministic substring and `Next Needing Attention` respects visible results.
-
-## Driver Workspace / Missing BOL Task
-
-Driver Workspace shows compact unresolved BOL attention rows under `NEEDS ATTENTION`; each order appears once.
-
-Opening a row navigates inside MainWindow to one focused task with:
-
-- driver identity/current Unit/Leader
-- Order # and Empty Call Date
-- route/customer/miles where available
-- exact source Driver Code/name evidence
-- latest-report presence and warnings
-- current local state
-- optional action note
-- Requested/Attempted/Follow-up/Resolved/Reopen as permitted
-- compact action history
-- Next Work Item / Next Needing Attention
-
-Back returns to prior Driver Workspace. No secondary Window/modal/browser is created.
-
-## Next Work Item
-
-Within one driver, unresolved BOL follows unfinished idle contact and precedes manual Follow-up/Waiting. BOL ordering is oldest Empty Call Date first. When current driver has no next work, WAA reuses existing visible/search-filtered `Next Needing Attention`.
-
-## Work history and v0.4.2 Handoff
-
-Persisted `MissingBolTask` remains the unresolved work source. `MissingBolAction` remains completed activity and Today’s Activity source. Resolved task itself is not duplicated as completion because the linked Resolved action represents that activity.
-
-The **runtime v0.4.2 Handoff presentation is compact**:
-
-- unresolved MissingBolTask does not appear as one verbose handoff line per order
-- the generated draft has a dedicated `Missing BOLs:` section
-- each driver appears once in that section
-- all unresolved matched Order # values are grouped on the driver’s line
-- singular/plural wording is automatic (`order` / `orders`)
-- BOL orders are deterministically oldest Empty Call Date first, then Order #
-- the visible copied BOL line intentionally omits Empty Call Date, route, and local status because those details remain in the focused BOL workspace
+- represented matched drivers use current durable Driver Code ownership
+- Driver Leader grouping follows the established Handoff rules
+- each represented driver appears once in the BOL section
+- current workbook Order # values are grouped on that driver’s line
+- current fleet Unit/Driver Name are preferred for identity
+- BOL rows do not create the ordinary driver work narrative
 
 Example:
 
 `242163 — Brad Example [ABC123]: Missing BOL for orders AST2543, ASU1575`
 
-Current fleet Unit/Driver Name are preferred for Handoff identity when available; saved task snapshot is fallback.
+Editing/copying Handoff never changes report data. Regenerate rebuilds the Missing BOL section from the current in-memory workbook view plus saved non-BOL work.
 
-MissingBolAction activity may contribute to the driver’s compact narrative line. When the action has a human note, Handoff prefers that note instead of repeating mechanical `Resolved missing BOL... Note:` boilerplate. When no note exists, concise saved action text remains so activity is not silently lost.
+## Report-update cadence
 
-The old visible `NEEDS FOLLOW-UP` / `COMPLETED TODAY` BOL presentation is not the v0.4.2 runtime format. Underlying local-day/open-state classification remains deterministic and regression-tested.
+Rolling 7 Day and Missing BOL are scanned only:
 
-Editing/copying Handoff never changes BOL/task/action/source state. Regenerate rebuilds from saved records; navigating away/back preserves edited draft in-session.
+1. once at launch
+2. when the user explicitly chooses `Update Reports`
 
-## Report-update independence
-
-Rolling 7 Day and Missing BOL scan only once at launch and through explicit `Update Reports`. Sources import independently and status reports partial outcomes honestly.
-
-No FileSystemWatcher/timer/polling/recurring scan exists.
-
-If Update Reports runs while a BOL task is open, the route is rebuilt by stable Driver Code/item ID; unsaved note text is preserved. Missing/stale entity shows explicit Unavailable state with safe Back.
+No `FileSystemWatcher`, recurring timer, polling loop, or automatic mid-session import exists.
 
 ## Privacy/permanent exclusions
 
@@ -263,9 +238,8 @@ Permanently excluded unless explicitly reversed:
 
 ## Honest limitations
 
-- unmatched items cannot become driver-owned work/Handoff until exact durable Driver Code exists
+- current unmatched rows remain unmatched until an exact current durable Driver Code exists
 - no manual reassignment by design
-- v0.4.2 opening `No open ACE/ACI's` is an editable handoff convention; WAA does not track or validate ACE/ACI state
-- WAA does not store a coaching/not-coached field, so Handoff must not invent one
-- representative low-end office-PC benchmark remains separate from GitHub-hosted validation
+- BOL work/action history from older releases is not exposed as current BOL workflow state
+- WAA does not store a coaching/not-coached field and must not invent one
 - Maintenance and DOT remain separate future evaluations

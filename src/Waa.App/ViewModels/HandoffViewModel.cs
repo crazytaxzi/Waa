@@ -84,10 +84,17 @@ public sealed class HandoffViewModel : ObservableObject
             var day = LocalDayRange.Create(_now(), _timeZone);
             var loaded = await Task.Run(() =>
             {
-                var entries = _repository.LoadHandoffEntries(day.StartUtc, day.EndUtc);
-                var effectiveEntries = _missingBolRepository?.ApplyWorkSources(entries) ?? entries;
                 var fleet = _repository.LoadFleet();
-                return (Entries: effectiveEntries, Drivers: fleet.Drivers);
+                var saved = _repository.LoadHandoffEntries(day.StartUtc, day.EndUtc);
+                var classified = _missingBolRepository?.ApplyWorkSources(saved) ?? saved;
+                var currentWork = classified
+                    .Where(entry => entry.Source is not WorkEntrySource.MissingBolTask and not WorkEntrySource.MissingBolAction)
+                    .ToArray();
+                var currentBol = _missingBolRepository?.BuildCurrentHandoffEntries(fleet.Drivers)
+                    ?? Array.Empty<WorkEntryRecord>();
+                return (
+                    Entries: currentWork.Concat(currentBol).ToArray(),
+                    Drivers: fleet.Drivers);
             });
             var result = _handoffService.Generate(
                 loaded.Entries,
@@ -97,10 +104,10 @@ public sealed class HandoffViewModel : ObservableObject
             SummaryText =
                 $"{result.DriverLineCount} driver notes  •  " +
                 $"{result.MissingBolDriverCount} drivers with Missing BOL  •  " +
-                $"{result.MissingBolOrderCount} open BOL orders";
+                $"{result.MissingBolOrderCount} BOL orders in current file";
             _hasGenerated = true;
             OnPropertyChanged(nameof(HasGenerated));
-            _reportStatus($"Handoff regenerated from saved work for {day.LocalDate:M/d/yyyy}.");
+            _reportStatus($"Handoff regenerated from saved work and the current Missing BOL workbook for {day.LocalDate:M/d/yyyy}.");
         }
         catch (Exception exception)
         {
