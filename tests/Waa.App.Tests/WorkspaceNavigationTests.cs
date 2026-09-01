@@ -157,17 +157,20 @@ public sealed class WorkspaceNavigationTests
     }
 
     [Fact]
-    public async Task UnmatchedBol_OpensInCentralReadOnlyWorkspace()
+    public void UnmatchedBolWorkspace_IsCentralAndReadOnlyByContract()
     {
-        using var fixture = new RepositoryFixture();
-        var environment = CreateEnvironment(fixture);
-        ImportBol(environment.MissingBolRepository, "HASH-UNMATCHED-WORKSPACE", BolItem("BOL-U1", "UNKNOWN"));
-        await environment.ViewModel.InitializeAsync();
+        var item = new MissingBolUnmatchedItemViewModel(new MissingBolUnmatchedRecord(
+            1,
+            "BOL-U1",
+            new DateOnly(2026, 8, 27),
+            "UNKNOWN",
+            "Synthetic Source",
+            "Boise, ID",
+            "Auburn, WA",
+            true));
+        var workspace = new UnmatchedBolWorkspaceViewModel([item]);
 
-        environment.ViewModel.OpenUnmatchedBolCommand.Execute(null);
-        await WaitUntilAsync(() => environment.ViewModel.CurrentRoute == WorkspaceRoute.UnmatchedBol);
-
-        var workspace = Assert.IsType<UnmatchedBolWorkspaceViewModel>(environment.ViewModel.CurrentWorkspace);
+        Assert.Equal(WorkspaceRoute.UnmatchedBol, workspace.Route);
         Assert.Single(workspace.Items);
         Assert.Contains("exact", workspace.Items[0].ExactMatchExplanation, StringComparison.OrdinalIgnoreCase);
     }
@@ -207,12 +210,11 @@ public sealed class WorkspaceNavigationTests
     }
 
     [Fact]
-    public async Task DriverWorkspace_ShowsBolTaskExactlyOnceWithoutLinkedWorkDuplicate()
+    public async Task DriverWorkspace_ShowsCurrentBolRowExactlyOnceWithoutLinkedWorkDuplicate()
     {
         using var fixture = new RepositoryFixture();
-        var environment = CreateEnvironment(fixture);
+        var environment = await CreateInitializedEnvironmentAsync(fixture);
         ImportBol(environment.MissingBolRepository, "HASH-BOL-ONCE", BolItem("BOL-100", "A00001"));
-        await environment.ViewModel.InitializeAsync();
 
         await environment.ViewModel.NavigateToDriverAsync("A00001");
 
@@ -221,7 +223,8 @@ public sealed class WorkspaceNavigationTests
         Assert.DoesNotContain(
             workspace.NeedsAttention,
             item => item.Kind == DriverAttentionKind.ManualWork &&
-                    item.WorkItem?.Record.Source == WorkEntrySource.MissingBolTask);
+                    item.WorkItem?.Record.Source is WorkEntrySource.MissingBolTask or WorkEntrySource.MissingBolAction);
+        Assert.Equal(0, fixture.Driver("A00001").OpenWorkCount);
     }
 
     [Fact]
@@ -258,16 +261,15 @@ public sealed class WorkspaceNavigationTests
     }
 
     [Fact]
-    public async Task ClickingBolAttention_OpensCorrectOrderTask()
+    public async Task ClickingBolAttention_OpensCorrectCurrentReportOrder()
     {
         using var fixture = new RepositoryFixture();
-        var environment = CreateEnvironment(fixture);
+        var environment = await CreateInitializedEnvironmentAsync(fixture);
         ImportBol(
             environment.MissingBolRepository,
             "HASH-BOL-OPEN",
             BolItem("BOL-OLD", "A00001", new DateOnly(2026, 8, 25)),
             BolItem("BOL-NEW", "A00001", new DateOnly(2026, 8, 28)));
-        await environment.ViewModel.InitializeAsync();
         await environment.ViewModel.NavigateToDriverAsync("A00001");
         var driverWorkspace = Assert.IsType<DriverWorkspaceViewModel>(environment.ViewModel.CurrentWorkspace);
         var bol = driverWorkspace.NeedsAttention.Single(item => item.Title == "Order BOL-OLD");
@@ -277,6 +279,7 @@ public sealed class WorkspaceNavigationTests
 
         var task = Assert.IsType<MissingBolTaskWorkspaceViewModel>(environment.ViewModel.CurrentWorkspace);
         Assert.Equal("BOL-OLD", task.Item.OrderNumber);
+        Assert.Equal("In current report", task.Item.StatusDisplay);
         Assert.Equal("Fleet > Alex Example > Missing BOL > BOL-OLD", task.Breadcrumb);
     }
 
@@ -354,40 +357,34 @@ public sealed class WorkspaceNavigationTests
     }
 
     [Fact]
-    public async Task MissingBolNote_SurvivesRefreshWithoutSave()
+    public async Task CurrentBolRow_DisappearsWhenRefreshHasNoWorkbook()
     {
         using var fixture = new RepositoryFixture();
-        var environment = CreateEnvironment(fixture);
-        ImportBol(environment.MissingBolRepository, "HASH-BOL-DRAFT", BolItem("BOL-DRAFT", "A00001"));
-        await environment.ViewModel.InitializeAsync();
+        var environment = await CreateInitializedEnvironmentAsync(fixture);
+        ImportBol(environment.MissingBolRepository, "HASH-BOL-CURRENT", BolItem("BOL-CURRENT", "A00001"));
         await environment.ViewModel.NavigateToDriverAsync("A00001");
         var driverWorkspace = Assert.IsType<DriverWorkspaceViewModel>(environment.ViewModel.CurrentWorkspace);
-        var bol = driverWorkspace.NeedsAttention.Single(item => item.Kind == DriverAttentionKind.MissingBol);
-        environment.ViewModel.OpenAttentionItemCommand.Execute(bol);
-        await WaitUntilAsync(() => environment.ViewModel.CurrentRoute == WorkspaceRoute.MissingBolTask);
-        var task = Assert.IsType<MissingBolTaskWorkspaceViewModel>(environment.ViewModel.CurrentWorkspace);
-        task.Item.Note = "Do not discard this note";
+        Assert.Single(driverWorkspace.NeedsAttention, item => item.Kind == DriverAttentionKind.MissingBol);
 
         environment.ViewModel.UpdateReportsCommand.Execute(null);
         await WaitUntilAsync(() => !environment.ViewModel.IsBusy && !environment.ViewModel.MissingBol!.IsBusy);
 
-        var refreshed = Assert.IsType<MissingBolTaskWorkspaceViewModel>(environment.ViewModel.CurrentWorkspace);
-        Assert.Equal("Do not discard this note", refreshed.Item.Note);
+        Assert.False(environment.MissingBolRepository.HasCurrentSnapshot);
+        Assert.Empty(environment.ViewModel.MissingBol!.Items);
     }
 
     [Fact]
-    public async Task NextWorkItem_FollowsIdleThenOldestBolThenManualFollowUpThenWaiting()
+    public async Task DriverIndex_OrdersCurrentBolRowsByEmptyCallBeforeManualWork()
     {
         using var fixture = new RepositoryFixture();
         fixture.Repository.RecordManualWork(fixture.Driver("A00001"), WorkEntryStatus.Waiting, "Waiting item");
         fixture.Repository.RecordManualWork(fixture.Driver("A00001"), WorkEntryStatus.FollowUp, "Follow-up item");
-        var environment = CreateEnvironment(fixture);
+        var environment = await CreateInitializedEnvironmentAsync(fixture);
         ImportBol(
             environment.MissingBolRepository,
             "HASH-ORDERING",
             BolItem("BOL-2", "A00001", new DateOnly(2026, 8, 28)),
             BolItem("BOL-1", "A00001", new DateOnly(2026, 8, 26)));
-        await environment.ViewModel.InitializeAsync();
         await environment.ViewModel.NavigateToDriverAsync("A00001");
 
         var workspace = Assert.IsType<DriverWorkspaceViewModel>(environment.ViewModel.CurrentWorkspace);
