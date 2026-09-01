@@ -210,7 +210,7 @@ public sealed class WorkspaceNavigationTests
     }
 
     [Fact]
-    public async Task DriverWorkspace_ShowsCurrentBolRowExactlyOnceWithoutLinkedWorkDuplicate()
+    public async Task DriverWorkspace_SeparatesCurrentBolFromActionableNeedsAttention()
     {
         using var fixture = new RepositoryFixture();
         var environment = await CreateInitializedEnvironmentAsync(fixture);
@@ -219,7 +219,9 @@ public sealed class WorkspaceNavigationTests
         await environment.ViewModel.NavigateToDriverAsync("A00001");
 
         var workspace = Assert.IsType<DriverWorkspaceViewModel>(environment.ViewModel.CurrentWorkspace);
-        Assert.Single(workspace.NeedsAttention, item => item.Kind == DriverAttentionKind.MissingBol);
+        Assert.DoesNotContain(workspace.NeedsAttention, item => item.Kind == DriverAttentionKind.MissingBol);
+        var bol = Assert.Single(environment.ViewModel.MissingBol!.Items);
+        Assert.Equal("BOL-100", bol.OrderNumber);
         Assert.DoesNotContain(
             workspace.NeedsAttention,
             item => item.Kind == DriverAttentionKind.ManualWork &&
@@ -261,7 +263,7 @@ public sealed class WorkspaceNavigationTests
     }
 
     [Fact]
-    public async Task ClickingBolAttention_OpensCorrectCurrentReportOrder()
+    public async Task ClickingCurrentBolReportRow_OpensCorrectReadOnlyOrder()
     {
         using var fixture = new RepositoryFixture();
         var environment = await CreateInitializedEnvironmentAsync(fixture);
@@ -271,8 +273,9 @@ public sealed class WorkspaceNavigationTests
             BolItem("BOL-OLD", "A00001", new DateOnly(2026, 8, 25)),
             BolItem("BOL-NEW", "A00001", new DateOnly(2026, 8, 28)));
         await environment.ViewModel.NavigateToDriverAsync("A00001");
-        var driverWorkspace = Assert.IsType<DriverWorkspaceViewModel>(environment.ViewModel.CurrentWorkspace);
-        var bol = driverWorkspace.NeedsAttention.Single(item => item.Title == "Order BOL-OLD");
+        var bol = environment.ViewModel.MissingBol!.Items
+            .Single(item => item.OrderNumber == "BOL-OLD")
+            .AttentionItem;
 
         environment.ViewModel.OpenAttentionItemCommand.Execute(bol);
         await WaitUntilAsync(() => environment.ViewModel.CurrentRoute == WorkspaceRoute.MissingBolTask);
@@ -364,7 +367,8 @@ public sealed class WorkspaceNavigationTests
         ImportBol(environment.MissingBolRepository, "HASH-BOL-CURRENT", BolItem("BOL-CURRENT", "A00001"));
         await environment.ViewModel.NavigateToDriverAsync("A00001");
         var driverWorkspace = Assert.IsType<DriverWorkspaceViewModel>(environment.ViewModel.CurrentWorkspace);
-        Assert.Single(driverWorkspace.NeedsAttention, item => item.Kind == DriverAttentionKind.MissingBol);
+        Assert.DoesNotContain(driverWorkspace.NeedsAttention, item => item.Kind == DriverAttentionKind.MissingBol);
+        Assert.Single(environment.ViewModel.MissingBol!.Items);
 
         environment.ViewModel.UpdateReportsCommand.Execute(null);
         await WaitUntilAsync(() => !environment.ViewModel.IsBusy && !environment.ViewModel.MissingBol!.IsBusy);
@@ -374,7 +378,7 @@ public sealed class WorkspaceNavigationTests
     }
 
     [Fact]
-    public async Task DriverIndex_OrdersCurrentBolRowsByEmptyCallBeforeManualWork()
+    public async Task DriverWorkspace_OrdersCurrentBolSeparatelyFromActionableWork()
     {
         using var fixture = new RepositoryFixture();
         fixture.Repository.RecordManualWork(fixture.Driver("A00001"), WorkEntryStatus.Waiting, "Waiting item");
@@ -393,15 +397,40 @@ public sealed class WorkspaceNavigationTests
             new[]
             {
                 DriverAttentionKind.Idle,
-                DriverAttentionKind.MissingBol,
-                DriverAttentionKind.MissingBol,
                 DriverAttentionKind.ManualWork,
                 DriverAttentionKind.ManualWork
             },
             workspace.NeedsAttention.Select(item => item.Kind));
-        Assert.Equal("Order BOL-1", workspace.NeedsAttention[1].Title);
-        Assert.Equal("Follow-up", workspace.NeedsAttention[3].StatusText);
-        Assert.Equal("Waiting", workspace.NeedsAttention[4].StatusText);
+        Assert.Equal(
+            new[] { "BOL-1", "BOL-2" },
+            environment.ViewModel.MissingBol!.Items.Select(item => item.OrderNumber));
+        Assert.Equal("Follow-up", workspace.NeedsAttention[1].StatusText);
+        Assert.Equal("Waiting", workspace.NeedsAttention[2].StatusText);
+    }
+
+    [Fact]
+    public async Task NextWorkItem_SkipsCurrentBolReportRows()
+    {
+        using var fixture = new RepositoryFixture();
+        fixture.Repository.RecordManualWork(
+            fixture.Driver("A00001"),
+            WorkEntryStatus.FollowUp,
+            "Actual follow-up work");
+        var environment = await CreateInitializedEnvironmentAsync(fixture);
+        ImportBol(
+            environment.MissingBolRepository,
+            "HASH-NEXT-SKIP",
+            BolItem("BOL-SKIP", "A00001", new DateOnly(2026, 8, 20)));
+        await environment.ViewModel.NavigateToDriverAsync("A00001");
+
+        environment.ViewModel.NextWorkItemCommand.Execute(null);
+        await WaitUntilAsync(() => environment.ViewModel.CurrentRoute == WorkspaceRoute.IdleTask);
+
+        environment.ViewModel.NextWorkItemCommand.Execute(null);
+        await WaitUntilAsync(() => environment.ViewModel.CurrentRoute == WorkspaceRoute.WorkItemTask);
+
+        var task = Assert.IsType<WorkItemTaskWorkspaceViewModel>(environment.ViewModel.CurrentWorkspace);
+        Assert.Equal("Actual follow-up work", task.Item.Record.Text);
     }
 
     [Fact]
