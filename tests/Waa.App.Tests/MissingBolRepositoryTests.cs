@@ -62,7 +62,11 @@ public sealed class MissingBolRepositoryTests
             Item("SYN2021", "A00001"));
         Assert.Equal(2, bol.LoadDriverItems("A00001").Count);
 
-        Import(bol, "HASH-TWO", Item("SYN2021", "A00001"), LoadedUtc.AddMinutes(5));
+        Import(
+            bol,
+            "HASH-TWO",
+            new[] { Item("SYN2021", "A00001") },
+            LoadedUtc.AddMinutes(5));
 
         var current = bol.LoadDriverItems("A00001");
         var only = Assert.Single(current);
