@@ -120,9 +120,24 @@ public sealed class MissingBolItemViewModel
     public string OrderNumber => Record.SourceOrderNumber;
     public string EmptyCallDateDisplay => Record.EmptyCallDate.ToString("M/d/yyyy", CultureInfo.CurrentCulture);
     public string StatusDisplay => "In current report";
-    // Compatibility with the driver index's old unresolved filter. Source-only rows
-    // are always current while they exist and never have local Resolved state.
-    public bool IsResolved => false;
+
+    // The old Driver Workspace builder only adds BOL rows to NEEDS ATTENTION when
+    // IsResolved is false. Source-only BOL rows are information, not actionable
+    // work, so keep them out of that list (and therefore out of Next Work Item).
+    // They are displayed in their own CURRENT MISSING BOL section instead.
+    public bool IsResolved => true;
+
+    public DriverAttentionItemViewModel AttentionItem => new(
+        DriverAttentionKind.MissingBol,
+        $"bol:{Record.Id}",
+        "MISSING BOL",
+        $"Order {OrderNumber}",
+        StatusDisplay,
+        $"Empty call {EmptyCallDateDisplay}  •  {RouteDisplay}",
+        EmptyCallDateDisplay,
+        SemanticState,
+        missingBolItem: this);
+
     public string RouteDisplay => FormatRoute(Record.OriginCityState, Record.DestinationCityState);
     public string CustomerDisplay => Record.BillTo.Length == 0
         ? "Customer not supplied"
