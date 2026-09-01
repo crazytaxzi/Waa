@@ -151,11 +151,13 @@ public sealed class DriverWorkViewModel : ObservableObject
                 driver.DriverCode,
                 day.StartUtc,
                 day.EndUtc));
-            var openEntries = _missingBolRepository?.ApplyWorkSources(state.OpenEntries)
-                ?? state.OpenEntries;
+            var openEntries = (_missingBolRepository?.ApplyWorkSources(state.OpenEntries)
+                    ?? state.OpenEntries)
+                .Where(entry => entry.Source is not WorkEntrySource.MissingBolTask and not WorkEntrySource.MissingBolAction)
+                .ToArray();
             var todayEntries = (_missingBolRepository?.ApplyWorkSources(state.TodayEntries)
                     ?? state.TodayEntries)
-                .Where(entry => entry.Source != WorkEntrySource.MissingBolTask)
+                .Where(entry => entry.Source is not WorkEntrySource.MissingBolTask and not WorkEntrySource.MissingBolAction)
                 .ToArray();
 
             if (version != _loadVersion ||
@@ -167,9 +169,9 @@ public sealed class DriverWorkViewModel : ObservableObject
 
             ReplaceItems(OpenEntries, openEntries);
             ReplaceItems(TodayEntries, todayEntries);
-            OpenWorkSummary = openEntries.Count == 0
+            OpenWorkSummary = openEntries.Length == 0
                 ? "No unresolved work."
-                : $"{openEntries.Count} unresolved item{(openEntries.Count == 1 ? string.Empty : "s")}.";
+                : $"{openEntries.Length} unresolved item{(openEntries.Length == 1 ? string.Empty : "s")}.";
             TodaySummary = todayEntries.Length == 0
                 ? "No activity recorded today."
                 : $"{todayEntries.Length} activit{(todayEntries.Length == 1 ? "y" : "ies")} today — newest first.";
