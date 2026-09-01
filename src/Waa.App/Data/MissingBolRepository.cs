@@ -149,6 +149,21 @@ public sealed class MissingBolRepository
             }
         }
 
+        foreach (var legacy in LoadLegacyOpenTaskCountByDriver())
+        {
+            if (summaries.TryGetValue(legacy.Key, out var summary))
+            {
+                summaries[legacy.Key] = summary with { LegacyOpenTaskCount = legacy.Value };
+            }
+            else
+            {
+                summaries[legacy.Key] = new MissingBolDriverSummary(0, null, string.Empty)
+                {
+                    LegacyOpenTaskCount = legacy.Value
+                };
+            }
+        }
+
         return new MissingBolFleetState(
             summaries,
             summaries.Values.Sum(summary => summary.OpenCount),
@@ -296,8 +311,16 @@ public sealed class MissingBolRepository
         var drivers = currentDrivers
             .GroupBy(driver => driver.DriverCode, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        IReadOnlyList<MissingBolSourceItem> items;
+        DateTimeOffset loadedUtc;
+        lock (_gate)
+        {
+            items = _items.ToArray();
+            loadedUtc = _loadedUtc;
+        }
+
         var entries = new List<WorkEntryRecord>();
-        foreach (var source in SnapshotItems())
+        foreach (var source in items)
         {
             if (source.NormalizedSourceDriverCode.Length == 0 ||
                 !drivers.TryGetValue(source.NormalizedSourceDriverCode, out var driver))
@@ -311,7 +334,7 @@ public sealed class MissingBolRepository
                 driver.DriverName,
                 $"Missing BOL for order {source.SourceOrderNumber}, empty call {source.EmptyCallDate:M/d/yyyy}.",
                 WorkEntryStatus.FollowUp,
-                _loadedUtc == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : _loadedUtc,
+                loadedUtc == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : loadedUtc,
                 null,
                 WorkEntrySource.MissingBolTask,
                 null,
@@ -333,7 +356,12 @@ public sealed class MissingBolRepository
 
     private MissingBolItemRecord ToItemRecord(MissingBolSourceItem source, CurrentDriver? driver)
     {
-        var loaded = _loadedUtc == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : _loadedUtc;
+        DateTimeOffset loaded;
+        lock (_gate)
+        {
+            loaded = _loadedUtc == DateTimeOffset.MinValue ? DateTimeOffset.UtcNow : _loadedUtc;
+        }
+
         var sourceNameDiffers = driver is not null &&
                                 source.SourceDriverName.Length > 0 &&
                                 !source.SourceDriverName.Equals(driver.DriverName, StringComparison.OrdinalIgnoreCase);
@@ -423,11 +451,8 @@ public sealed class MissingBolRepository
         return value == 0 ? 1 : value;
     }
 
-    private static long SyntheticWorkId(string normalizedOrderNumber)
-    {
-        var stable = StableItemId(normalizedOrderNumber);
-        return stable == long.MaxValue ? long.MaxValue - 1 : stable + 1;
-    }
+    private static long SyntheticWorkId(string normalizedOrderNumber) =>
+        -StableItemId(normalizedOrderNumber);
 
     private sealed record CurrentDriver(string DriverCode, string DriverName);
 }
