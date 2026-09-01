@@ -15,6 +15,8 @@
     <SolidColorBrush x:Key="SuccessBrush" Color="#39FF6A" />
     <SolidColorBrush x:Key="SuccessHoverBrush" Color="#63FF8A" />
     <SolidColorBrush x:Key="SuccessButtonTextBrush" Color="#11161B" />
+    <SolidColorBrush x:Key="AmbientParticleBrush" Color="#65CFFF" />
+    <SolidColorBrush x:Key="AmbientScanlineBrush" Color="#4DBFFF" />
     <SolidColorBrush x:Key="TextBrush" Color="#F2F7FB" />
     <SolidColorBrush x:Key="SubtleTextBrush" Color="#B8C7D3" />
     <SolidColorBrush x:Key="DisabledTextBrush" Color="#A8B6C1" />
