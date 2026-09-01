@@ -28,11 +28,24 @@ public sealed class ThemePreferenceStore
     public void SetDarkMode(bool darkMode) =>
         SetSetting(ThemeSettingKey, darkMode ? "dark" : "light");
 
-    public bool GetAmbientMotionEnabled()
+    public bool? GetAmbientMotionPreference()
     {
         var value = GetSetting(AmbientMotionSettingKey);
-        return !string.Equals(value, "off", StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(value, "on", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(value, "off", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return null;
     }
+
+    public bool GetAmbientMotionEnabled() =>
+        GetAmbientMotionPreference() ?? true;
 
     public void SetAmbientMotionEnabled(bool enabled) =>
         SetSetting(AmbientMotionSettingKey, enabled ? "on" : "off");
