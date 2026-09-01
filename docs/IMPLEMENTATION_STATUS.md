@@ -2,19 +2,17 @@
 
 ## Current bounded release
 
-**WAA v0.4.5 — Ambient Motion Theme Layer, merged to `main` and Windows-validated.**
+**WAA v0.4.5.1 — Ambient Motion Control Hotfix, merged to `main` and Windows-validated.**
 
-This release is presentation-only. It adds bounded ambient shell motion, a persisted Motion setting, and restrained button feedback. It does not change database schema/version, report parsing, queue priority, durable identity, work/BOL/Handoff behavior, route identity, or `%LOCALAPPDATA%\WAA` compatibility.
+This release is a presentation/settings hotfix only. It restores direct user control of the v0.4.5 ambient-motion layer on Windows sessions where `SystemParameters.ClientAreaAnimation` reports false. It does not change database schema/version, report parsing, queue priority, durable identity, work/BOL/Handoff behavior, route identity, or `%LOCALAPPDATA%\WAA` compatibility.
 
-Merged product commit: `0d9a55ebf54c2feb955e5332c299bfa894118af5`.
+Merged product commit: `3e1282cb9f2a6360a2a379773fab4ff9891a781a`.
 
-Merged-main Windows validation: **Windows build, test, and portable package #81**, run ID `33537683886`, September 1, 2026 — **success**.
-
-This documentation-only status commit must pass the same workflow; its resulting portable artifact is the final documentation-aligned delivery build.
+Merged-main Windows validation: **Windows build, test, and portable package #84**, run ID `33540852195`, September 1, 2026 — **success**.
 
 ## v0.4.5 ambient shell
 
-Dark mode has a deliberately faint decorative layer:
+Dark mode keeps the deliberately faint decorative layer:
 
 - one slow rolling scanline
 - eight sparse 2–3 pixel electric-blue motes
@@ -22,21 +20,27 @@ Dark mode has a deliberately faint decorative layer:
 - no glow, blur, shader, shadow, particle engine, timer, background worker, browser surface, or new dependency
 - overlay is clipped and `IsHitTestVisible=False`
 
-The ambient layer runs only when the persisted user preference is enabled, Dark mode is active, and Windows `SystemParameters.ClientAreaAnimation` permits client animation. Light mode always suppresses it.
+The ambient Storyboard runs only when Dark mode is active and the current WAA motion state is enabled. Light mode always suppresses it.
 
-## Motion preference
+## v0.4.5.1 motion-control hotfix
 
-The shell exposes a compact motion control:
+The v0.4.5 defect was that Windows `SystemParameters.ClientAreaAnimation == false` forced the shell into a disabled `Motion reduced` state, preventing the user from explicitly choosing WAA motion on or off.
 
-- `Motion off` means ambient motion is currently enabled and can be switched off
-- `Motion on` means the preference is disabled and can be enabled
-- `Motion reduced` appears disabled when Windows client animations are disabled
+v0.4.5.1 changes that behavior:
 
-The new preference uses the existing SQLite `settings` table key `appearance_ambient_motion`. Missing preference defaults to enabled. Saving runs off the UI thread and rolls visible state back on persistence failure. No schema migration or schema version change is required.
+- Windows client-animation state is used only to seed the initial runtime default when no WAA motion preference has ever been saved.
+- If Windows client animation is disabled and no WAA preference exists, WAA starts with ambient motion off and an enabled `Motion on` button.
+- If Windows client animation is enabled and no WAA preference exists, WAA starts with ambient motion on and an enabled `Motion off` button.
+- The WAA Motion button never becomes permanently disabled because of Windows/RDP/enterprise animation state.
+- The first explicit user click stores `appearance_ambient_motion=on|off` in the existing `settings` table.
+- Once saved, that explicit WAA preference is authoritative on later launches even if Windows reports client-area animation disabled.
+- Preference saving still runs off the UI thread and restores the previous visible state if persistence fails.
+
+No schema migration or schema version change is required.
 
 ## Button feedback
 
-Central `BaseButtonStyle` adds only template-local render feedback:
+Central `BaseButtonStyle` remains unchanged from v0.4.5:
 
 - hover scale maximum `1.012x`
 - short 0.12/0.14 second enter/leave transitions
@@ -60,9 +64,9 @@ Still preserved:
 
 ## Validation
 
-PR #7 release tree, workflow **#76**, run ID `33536942344`: success.
+PR #8 hotfix tree, workflow **#83**, run ID `33540678569`: success.
 
-Merged product `main`, workflow **#81**, run ID `33537683886`:
+Merged product `main`, workflow **#84**, run ID `33540852195`:
 
 - restore: passed
 - warnings-as-errors Release build: passed
@@ -73,13 +77,13 @@ Merged product `main`, workflow **#81**, run ID `33537683886`:
 - build: **0 warnings, 0 errors**
 - self-contained win-x64 publish: passed
 - portable artifact upload: passed
-- merged-product artifact SHA-256: `74647439fd8b1c383f2839ac0196c10370e7010e2acdc16b2fad448fb9f0bb9f`
+- merged-product artifact SHA-256: `431cf80a0522229c9c73f6f90f7f07a241a9dc79a07f886d331ea96a2a4d62d0`
 
-An earlier PR run correctly caught an old shell-theme regression assertion that depended on the pre-overlay XAML indentation/layout. The test was changed to validate dynamic shell-background usage semantically; production dark-shell behavior was not weakened. Button motion was also tightened to a template-local transform before final branch validation.
+Regression coverage now explicitly prevents the disabled `Motion reduced` path from returning and verifies that Windows client-animation state is only an unsaved initial-default signal.
 
 ## Database compatibility
 
-v0.4.5 requires **no database schema change**. Existing `%LOCALAPPDATA%\WAA` preserves roster/import metadata, idle contacts, work history, Missing BOL state/actions, threshold, Light/Dark preference, Handoff state, and the new ambient-motion preference.
+v0.4.5.1 requires **no database schema change**. Existing `%LOCALAPPDATA%\WAA` preserves roster/import metadata, idle contacts, work history, Missing BOL state/actions, threshold, Light/Dark preference, Handoff state, and any previously saved Ambient Motion preference.
 
 ## Remaining limitations
 
