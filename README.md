@@ -4,9 +4,9 @@ WAA is a local, portable Windows application for working through a driver fleet,
 
 **Driver Code** is durable identity. **Driver Name** is display identity. Unit Code and Driver Leader are operational/historical context and never define driver identity.
 
-## Current release line: v0.4.5
+## Current release line: v0.4.5.1
 
-v0.4 introduced the centralized one-window workspace and theme-safe text. v0.4.1 fixed inline `Run.Text` startup binding. v0.4.2 made Handoff compact. v0.4.3 tightened Fleet Queue density and introduced the gunmetal/neon-purple/neon-green stream palette. v0.4.4 grouped Handoff by Driver Leader and fixed the complete dark MainWindow shell. v0.4.5 adds a deliberately light ambient-motion layer and restrained button feedback without changing business/data behavior.
+v0.4 introduced the centralized one-window workspace and theme-safe text. v0.4.1 fixed inline `Run.Text` startup binding. v0.4.2 made Handoff compact. v0.4.3 tightened Fleet Queue density and introduced the gunmetal/neon-purple/neon-green stream palette. v0.4.4 grouped Handoff by Driver Leader and fixed the complete dark MainWindow shell. v0.4.5 added a deliberately light ambient-motion layer and restrained button feedback. v0.4.5.1 keeps that motion control user-operated even when Windows reports reduced client animation.
 
 Current UI/workflow highlights:
 
@@ -23,9 +23,10 @@ Current UI/workflow highlights:
 - centralized Light/Dark palettes with automatic theme-safe text
 - complete dark-mode MainWindow/client background
 - optional dark-mode ambient scanline + sparse electric-blue dust
+- user-controlled Ambient Motion preference even on reduced-animation Windows sessions
 - restrained button hover/press motion
 
-## v0.4.5 ambient motion
+## v0.4.5 ambient motion + v0.4.5.1 control hotfix
 
 Ambient motion is intentionally subtle and bounded:
 
@@ -35,19 +36,19 @@ Ambient motion is intentionally subtle and bounded:
 - non-interactive overlay (`IsHitTestVisible=False`)
 - no timer, particle engine, blur, glow, shader, background worker, browser surface, or new graphics dependency
 
-It runs only when:
+The ambient effect itself runs only when:
 
 1. Dark mode is active
-2. the persisted WAA Ambient Motion preference is enabled
-3. Windows `SystemParameters.ClientAreaAnimation` permits client animation
+2. the current WAA Ambient Motion preference is enabled
+
+If no WAA motion preference has ever been saved, Windows `SystemParameters.ClientAreaAnimation` supplies the initial default only. Windows animation enabled starts WAA motion enabled; Windows animation disabled starts WAA motion disabled. The button stays usable in both cases.
 
 The shell control reads:
 
-- `Motion off` — motion is enabled; click to disable it
-- `Motion on` — motion is disabled; click to enable it
-- `Motion reduced` — Windows client animations are disabled, so WAA suppresses ambient motion
+- `Motion off` — WAA motion is enabled; click to disable it
+- `Motion on` — WAA motion is disabled; click to enable it
 
-The preference defaults enabled when absent and is stored in the existing SQLite `settings` table. No database migration/schema version change is required.
+There is no greyed-out `Motion reduced` lockout in v0.4.5.1. Once the user clicks the control, WAA stores an explicit `on` or `off` value in the existing SQLite `settings` table and that WAA choice wins on later launches, including RDP, enterprise-policy, or performance-tuned Windows sessions. No database migration/schema version change is required.
 
 Buttons use only a tiny template-local hover scale (`1.012x`) and slight pressed opacity feedback. Layout, commands, click targets, keyboard accessibility, focus, and semantic colors are unchanged.
 
@@ -65,7 +66,7 @@ Buttons use only a tiny template-local hover scale (`1.012x`) and slight pressed
 - Resolve/Reopen without deleting original history
 - Today’s Activity
 - deterministic editable Handoff and Copy to Clipboard
-- persisted Light/Dark and Ambient Motion preferences
+- persisted Light/Dark and explicit Ambient Motion preferences
 - SQLite under `%LOCALAPPDATA%\WAA`
 - self-contained Windows x64 portable deployment with no installer/admin requirement
 
@@ -145,7 +146,7 @@ Upgrade:
 4. Retain `%LOCALAPPDATA%\WAA`.
 5. Start `WAA.exe`.
 
-v0.4.5 requires no schema migration. Replacing application files leaves roster, observations, contacts, work history, BOL state/actions, threshold, Handoff history, Light/Dark preference, and Ambient Motion preference intact.
+v0.4.5.1 requires no schema migration. Replacing application files leaves roster, observations, contacts, work history, BOL state/actions, threshold, Handoff history, Light/Dark preference, and Ambient Motion preference intact.
 
 ## Permanent exclusions
 

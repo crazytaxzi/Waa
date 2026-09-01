@@ -1,4 +1,4 @@
-# WAA Theming v0.4.5
+# WAA Theming v0.4.5.1
 
 ## Meaning of Auto text
 
@@ -31,7 +31,7 @@ Purple remains the primary selection/focus/breadcrumb/Handoff accent. Green rema
 
 `MainWindow`, the outer shell Grid, and the inner client Grid explicitly consume `WindowBackgroundBrush` through `DynamicResource`. This prevents a Windows/default light surface from remaining visible around dark-themed content. The Windows title bar continues to use the existing DWM helper where supported.
 
-## v0.4.5 ambient motion
+## v0.4.5 ambient motion + v0.4.5.1 control hotfix
 
 Ambient motion is an intentionally bounded visual layer, not a general animation framework.
 
@@ -43,15 +43,16 @@ Dark-mode ambient effects consist of:
 
 The ambient overlay is clipped to the MainWindow client area, sits above the shell visually, and is `IsHitTestVisible=False`. It cannot intercept mouse input or alter workspace routing, selection, text editing, or button hit targets.
 
-Ambient motion runs only when all three conditions are true:
+Ambient motion runs only when both conditions are true:
 
-1. the user’s persisted Ambient Motion preference is enabled
+1. the current WAA Ambient Motion preference is enabled
 2. Dark mode is active
-3. Windows `SystemParameters.ClientAreaAnimation` permits client-area animation
 
-If Windows disables client-area animation, WAA suppresses the effect and the shell control reports `Motion reduced` rather than overriding the operating-system accessibility preference.
+Windows `SystemParameters.ClientAreaAnimation` is now an **initial-default signal only**, not a permanent lockout. When no WAA motion preference has ever been saved, WAA starts with motion enabled if Windows client animation is enabled and starts with motion disabled if Windows client animation is disabled. The shell control remains enabled either way.
 
-The user control displays `Motion off` while the persisted preference is enabled and `Motion on` while disabled. The preference defaults enabled when no value exists and is stored as `appearance_ambient_motion` in the existing `settings` table. No schema version or migration is introduced. Preference writes run off the UI thread; a failed save restores the previous visible state.
+As soon as the user clicks the WAA motion control, WAA stores an explicit `on` or `off` preference under `appearance_ambient_motion`. That explicit WAA choice is authoritative on later launches, including RDP, enterprise-policy, or performance-tuned Windows sessions where `SystemParameters.ClientAreaAnimation` reports false.
+
+The user control displays `Motion off` while WAA motion is enabled and `Motion on` while disabled. There is no longer a greyed-out `Motion reduced` state. The legacy convenience method still treats an absent setting as enabled for compatibility, while MainWindow uses the nullable preference to choose the Windows-informed first-run default. No schema version or migration is introduced. Preference writes run off the UI thread; a failed save restores the previous visible state.
 
 Ambient motion is intentionally cheap:
 
@@ -60,7 +61,7 @@ Ambient motion is intentionally cheap:
 - no background worker
 - no blur, glow, shadow, shader, or external graphics dependency
 - no animation inside DataGrid rows or editable text controls
-- one fixed Storyboard starts/stops with theme/preference/accessibility state
+- one fixed Storyboard starts/stops with theme and WAA preference state
 
 ## Button motion
 
@@ -91,7 +92,7 @@ Semantic state remains word-first and palette-assisted through warning, follow-u
 
 `ThemeManager.Apply(bool darkMode)` swaps the active palette dictionary. Base styles and DataTemplates remain in place. Because brushes and explicit shell backgrounds use dynamic resources, the visible application updates without restart or navigation reset.
 
-Switching to Light mode immediately stops/collapses the ambient layer. Returning to Dark mode restarts it only when the user preference and Windows animation permission allow it. Navigation, queue selection, search, notes, and Handoff drafts are not reset.
+Switching to Light mode immediately stops/collapses the ambient layer. Returning to Dark mode restarts it when the current WAA motion preference is enabled. Navigation, queue selection, search, notes, and Handoff drafts are not reset.
 
 ## Contrast requirements
 
@@ -109,7 +110,8 @@ Repository tests enforce that:
 - MainWindow/root client surfaces use dynamic `WindowBackgroundBrush`
 - ambient brushes are centralized palette resources
 - ambient layer is non-interactive and bounded to a fixed small number of motes
-- ambient code respects Dark mode, persisted preference, and Windows client-animation permission
+- Windows client-animation state can seed an unsaved first-run default but cannot disable the WAA motion control
+- explicit WAA motion preference plus Dark mode control whether the ambient Storyboard runs
 - no timer, blur, glow, or particle-engine path is introduced
 - button motion remains restrained and render-only
 - generated DataGrid/editor/button/selected/disabled text stays theme-safe
