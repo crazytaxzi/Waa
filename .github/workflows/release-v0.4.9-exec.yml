@@ -65,6 +65,19 @@ jobs:
           python $script
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Disable SQLite pooling during legacy retirement
+        shell: pwsh
+        run: |
+          $path = 'src\Waa.App\Services\LegacyDatabaseRetirementService.cs'
+          $text = [IO.File]::ReadAllText($path)
+          $old = '            Cache = SqliteCacheMode.Private'
+          if (-not $text.Contains($old)) {
+            throw 'Legacy retirement SQLite connection pattern was not found.'
+          }
+          $new = '            Cache = SqliteCacheMode.Private,' + [Environment]::NewLine + '            Pooling = false'
+          $text = $text.Replace($old, $new)
+          [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
+
       - name: Restore
         shell: pwsh
         run: dotnet restore Waa.sln
@@ -161,6 +174,7 @@ jobs:
             '- Fleet Queue, Driver Workspace, Handoff, idle-contact snapshots, and newly saved work use the effective Unit.',
             '- Historical work/contact snapshots and imported report evidence are never rewritten.',
             '- No uniqueness restriction is imposed on Unit because legitimate co-driver/shared-unit situations can exist.',
+            '- Legacy retirement SQLite connections do not pool file handles, allowing verified archives to finalize reliably on Windows.',
             '- Includes v0.4.8 safe previous-generation database retirement and v0.4.7 Handoff audit hardening.',
             '- Self-contained Windows x64 portable package.'
           ) | Set-Content -Path release-notes.md -Encoding UTF8
