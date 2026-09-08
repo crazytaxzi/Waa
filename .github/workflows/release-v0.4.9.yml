@@ -1,0 +1,241 @@
+name: Publish WAA v0.4.9 Manual Truck Assignment
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release-v0.4.9.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-2025
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Apply v0.4.9 manual truck assignment
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          root = Path.cwd()
+
+          def read(rel):
+              return (root / rel).read_text(encoding='utf-8')
+
+          def write(rel, text):
+              (root / rel).write_text(text, encoding='utf-8', newline='')
+
+          def replace(rel, old, new, count=1):
+              text = read(rel)
+              if text.count(old) < count:
+                  raise RuntimeError(f"Expected pattern not found in {rel}: {old[:160]!r}")
+              write(rel, text.replace(old, new, count))
+
+          # Model a manual assignment separately from report evidence.
+          replace('src/Waa.App/Data/DatabaseModels.cs',
+          '''    int OpenWorkCount);\n\npublic sealed record WorkEntryRecord(\n''',
+          '''    int OpenWorkCount);\n\npublic sealed record DriverUnitAssignmentRecord(\n    string DriverCode,\n    string ReportUnitCode,\n    string? ManualUnitCode)\n{\n    public bool HasManualOverride => !string.IsNullOrWhiteSpace(ManualUnitCode);\n    public string EffectiveUnitCode => HasManualOverride ? ManualUnitCode! : ReportUnitCode;\n}\n\npublic sealed record WorkEntryRecord(\n''')
+
+          rel = 'src/Waa.App/Data/WaaRepository.cs'
+          replace(rel,
+          '''    public DateOnly? GetCurrentReportCycle()\n''',
+          '''    public DriverUnitAssignmentRecord? GetDriverUnitAssignment(string driverCode)\n    {\n        ArgumentException.ThrowIfNullOrWhiteSpace(driverCode);\n\n        using var connection = OpenConnection();\n        using var command = connection.CreateCommand();\n        command.CommandText = """\n            SELECT\n                driver.driver_code,\n                COALESCE(snapshot.unit_code, driver.current_unit_code, ''),\n                unit_override.unit_code\n            FROM drivers AS driver\n            LEFT JOIN current_driver_snapshots AS snapshot\n                ON snapshot.driver_code = driver.driver_code\n            LEFT JOIN driver_unit_overrides AS unit_override\n                ON unit_override.driver_code = driver.driver_code\n            WHERE driver.driver_code = $driverCode\n            LIMIT 1;\n            """;\n        command.Parameters.AddWithValue("$driverCode", driverCode.Trim());\n        using var reader = command.ExecuteReader();\n        if (!reader.Read())\n        {\n            return null;\n        }\n\n        return new DriverUnitAssignmentRecord(\n            reader.GetString(0),\n            reader.GetString(1),\n            reader.IsDBNull(2) ? null : reader.GetString(2));\n    }\n\n    public void SetDriverUnitOverride(\n        string driverCode,\n        string unitCode,\n        DateTimeOffset? updatedUtc = null)\n    {\n        ArgumentException.ThrowIfNullOrWhiteSpace(driverCode);\n        ArgumentException.ThrowIfNullOrWhiteSpace(unitCode);\n        var normalizedCode = driverCode.Trim();\n        var normalizedUnit = unitCode.Trim();\n\n        using var connection = OpenConnection();\n        using (var driverCheck = connection.CreateCommand())\n        {\n            driverCheck.CommandText = "SELECT EXISTS(SELECT 1 FROM drivers WHERE driver_code = $driverCode);";\n            driverCheck.Parameters.AddWithValue("$driverCode", normalizedCode);\n            if (Convert.ToInt32(driverCheck.ExecuteScalar(), CultureInfo.InvariantCulture) != 1)\n            {\n                throw new InvalidOperationException($"Driver '{normalizedCode}' is not in the saved WAA roster.");\n            }\n        }\n\n        using var command = connection.CreateCommand();\n        command.CommandText = """\n            INSERT INTO driver_unit_overrides(driver_code, unit_code, updated_utc)\n            VALUES ($driverCode, $unitCode, $updatedUtc)\n            ON CONFLICT(driver_code) DO UPDATE SET\n                unit_code = excluded.unit_code,\n                updated_utc = excluded.updated_utc;\n            """;\n        command.Parameters.AddWithValue("$driverCode", normalizedCode);\n        command.Parameters.AddWithValue("$unitCode", normalizedUnit);\n        command.Parameters.AddWithValue(\n            "$updatedUtc",\n            FormatUtc((updatedUtc ?? DateTimeOffset.UtcNow).ToUniversalTime()));\n        command.ExecuteNonQuery();\n    }\n\n    public bool ClearDriverUnitOverride(string driverCode)\n    {\n        ArgumentException.ThrowIfNullOrWhiteSpace(driverCode);\n        using var connection = OpenConnection();\n        using var command = connection.CreateCommand();\n        command.CommandText = "DELETE FROM driver_unit_overrides WHERE driver_code = $driverCode;";\n        command.Parameters.AddWithValue("$driverCode", driverCode.Trim());\n        return command.ExecuteNonQuery() == 1;\n    }\n\n    public DateOnly? GetCurrentReportCycle()\n''')
+
+          replace(rel,
+          '''                snapshot.report_cycle_date,\n                snapshot.unit_code,\n                snapshot.driver_leader,\n''',
+          '''                snapshot.report_cycle_date,\n                COALESCE(NULLIF(TRIM(unit_override.unit_code), ''), snapshot.unit_code),\n                snapshot.driver_leader,\n''')
+          replace(rel,
+          '''            FROM current_driver_snapshots AS snapshot\n            INNER JOIN drivers AS driver ON driver.driver_code = snapshot.driver_code\n            LEFT JOIN latest_contact AS contact\n''',
+          '''            FROM current_driver_snapshots AS snapshot\n            INNER JOIN drivers AS driver ON driver.driver_code = snapshot.driver_code\n            LEFT JOIN driver_unit_overrides AS unit_override\n                ON unit_override.driver_code = snapshot.driver_code\n            LEFT JOIN latest_contact AS contact\n''')
+          replace(rel,
+          '''                CREATE TABLE IF NOT EXISTS weekly_observations (\n''',
+          '''                CREATE TABLE IF NOT EXISTS driver_unit_overrides (\n                    driver_code TEXT PRIMARY KEY COLLATE NOCASE,\n                    unit_code TEXT NOT NULL CHECK (length(trim(unit_code)) > 0),\n                    updated_utc TEXT NOT NULL,\n                    FOREIGN KEY (driver_code) REFERENCES drivers(driver_code)\n                );\n\n                CREATE TABLE IF NOT EXISTS weekly_observations (\n''')
+          replace(rel, 'version.CommandText = "PRAGMA user_version = 3;";', 'version.CommandText = "PRAGMA user_version = 4;";')
+
+          # Main workspace editing state and commands.
+          rel = 'src/Waa.App/ViewModels/MainViewModel.cs'
+          replace(rel,
+          '''    private string _contactNote = string.Empty;\n    private string _reportCycleText = "No report";\n''',
+          '''    private string _contactNote = string.Empty;\n    private string _driverUnitAssignmentText = string.Empty;\n    private string _driverUnitAssignmentSourceText = string.Empty;\n    private bool _hasDriverUnitOverride;\n    private string _reportCycleText = "No report";\n''')
+          replace(rel,
+          '''        OpenActivityDetailCommand = new AsyncRelayCommand<WorkEntryItemViewModel>(\n            item => item is null ? Task.CompletedTask : OpenActivityDetailAsync(item),\n            item => !IsBusy && item is not null);\n''',
+          '''        OpenActivityDetailCommand = new AsyncRelayCommand<WorkEntryItemViewModel>(\n            item => item is null ? Task.CompletedTask : OpenActivityDetailAsync(item),\n            item => !IsBusy && item is not null);\n        SaveDriverUnitAssignmentCommand = new AsyncRelayCommand(\n            SaveDriverUnitAssignmentAsync,\n            CanEditDriverUnitAssignment);\n        UseReportUnitAssignmentCommand = new AsyncRelayCommand(\n            UseReportUnitAssignmentAsync,\n            () => CanEditDriverUnitAssignment() && HasDriverUnitOverride);\n''')
+          replace(rel,
+          '''    public AsyncRelayCommand<WorkEntryItemViewModel> OpenActivityDetailCommand { get; }\n''',
+          '''    public AsyncRelayCommand<WorkEntryItemViewModel> OpenActivityDetailCommand { get; }\n    public AsyncRelayCommand SaveDriverUnitAssignmentCommand { get; }\n    public AsyncRelayCommand UseReportUnitAssignmentCommand { get; }\n''')
+          replace(rel,
+          '''    public string ContactNote\n    {\n        get => _contactNote;\n        set => SetProperty(ref _contactNote, value);\n    }\n\n    public string ReportCycleText\n''',
+          '''    public string ContactNote\n    {\n        get => _contactNote;\n        set => SetProperty(ref _contactNote, value);\n    }\n\n    public string DriverUnitAssignmentText\n    {\n        get => _driverUnitAssignmentText;\n        set => SetProperty(ref _driverUnitAssignmentText, value);\n    }\n\n    public string DriverUnitAssignmentSourceText\n    {\n        get => _driverUnitAssignmentSourceText;\n        private set => SetProperty(ref _driverUnitAssignmentSourceText, value);\n    }\n\n    public bool HasDriverUnitOverride\n    {\n        get => _hasDriverUnitOverride;\n        private set => SetProperty(ref _hasDriverUnitOverride, value);\n    }\n\n    public string ReportCycleText\n''')
+          replace(rel,
+          '''    private async Task NextNeedingAttentionAsync()\n''',
+          '''    private async Task SaveDriverUnitAssignmentAsync()\n    {\n        var selected = SelectedDriver;\n        if (selected is null)\n        {\n            return;\n        }\n\n        var unit = DriverUnitAssignmentText.Trim();\n        if (unit.Length == 0)\n        {\n            StatusMessage = "Enter a truck/unit before saving the assignment.";\n            return;\n        }\n\n        var preserveLocation = _navigator.Current;\n        var driverCode = selected.DriverCode;\n        var driverName = selected.DriverName;\n        try\n        {\n            IsBusy = true;\n            await Task.Run(() => _repository.SetDriverUnitOverride(driverCode, unit));\n            await ReloadFleetAsync(driverCode);\n            await RestoreLocationAsync(preserveLocation);\n            StatusMessage = $"Assigned Unit {unit} to {driverName}. The manual assignment will stay in effect until Use Report Assignment is chosen.";\n        }\n        catch (Exception exception)\n        {\n            AppLog.Write(exception, "Driver unit assignment save failed");\n            StatusMessage = $"Truck/unit assignment was not changed: {exception.Message}";\n        }\n        finally\n        {\n            IsBusy = false;\n        }\n    }\n\n    private async Task UseReportUnitAssignmentAsync()\n    {\n        var selected = SelectedDriver;\n        if (selected is null)\n        {\n            return;\n        }\n\n        var preserveLocation = _navigator.Current;\n        var driverCode = selected.DriverCode;\n        var driverName = selected.DriverName;\n        try\n        {\n            IsBusy = true;\n            await Task.Run(() => _repository.ClearDriverUnitOverride(driverCode));\n            await ReloadFleetAsync(driverCode);\n            await RestoreLocationAsync(preserveLocation);\n            StatusMessage = $"{driverName} is using the current report truck/unit assignment again.";\n        }\n        catch (Exception exception)\n        {\n            AppLog.Write(exception, "Driver unit assignment clear failed");\n            StatusMessage = $"Report truck/unit assignment could not be restored: {exception.Message}";\n        }\n        finally\n        {\n            IsBusy = false;\n        }\n    }\n\n    private async Task NextNeedingAttentionAsync()\n''')
+          replace(rel,
+          '''    private async Task LoadSelectedDriverStateAsync(DriverRowViewModel? selectedDriver)\n    {\n        var workTask = Work.SetDriverAsync(selectedDriver?.Record);\n        if (MissingBol is null)\n        {\n            await workTask;\n            return;\n        }\n\n        await Task.WhenAll(\n            workTask,\n            MissingBol.SetDriverAsync(selectedDriver?.Record));\n    }\n\n    private bool CanRecordContact() =>\n''',
+          '''    private async Task LoadSelectedDriverStateAsync(DriverRowViewModel? selectedDriver)\n    {\n        var workTask = Work.SetDriverAsync(selectedDriver?.Record);\n        var missingBolTask = MissingBol is null\n            ? Task.CompletedTask\n            : MissingBol.SetDriverAsync(selectedDriver?.Record);\n        var assignmentTask = selectedDriver is null\n            ? Task.FromResult<DriverUnitAssignmentRecord?>(null)\n            : Task.Run(() => _repository.GetDriverUnitAssignment(selectedDriver.DriverCode));\n\n        await Task.WhenAll(workTask, missingBolTask, assignmentTask);\n\n        if (selectedDriver is null)\n        {\n            DriverUnitAssignmentText = string.Empty;\n            DriverUnitAssignmentSourceText = string.Empty;\n            HasDriverUnitOverride = false;\n            RefreshCommandStates();\n            return;\n        }\n\n        if (!string.Equals(SelectedDriver?.DriverCode, selectedDriver.DriverCode, StringComparison.OrdinalIgnoreCase))\n        {\n            return;\n        }\n\n        var assignment = assignmentTask.Result;\n        if (assignment is null)\n        {\n            DriverUnitAssignmentText = selectedDriver.UnitCode;\n            DriverUnitAssignmentSourceText = "Current fleet assignment";\n            HasDriverUnitOverride = false;\n        }\n        else\n        {\n            DriverUnitAssignmentText = assignment.EffectiveUnitCode;\n            HasDriverUnitOverride = assignment.HasManualOverride;\n            DriverUnitAssignmentSourceText = assignment.HasManualOverride\n                ? $"Manual assignment  •  Report Unit {DisplayUnit(assignment.ReportUnitCode)}"\n                : $"Report assignment  •  Unit {DisplayUnit(assignment.ReportUnitCode)}";\n        }\n\n        RefreshCommandStates();\n    }\n\n    private bool CanEditDriverUnitAssignment() =>\n        !IsBusy &&\n        SelectedDriver is not null &&\n        CurrentRoute == WorkspaceRoute.DriverWorkspace;\n\n    private bool CanRecordContact() =>\n''')
+          replace(rel,
+          '''        OpenActivityDetailCommand.RaiseCanExecuteChanged();\n''',
+          '''        OpenActivityDetailCommand.RaiseCanExecuteChanged();\n        SaveDriverUnitAssignmentCommand.RaiseCanExecuteChanged();\n        UseReportUnitAssignmentCommand.RaiseCanExecuteChanged();\n''')
+          replace(rel,
+          '''    private static string FormatFleetPercent(decimal? value, int included, int total)\n''',
+          '''    private static string DisplayUnit(string value) =>\n        string.IsNullOrWhiteSpace(value) || value == "*" ? "not supplied" : value;\n\n    private static string FormatFleetPercent(decimal? value, int included, int total)\n''')
+
+          # Driver Workspace editor. Manual assignment is intentionally compact and centralized.
+          rel = 'src/Waa.App/Views/DriverWorkspaceView.xaml'
+          replace(rel,
+          '''                    <TextBlock Margin="0,3,0,0" Style="{StaticResource SubtleTextStyle}">\n                        <Run Text="Report cycle " />\n                        <Run Text="{Binding Driver.Record.ReportCycleDate, Mode=OneWay, StringFormat={}{0:M/d/yyyy}}" />\n                    </TextBlock>\n                    <UniformGrid Margin="0,14,0,0" Columns="5">\n''',
+          '''                    <TextBlock Margin="0,3,0,0" Style="{StaticResource SubtleTextStyle}">\n                        <Run Text="Report cycle " />\n                        <Run Text="{Binding Driver.Record.ReportCycleDate, Mode=OneWay, StringFormat={}{0:M/d/yyyy}}" />\n                    </TextBlock>\n                    <Border Margin="0,10,0,0" Style="{StaticResource SubtlePanelStyle}">\n                        <Grid>\n                            <Grid.ColumnDefinitions>\n                                <ColumnDefinition Width="Auto" />\n                                <ColumnDefinition Width="150" />\n                                <ColumnDefinition Width="Auto" />\n                                <ColumnDefinition Width="Auto" />\n                                <ColumnDefinition Width="*" />\n                            </Grid.ColumnDefinitions>\n                            <StackPanel Grid.Column="0" Margin="0,0,12,0" VerticalAlignment="Center">\n                                <TextBlock Text="Truck / Unit" FontWeight="SemiBold" />\n                                <TextBlock Margin="0,2,0,0"\n                                           Text="{Binding DataContext.DriverUnitAssignmentSourceText, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"\n                                           Style="{StaticResource SubtleTextStyle}" />\n                            </StackPanel>\n                            <TextBox Grid.Column="1"\n                                     Margin="0,0,8,0"\n                                     VerticalContentAlignment="Center"\n                                     Text="{Binding DataContext.DriverUnitAssignmentText, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"\n                                     automation:AutomationProperties.Name="Truck or unit assignment" />\n                            <Button Grid.Column="2"\n                                    Margin="0,0,8,0"\n                                    Content="Assign / Change Truck"\n                                    Command="{Binding DataContext.SaveDriverUnitAssignmentCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"\n                                    Style="{StaticResource PrimaryButtonStyle}"\n                                    automation:AutomationProperties.Name="Assign or change truck for this driver" />\n                            <Button Grid.Column="3"\n                                    Margin="0,0,8,0"\n                                    Content="Use Report Assignment"\n                                    Command="{Binding DataContext.UseReportUnitAssignmentCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"\n                                    Visibility="{Binding DataContext.HasDriverUnitOverride, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Converter={StaticResource BooleanToVisibilityConverter}}"\n                                    automation:AutomationProperties.Name="Clear manual truck assignment and use report assignment" />\n                        </Grid>\n                    </Border>\n                    <UniformGrid Margin="0,14,0,0" Columns="5">\n''')
+
+          # Migration expectations move with the new metadata-only table.
+          replace('tests/Waa.App.Tests/WorkLogMigrationTests.cs',
+                  'Assert.Equal(3L, ScalarLong(connection, "PRAGMA user_version;"));',
+                  'Assert.Equal(4L, ScalarLong(connection, "PRAGMA user_version;"));')
+          replace('tests/Waa.App.Tests/LegacyDatabaseRetirementTests.cs',
+                  'Assert.Equal(3L, ScalarLong(currentConnection, "PRAGMA user_version;"));',
+                  'Assert.Equal(4L, ScalarLong(currentConnection, "PRAGMA user_version;"));')
+
+          write('tests/Waa.App.Tests/DriverUnitOverrideTests.cs', '''using Waa.App.Data;\nusing Xunit;\n\nnamespace Waa.App.Tests;\n\npublic sealed class DriverUnitOverrideTests\n{\n    [Fact]\n    public void ManualUnitOverride_WinsAcrossReportRefresh_AndClearRestoresReportUnit()\n    {\n        using var fixture = new RepositoryFixture();\n\n        fixture.Repository.SetDriverUnitOverride("A00001", "299999");\n        var assigned = fixture.Driver("A00001");\n        var assignment = Assert.IsType<DriverUnitAssignmentRecord>(\n            fixture.Repository.GetDriverUnitAssignment("A00001"));\n\n        Assert.Equal("299999", assigned.UnitCode);\n        Assert.Equal("270101", assignment.ReportUnitCode);\n        Assert.Equal("299999", assignment.ManualUnitCode);\n        Assert.True(assignment.HasManualOverride);\n\n        fixture.ImportFleet(\n            new DateOnly(2026, 9, 6),\n            new SyntheticDriver("A00001", "Alex Example", "LEAD000001", "288888", 44m),\n            new SyntheticDriver("B00002", "Blair Example", "LEAD000002", "270202", 48m),\n            new SyntheticDriver("C00003", "Casey Example", "LEAD000003", "270303", 28m),\n            new SyntheticDriver("D00004", "Drew Example", "LEAD000004", "270404", 16m));\n\n        var afterRefresh = fixture.Driver("A00001");\n        assignment = Assert.IsType<DriverUnitAssignmentRecord>(\n            fixture.Repository.GetDriverUnitAssignment("A00001"));\n        Assert.Equal("299999", afterRefresh.UnitCode);\n        Assert.Equal("288888", assignment.ReportUnitCode);\n        Assert.Equal("299999", assignment.ManualUnitCode);\n\n        Assert.True(fixture.Repository.ClearDriverUnitOverride("A00001"));\n        var restored = fixture.Driver("A00001");\n        assignment = Assert.IsType<DriverUnitAssignmentRecord>(\n            fixture.Repository.GetDriverUnitAssignment("A00001"));\n        Assert.Equal("288888", restored.UnitCode);\n        Assert.False(assignment.HasManualOverride);\n        Assert.Null(assignment.ManualUnitCode);\n    }\n\n    [Fact]\n    public void ManualUnitOverride_IsUsedByNewHistoricalWorkSnapshot()\n    {\n        using var fixture = new RepositoryFixture();\n        fixture.Repository.SetDriverUnitOverride("B00002", "277777");\n        var assigned = fixture.Driver("B00002");\n\n        var id = fixture.Repository.RecordManualWork(\n            assigned,\n            WorkEntryStatus.Waiting,\n            "Synthetic work under manual truck assignment.");\n\n        var work = Assert.IsType<WorkEntryRecord>(fixture.Repository.GetWorkEntry(id));\n        Assert.Equal("277777", work.UnitCodeSnapshot);\n        Assert.Equal("277777", assigned.UnitCode);\n    }\n\n    [Fact]\n    public void ManualUnitOverride_RejectsUnknownDriver()\n    {\n        using var fixture = new RepositoryFixture();\n        Assert.Throws<InvalidOperationException>(() =>\n            fixture.Repository.SetDriverUnitOverride("NO-SUCH-DRIVER", "299999"));\n    }\n}\n''')
+
+          # Canonical product rules/documentation.
+          replace('AGENTS.md',
+          '''- Unit Code is assignment context, never identity.\n''',
+          '''- Unit Code is assignment context, never identity. A persisted manual Unit override may supersede the current report Unit for presentation/new snapshots, but it is keyed only by Driver Code, never changes identity, never rewrites report evidence/history, and clearing it immediately restores the report Unit.\n''')
+          replace('docs/DATA_SOURCES.md',
+          '''- Unit Code is assignment/context stored as text.\n''',
+          '''- Unit Code is assignment/context stored as text. The report Unit remains source evidence; a Driver Code-keyed manual Unit override may supersede current presentation and new work/contact snapshots until explicitly cleared.\n''')
+          replace('README.md',
+          '''## Current release line: v0.4.6\n''',
+          '''## Current release line: v0.4.9\n''')
+          replace('README.md',
+          '''- compact Fleet identity: Driver Name, then `DriverCode • Unit ######`; Leader stays in its own column\n''',
+          '''- compact Fleet identity: Driver Name, then `DriverCode • Unit ######`; Leader stays in its own column\n- Driver Workspace can assign/change a truck manually by Driver Code; manual assignment survives report refreshes until `Use Report Assignment` is chosen\n''')
+
+          print('Applied WAA v0.4.9 manual truck assignment changes.')\n          '@ | python -
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore Waa.sln
+
+      - name: Format and verify
+        shell: pwsh
+        run: |
+          dotnet format Waa.sln --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet format Waa.sln --verify-no-changes --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build Waa.sln --configuration Release --no-restore
+
+      - name: Test
+        shell: pwsh
+        run: dotnet test Waa.sln --configuration Release --no-build
+
+      - name: Audit NuGet vulnerabilities
+        shell: pwsh
+        run: dotnet list Waa.sln package --vulnerable --include-transitive
+
+      - name: Commit and push v0.4.9 product
+        shell: pwsh
+        run: |
+          git config user.name 'WAA Release Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add AGENTS.md README.md docs src tests
+          git commit -m 'WAA v0.4.9 restore manual truck assignment'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $productSha = (git rev-parse HEAD).Trim()
+          "PRODUCT_SHA=$productSha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          git push origin HEAD:main
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publish portable win-x64 application
+        shell: pwsh
+        run: |
+          $output = Join-Path $PWD 'artifacts\WAA-Portable-win-x64'
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+          dotnet publish src\Waa.App\Waa.App.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:PublishTrimmed=false `
+            -p:PublishReadyToRun=false `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            --output $output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item portable\README-FIRST.txt (Join-Path $output 'README-FIRST.txt')
+          @(
+            'WAA portable build',
+            'Release: v0.4.9',
+            "Product commit: $env:PRODUCT_SHA",
+            "Built UTC: $([DateTime]::UtcNow.ToString('O'))",
+            '.NET 8 Windows x64 self-contained'
+          ) | Set-Content -Path (Join-Path $output 'BUILD.txt') -Encoding UTF8
+
+      - name: Package release ZIP and checksum
+        shell: pwsh
+        run: |
+          $zip = Join-Path $PWD 'artifacts\WAA-Portable-win-x64-v0.4.9.zip'
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path (Join-Path $PWD 'artifacts\WAA-Portable-win-x64\*') -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  WAA-Portable-win-x64-v0.4.9.zip" | Set-Content -Path (Join-Path $PWD 'artifacts\WAA-Portable-win-x64-v0.4.9.sha256') -Encoding ascii
+          Write-Host "SHA256=$hash"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WAA-Portable-win-x64-v0.4.9
+          path: |
+            artifacts/WAA-Portable-win-x64-v0.4.9.zip
+            artifacts/WAA-Portable-win-x64-v0.4.9.sha256
+          if-no-files-found: error
+
+      - name: Write release notes
+        shell: pwsh
+        run: |
+          @'
+          WAA v0.4.9 — Manual Truck Assignment Restored
+
+          - Restores Assign / Change Truck in Driver Workspace.
+          - Manual assignment is keyed by durable Driver Code; Unit remains context, never identity.
+          - Manual Unit overrides survive Rolling 7 Day report refreshes.
+          - Use Report Assignment removes the override and immediately returns to the current report Unit.
+          - Fleet Queue, Driver Workspace, Handoff, idle-contact snapshots, and newly saved work use the effective Unit.
+          - Historical work/contact snapshots and imported report evidence are never rewritten.
+          - No uniqueness restriction is imposed on Unit because legitimate co-driver/shared-unit situations can exist.
+          - Includes v0.4.8 safe previous-generation database retirement and v0.4.7 Handoff audit hardening.
+          - Self-contained Windows x64 portable package.
+          '@ | Set-Content -Path release-notes.md -Encoding UTF8
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          $tag = 'v0.4.9'
+          $zip = 'artifacts\WAA-Portable-win-x64-v0.4.9.zip'
+          $checksum = 'artifacts\WAA-Portable-win-x64-v0.4.9.sha256'
+          gh release create $tag $zip $checksum `
+            --repo $repo `
+            --target $env:PRODUCT_SHA `
+            --title 'WAA v0.4.9 — Manual Truck Assignment Restored' `
+            --notes-file release-notes.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
