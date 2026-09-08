@@ -292,7 +292,8 @@ public sealed class LegacyDatabaseRetirementService
         {
             DataSource = databasePath,
             Mode = mode,
-            Cache = SqliteCacheMode.Private
+            Cache = SqliteCacheMode.Private,
+            Pooling = false
         }.ToString());
         connection.Open();
         using var timeout = connection.CreateCommand();

@@ -13,6 +13,40 @@
                         <Run Text="Report cycle " />
                         <Run Text="{Binding Driver.Record.ReportCycleDate, Mode=OneWay, StringFormat={}{0:M/d/yyyy}}" />
                     </TextBlock>
+                    <Border Margin="0,10,0,0" Style="{StaticResource SubtlePanelStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="150" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" Margin="0,0,12,0" VerticalAlignment="Center">
+                                <TextBlock Text="Truck / Unit" FontWeight="SemiBold" />
+                                <TextBlock Margin="0,2,0,0"
+                                           Text="{Binding DataContext.DriverUnitAssignmentSourceText, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                           Style="{StaticResource SubtleTextStyle}" />
+                            </StackPanel>
+                            <TextBox Grid.Column="1"
+                                     Margin="0,0,8,0"
+                                     VerticalContentAlignment="Center"
+                                     Text="{Binding DataContext.DriverUnitAssignmentText, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     automation:AutomationProperties.Name="Truck or unit assignment" />
+                            <Button Grid.Column="2"
+                                    Margin="0,0,8,0"
+                                    Content="Assign / Change Truck"
+                                    Command="{Binding DataContext.SaveDriverUnitAssignmentCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                    Style="{StaticResource PrimaryButtonStyle}"
+                                    automation:AutomationProperties.Name="Assign or change truck for this driver" />
+                            <Button Grid.Column="3"
+                                    Margin="0,0,8,0"
+                                    Content="Use Report Assignment"
+                                    Command="{Binding DataContext.UseReportUnitAssignmentCommand, RelativeSource={RelativeSource AncestorType={x:Type Window}}}"
+                                    Visibility="{Binding DataContext.HasDriverUnitOverride, RelativeSource={RelativeSource AncestorType={x:Type Window}}, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                    automation:AutomationProperties.Name="Clear manual truck assignment and use report assignment" />
+                        </Grid>
+                    </Border>
                     <UniformGrid Margin="0,14,0,0" Columns="5">
                         <Border Margin="0,0,6,0" Style="{StaticResource SubtlePanelStyle}">
                             <StackPanel><TextBlock Text="28 Day Idle" Style="{StaticResource SubtleTextStyle}" /><TextBlock Margin="0,3,0,0" Text="{Binding Driver.Idle28Display}" FontWeight="SemiBold" FontSize="16" /></StackPanel>

@@ -16,7 +16,7 @@ WAA is a clean, driver-centric Windows work application. Current `main`, this fi
 ## Driver/history invariants
 
 - Driver Code is durable identity; Driver Name is display identity.
-- Unit Code is assignment context, never identity.
+- Unit Code is assignment context, never identity. A persisted manual Unit override may supersede the current report Unit for presentation/new snapshots, but it is keyed only by Driver Code, never changes identity, never rewrites report evidence/history, and clearing it immediately restores the report Unit.
 - Driver Leader is organizational context, never identity.
 - Truck/leader changes never create another driver or move history.
 - Saved work history belongs to Driver Code.

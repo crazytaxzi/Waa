@@ -56,7 +56,7 @@ Driver identity, week, raw engine hours, raw idle hours, Unit Code, Driver Leade
 
 - Driver Code is the durable entity key.
 - Driver Name is current display identity attached to Driver Code.
-- Unit Code is assignment/context stored as text.
+- Unit Code is assignment/context stored as text. The report Unit remains source evidence; a Driver Code-keyed manual Unit override may supersede current presentation and new work/contact snapshots until explicitly cleared.
 - Driver Leader is organizational context.
 - Unit or leader changes do not create another driver.
 - A driver missing from a later roster does not lose saved work/contact history.

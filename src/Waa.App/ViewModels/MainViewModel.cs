@@ -21,6 +21,9 @@ public sealed class MainViewModel : ObservableObject
     private string _searchText = string.Empty;
     private string _thresholdText = "50.0";
     private string _contactNote = string.Empty;
+    private string _driverUnitAssignmentText = string.Empty;
+    private string _driverUnitAssignmentSourceText = string.Empty;
+    private bool _hasDriverUnitOverride;
     private string _reportCycleText = "No report";
     private string _fleet7DayText = "N/A";
     private string _fleet28DayText = "N/A";
@@ -128,6 +131,12 @@ public sealed class MainViewModel : ObservableObject
         OpenActivityDetailCommand = new AsyncRelayCommand<WorkEntryItemViewModel>(
             item => item is null ? Task.CompletedTask : OpenActivityDetailAsync(item),
             item => !IsBusy && item is not null);
+        SaveDriverUnitAssignmentCommand = new AsyncRelayCommand(
+            SaveDriverUnitAssignmentAsync,
+            CanEditDriverUnitAssignment);
+        UseReportUnitAssignmentCommand = new AsyncRelayCommand(
+            UseReportUnitAssignmentAsync,
+            () => CanEditDriverUnitAssignment() && HasDriverUnitOverride);
     }
 
     public ObservableCollection<DriverRowViewModel> Drivers { get; } = new();
@@ -153,6 +162,8 @@ public sealed class MainViewModel : ObservableObject
     public AsyncRelayCommand<DriverAttentionItemViewModel> OpenAttentionItemCommand { get; }
     public AsyncRelayCommand OpenNewWorkCommand { get; }
     public AsyncRelayCommand<WorkEntryItemViewModel> OpenActivityDetailCommand { get; }
+    public AsyncRelayCommand SaveDriverUnitAssignmentCommand { get; }
+    public AsyncRelayCommand UseReportUnitAssignmentCommand { get; }
 
     public DriverRowViewModel? SelectedDriver
     {
@@ -221,6 +232,24 @@ public sealed class MainViewModel : ObservableObject
     {
         get => _contactNote;
         set => SetProperty(ref _contactNote, value);
+    }
+
+    public string DriverUnitAssignmentText
+    {
+        get => _driverUnitAssignmentText;
+        set => SetProperty(ref _driverUnitAssignmentText, value);
+    }
+
+    public string DriverUnitAssignmentSourceText
+    {
+        get => _driverUnitAssignmentSourceText;
+        private set => SetProperty(ref _driverUnitAssignmentSourceText, value);
+    }
+
+    public bool HasDriverUnitOverride
+    {
+        get => _hasDriverUnitOverride;
+        private set => SetProperty(ref _hasDriverUnitOverride, value);
     }
 
     public string ReportCycleText
@@ -438,6 +467,73 @@ public sealed class MainViewModel : ObservableObject
         {
             AppLog.Write(exception, "Idle contact save failed");
             StatusMessage = $"Idle contact and work were not saved: {exception.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task SaveDriverUnitAssignmentAsync()
+    {
+        var selected = SelectedDriver;
+        if (selected is null)
+        {
+            return;
+        }
+
+        var unit = DriverUnitAssignmentText.Trim();
+        if (unit.Length == 0)
+        {
+            StatusMessage = "Enter a truck/unit before saving the assignment.";
+            return;
+        }
+
+        var preserveLocation = _navigator.Current;
+        var driverCode = selected.DriverCode;
+        var driverName = selected.DriverName;
+        try
+        {
+            IsBusy = true;
+            await Task.Run(() => _repository.SetDriverUnitOverride(driverCode, unit));
+            await ReloadFleetAsync(driverCode);
+            await RestoreLocationAsync(preserveLocation);
+            StatusMessage = $"Assigned Unit {unit} to {driverName}. The manual assignment will stay in effect until Use Report Assignment is chosen.";
+        }
+        catch (Exception exception)
+        {
+            AppLog.Write(exception, "Driver unit assignment save failed");
+            StatusMessage = $"Truck/unit assignment was not changed: {exception.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task UseReportUnitAssignmentAsync()
+    {
+        var selected = SelectedDriver;
+        if (selected is null)
+        {
+            return;
+        }
+
+        var preserveLocation = _navigator.Current;
+        var driverCode = selected.DriverCode;
+        var driverName = selected.DriverName;
+        try
+        {
+            IsBusy = true;
+            await Task.Run(() => _repository.ClearDriverUnitOverride(driverCode));
+            await ReloadFleetAsync(driverCode);
+            await RestoreLocationAsync(preserveLocation);
+            StatusMessage = $"{driverName} is using the current report truck/unit assignment again.";
+        }
+        catch (Exception exception)
+        {
+            AppLog.Write(exception, "Driver unit assignment clear failed");
+            StatusMessage = $"Report truck/unit assignment could not be restored: {exception.Message}";
         }
         finally
         {
@@ -991,16 +1087,52 @@ public sealed class MainViewModel : ObservableObject
     private async Task LoadSelectedDriverStateAsync(DriverRowViewModel? selectedDriver)
     {
         var workTask = Work.SetDriverAsync(selectedDriver?.Record);
-        if (MissingBol is null)
+        var missingBolTask = MissingBol is null
+            ? Task.CompletedTask
+            : MissingBol.SetDriverAsync(selectedDriver?.Record);
+        var assignmentTask = selectedDriver is null
+            ? Task.FromResult<DriverUnitAssignmentRecord?>(null)
+            : Task.Run(() => _repository.GetDriverUnitAssignment(selectedDriver.DriverCode));
+
+        await Task.WhenAll(workTask, missingBolTask, assignmentTask);
+
+        if (selectedDriver is null)
         {
-            await workTask;
+            DriverUnitAssignmentText = string.Empty;
+            DriverUnitAssignmentSourceText = string.Empty;
+            HasDriverUnitOverride = false;
+            RefreshCommandStates();
             return;
         }
 
-        await Task.WhenAll(
-            workTask,
-            MissingBol.SetDriverAsync(selectedDriver?.Record));
+        if (!string.Equals(SelectedDriver?.DriverCode, selectedDriver.DriverCode, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var assignment = assignmentTask.Result;
+        if (assignment is null)
+        {
+            DriverUnitAssignmentText = selectedDriver.UnitCode;
+            DriverUnitAssignmentSourceText = "Current fleet assignment";
+            HasDriverUnitOverride = false;
+        }
+        else
+        {
+            DriverUnitAssignmentText = assignment.EffectiveUnitCode;
+            HasDriverUnitOverride = assignment.HasManualOverride;
+            DriverUnitAssignmentSourceText = assignment.HasManualOverride
+                ? $"Manual assignment  •  Report Unit {DisplayUnit(assignment.ReportUnitCode)}"
+                : $"Report assignment  •  Unit {DisplayUnit(assignment.ReportUnitCode)}";
+        }
+
+        RefreshCommandStates();
     }
+
+    private bool CanEditDriverUnitAssignment() =>
+        !IsBusy &&
+        SelectedDriver is not null &&
+        CurrentRoute == WorkspaceRoute.DriverWorkspace;
 
     private bool CanRecordContact() =>
         !IsBusy &&
@@ -1036,6 +1168,8 @@ public sealed class MainViewModel : ObservableObject
         OpenAttentionItemCommand.RaiseCanExecuteChanged();
         OpenNewWorkCommand.RaiseCanExecuteChanged();
         OpenActivityDetailCommand.RaiseCanExecuteChanged();
+        SaveDriverUnitAssignmentCommand.RaiseCanExecuteChanged();
+        UseReportUnitAssignmentCommand.RaiseCanExecuteChanged();
     }
 
     private void OnWorkPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -1090,6 +1224,9 @@ public sealed class MainViewModel : ObservableObject
     private static bool TryParseThreshold(string value, out decimal threshold) =>
         decimal.TryParse(value, NumberStyles.Number, CultureInfo.CurrentCulture, out threshold) ||
         decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out threshold);
+
+    private static string DisplayUnit(string value) =>
+        string.IsNullOrWhiteSpace(value) || value == "*" ? "not supplied" : value;
 
     private static string FormatFleetPercent(decimal? value, int included, int total)
     {

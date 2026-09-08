@@ -61,6 +61,15 @@ public sealed record FleetDriverRecord(
     DateTimeOffset? LatestContactUtc,
     int OpenWorkCount);
 
+public sealed record DriverUnitAssignmentRecord(
+    string DriverCode,
+    string ReportUnitCode,
+    string? ManualUnitCode)
+{
+    public bool HasManualOverride => !string.IsNullOrWhiteSpace(ManualUnitCode);
+    public string EffectiveUnitCode => HasManualOverride ? ManualUnitCode! : ReportUnitCode;
+}
+
 public sealed record WorkEntryRecord(
     long Id,
     string DriverCode,

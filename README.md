@@ -4,7 +4,7 @@ WAA is a local, portable Windows application for working through a driver fleet,
 
 **Driver Code** is durable identity. **Driver Name** is display identity. Unit Code and Driver Leader are operational/historical context and never define driver identity.
 
-## Current release line: v0.4.6
+## Current release line: v0.4.9
 
 v0.4 introduced the centralized one-window workspace and theme-safe text. v0.4.1 fixed inline `Run.Text` startup binding. v0.4.2 made Handoff compact. v0.4.3 tightened Fleet Queue density and introduced the gunmetal/neon-purple/neon-green stream palette. v0.4.4 grouped Handoff by Driver Leader and fixed the complete dark MainWindow shell. v0.4.5 added bounded ambient motion. v0.4.5.1 restored direct user control of that motion. **v0.4.6 makes Missing BOL a read-only view of the current workbook instead of a persisted WAA workflow.**
 
@@ -15,6 +15,7 @@ Current UI/workflow highlights:
 - row click or keyboard `Enter` opens Driver Workspace by durable Driver Code
 - native Up/Down DataGrid navigation remains
 - compact Fleet identity: Driver Name, then `DriverCode • Unit ######`; Leader stays in its own column
+- Driver Workspace can assign/change a truck manually by Driver Code; manual assignment survives report refreshes until `Use Report Assignment` is chosen
 - focused same-window Idle/manual work task pages
 - dedicated read-only `CURRENT MISSING BOL` section inside Driver Workspace
 - read-only same-window Missing BOL order detail and Unmatched Missing BOL workspace

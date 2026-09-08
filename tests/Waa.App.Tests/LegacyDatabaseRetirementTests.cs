@@ -55,7 +55,7 @@ public sealed class LegacyDatabaseRetirementTests
                 ScalarLong(
                     currentConnection,
                     "SELECT COUNT(*) FROM pragma_table_info('drivers') WHERE name = 'driver_code';"));
-            Assert.Equal(3L, ScalarLong(currentConnection, "PRAGMA user_version;"));
+            Assert.Equal(4L, ScalarLong(currentConnection, "PRAGMA user_version;"));
         }
         finally
         {

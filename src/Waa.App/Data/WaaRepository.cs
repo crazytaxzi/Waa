@@ -66,6 +66,85 @@ public sealed class WaaRepository
         command.ExecuteNonQuery();
     }
 
+    public DriverUnitAssignmentRecord? GetDriverUnitAssignment(string driverCode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(driverCode);
+
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                driver.driver_code,
+                COALESCE(snapshot.unit_code, driver.current_unit_code, ''),
+                unit_override.unit_code
+            FROM drivers AS driver
+            LEFT JOIN current_driver_snapshots AS snapshot
+                ON snapshot.driver_code = driver.driver_code
+            LEFT JOIN driver_unit_overrides AS unit_override
+                ON unit_override.driver_code = driver.driver_code
+            WHERE driver.driver_code = $driverCode
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("$driverCode", driverCode.Trim());
+        using var reader = command.ExecuteReader();
+        if (!reader.Read())
+        {
+            return null;
+        }
+
+        return new DriverUnitAssignmentRecord(
+            reader.GetString(0),
+            reader.GetString(1),
+            reader.IsDBNull(2) ? null : reader.GetString(2));
+    }
+
+    public void SetDriverUnitOverride(
+        string driverCode,
+        string unitCode,
+        DateTimeOffset? updatedUtc = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(driverCode);
+        ArgumentException.ThrowIfNullOrWhiteSpace(unitCode);
+        var normalizedCode = driverCode.Trim();
+        var normalizedUnit = unitCode.Trim();
+
+        using var connection = OpenConnection();
+        using (var driverCheck = connection.CreateCommand())
+        {
+            driverCheck.CommandText = "SELECT EXISTS(SELECT 1 FROM drivers WHERE driver_code = $driverCode);";
+            driverCheck.Parameters.AddWithValue("$driverCode", normalizedCode);
+            if (Convert.ToInt32(driverCheck.ExecuteScalar(), CultureInfo.InvariantCulture) != 1)
+            {
+                throw new InvalidOperationException($"Driver '{normalizedCode}' is not in the saved WAA roster.");
+            }
+        }
+
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO driver_unit_overrides(driver_code, unit_code, updated_utc)
+            VALUES ($driverCode, $unitCode, $updatedUtc)
+            ON CONFLICT(driver_code) DO UPDATE SET
+                unit_code = excluded.unit_code,
+                updated_utc = excluded.updated_utc;
+            """;
+        command.Parameters.AddWithValue("$driverCode", normalizedCode);
+        command.Parameters.AddWithValue("$unitCode", normalizedUnit);
+        command.Parameters.AddWithValue(
+            "$updatedUtc",
+            FormatUtc((updatedUtc ?? DateTimeOffset.UtcNow).ToUniversalTime()));
+        command.ExecuteNonQuery();
+    }
+
+    public bool ClearDriverUnitOverride(string driverCode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(driverCode);
+        using var connection = OpenConnection();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM driver_unit_overrides WHERE driver_code = $driverCode;";
+        command.Parameters.AddWithValue("$driverCode", driverCode.Trim());
+        return command.ExecuteNonQuery() == 1;
+    }
+
     public DateOnly? GetCurrentReportCycle()
     {
         using var connection = OpenConnection();
@@ -287,7 +366,7 @@ public sealed class WaaRepository
                 driver.driver_name,
                 driver.raw_label,
                 snapshot.report_cycle_date,
-                snapshot.unit_code,
+                COALESCE(NULLIF(TRIM(unit_override.unit_code), ''), snapshot.unit_code),
                 snapshot.driver_leader,
                 snapshot.engine_hours_7d,
                 snapshot.idle_hours_7d,
@@ -304,6 +383,8 @@ public sealed class WaaRepository
                 COALESCE(open_work.open_count, 0)
             FROM current_driver_snapshots AS snapshot
             INNER JOIN drivers AS driver ON driver.driver_code = snapshot.driver_code
+            LEFT JOIN driver_unit_overrides AS unit_override
+                ON unit_override.driver_code = snapshot.driver_code
             LEFT JOIN latest_contact AS contact
                 ON contact.driver_code = snapshot.driver_code
                 AND contact.report_cycle_date = snapshot.report_cycle_date
@@ -744,6 +825,13 @@ public sealed class WaaRepository
                     ops_lob TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS driver_unit_overrides (
+                    driver_code TEXT PRIMARY KEY COLLATE NOCASE,
+                    unit_code TEXT NOT NULL CHECK (length(trim(unit_code)) > 0),
+                    updated_utc TEXT NOT NULL,
+                    FOREIGN KEY (driver_code) REFERENCES drivers(driver_code)
+                );
+
                 CREATE TABLE IF NOT EXISTS weekly_observations (
                     driver_code TEXT NOT NULL COLLATE NOCASE,
                     week_date TEXT NOT NULL,
@@ -857,7 +945,7 @@ public sealed class WaaRepository
         using (var version = connection.CreateCommand())
         {
             version.Transaction = transaction;
-            version.CommandText = "PRAGMA user_version = 3;";
+            version.CommandText = "PRAGMA user_version = 4;";
             version.ExecuteNonQuery();
         }
 
