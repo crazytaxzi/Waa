@@ -32,28 +32,36 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $start = -1
-          $lastPayloadLine = -1
+          $restoreStep = -1
           for ($i = 0; $i -lt $legacy.Count; $i++) {
             $trimmed = $legacy[$i].Trim()
             if ($start -lt 0 -and $trimmed -eq "@'") {
               $start = $i
               continue
             }
-            if ($start -ge 0 -and $trimmed -eq "print('Applied WAA v0.4.9 manual truck assignment changes.')") {
-              $lastPayloadLine = $i
+            if ($start -ge 0 -and $trimmed -eq '- name: Restore') {
+              $restoreStep = $i
               break
             }
           }
-          if ($start -lt 0 -or $lastPayloadLine -le $start) {
-            throw "Could not recover v0.4.9 Python payload. start=$start last=$lastPayloadLine"
+          if ($start -lt 0 -or $restoreStep -le $start) {
+            throw "Could not recover v0.4.9 Python payload bounds. start=$start restore=$restoreStep"
           }
 
-          $python = for ($i = $start + 1; $i -le $lastPayloadLine; $i++) {
+          $pythonLines = for ($i = $start + 1; $i -lt $restoreStep; $i++) {
             $line = $legacy[$i]
             if ($line.StartsWith('          ')) { $line.Substring(10) } else { $line }
           }
+          $pythonText = $pythonLines -join "`n"
+          $malformedTail = "\n          '@ | python -"
+          $pythonText = $pythonText.Replace($malformedTail, '')
+          $pythonText = $pythonText.TrimEnd()
+          if (-not $pythonText.Contains("print('Applied WAA v0.4.9 manual truck assignment changes.')")) {
+            throw 'Recovered v0.4.9 payload did not contain its expected final marker.'
+          }
+
           $script = Join-Path $env:RUNNER_TEMP 'apply-waa-v0.4.9.py'
-          $python | Set-Content -Path $script -Encoding utf8
+          Set-Content -Path $script -Value $pythonText -Encoding utf8 -NoNewline
           python $script
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
