@@ -1,0 +1,136 @@
+name: Publish WAA v0.4.8 Legacy Retirement
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release-v0.4.8.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-2025
+    env:
+      PRODUCT_SHA: 9a205ff12960ff6195dd3747e130c40384b31b24
+    steps:
+      - name: Check out validated product commit
+        uses: actions/checkout@v4
+        with:
+          ref: 9a205ff12960ff6195dd3747e130c40384b31b24
+          fetch-depth: 0
+
+      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore Waa.sln
+
+      - name: Verify formatting
+        shell: pwsh
+        run: dotnet format Waa.sln --verify-no-changes --no-restore
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build Waa.sln --configuration Release --no-restore
+
+      - name: Test
+        shell: pwsh
+        run: dotnet test Waa.sln --configuration Release --no-build
+
+      - name: Audit NuGet vulnerabilities
+        shell: pwsh
+        run: dotnet list Waa.sln package --vulnerable --include-transitive
+
+      - name: Publish portable win-x64 application
+        shell: pwsh
+        run: |
+          $output = Join-Path $PWD 'artifacts\WAA-Portable-win-x64'
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+          dotnet publish src\Waa.App\Waa.App.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:PublishTrimmed=false `
+            -p:PublishReadyToRun=false `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            --output $output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item portable\README-FIRST.txt (Join-Path $output 'README-FIRST.txt')
+          @(
+            'WAA portable build',
+            'Release: v0.4.8',
+            "Product commit: $env:PRODUCT_SHA",
+            "Built UTC: $([DateTime]::UtcNow.ToString('O'))",
+            '.NET 8 Windows x64 self-contained'
+          ) | Set-Content -Path (Join-Path $output 'BUILD.txt') -Encoding UTF8
+
+      - name: Package release ZIP and checksum
+        shell: pwsh
+        run: |
+          $zip = Join-Path $PWD 'artifacts\WAA-Portable-win-x64-v0.4.8.zip'
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path (Join-Path $PWD 'artifacts\WAA-Portable-win-x64\*') -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  WAA-Portable-win-x64-v0.4.8.zip" | Set-Content -Path (Join-Path $PWD 'artifacts\WAA-Portable-win-x64-v0.4.8.sha256') -Encoding ascii
+          Write-Host "SHA256=$hash"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WAA-Portable-win-x64-v0.4.8
+          path: |
+            artifacts/WAA-Portable-win-x64-v0.4.8.zip
+            artifacts/WAA-Portable-win-x64-v0.4.8.sha256
+          if-no-files-found: error
+
+      - name: Write release notes
+        shell: pwsh
+        run: |
+          @'
+          WAA v0.4.8 — Previous-Generation Database Retirement
+
+          - Detects the known pre-current WAA database generation before current schema initialization.
+          - Creates a consistent SQLite backup and requires PRAGMA quick_check = ok before retirement.
+          - Preserves the old LMDB live store when present so uncheckpointed previous-generation state is not lost.
+          - Writes a retirement manifest with archived table row counts.
+          - Stores archives under %LOCALAPPDATA%\WAA-Legacy\WAA-retired-<UTC timestamp>.
+          - Starts current WAA with a fresh current-generation database after the archive is secured.
+          - Carries forward recognizable Light/Dark and Ambient Motion preferences only.
+          - Does not invent mappings from old PTA/call/note/reminder/timer/transition/Missing-BOL semantics into current work.
+          - Unknown incompatible database layouts still stop safely and remain untouched.
+          - Includes the v0.4.7 Handoff cleanup and audit hardening.
+          - Self-contained Windows x64 portable package.
+
+          Close every older WAA instance before first launch of v0.4.8. On the one launch where retirement occurs, WAA displays the archive location after the main window opens.
+          '@ | Set-Content -Path release-notes.md -Encoding UTF8
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          $tag = 'v0.4.8'
+          $zip = 'artifacts\WAA-Portable-win-x64-v0.4.8.zip'
+          $checksum = 'artifacts\WAA-Portable-win-x64-v0.4.8.sha256'
+
+          gh release view $tag --repo $repo *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip $checksum --clobber --repo $repo
+          }
+          else {
+            gh release create $tag $zip $checksum `
+              --repo $repo `
+              --target $env:PRODUCT_SHA `
+              --title 'WAA v0.4.8 — Previous-Generation Database Retirement' `
+              --notes-file release-notes.md
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
