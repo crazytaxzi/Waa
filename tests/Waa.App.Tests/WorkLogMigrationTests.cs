@@ -50,12 +50,17 @@ public sealed class WorkLogMigrationTests
             Assert.Equal(
                 1L,
                 ScalarLong(connection, "SELECT COUNT(*) FROM work_entries WHERE linked_idle_contact_event_id = 1;"));
-            Assert.Equal(2L, ScalarLong(connection, "PRAGMA user_version;"));
+            Assert.Equal(3L, ScalarLong(connection, "PRAGMA user_version;"));
             Assert.Equal(
                 0L,
                 ScalarLong(
                     connection,
                     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name LIKE 'missing_bol_%';"));
+            Assert.Equal(
+                1L,
+                ScalarLong(
+                    connection,
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'handoff_dismissals';"));
 
             Assert.Equal(47.5m, restarted.GetIdleThreshold());
             Assert.True(new ThemePreferenceStore(databasePath).GetDarkMode());
@@ -66,6 +71,59 @@ public sealed class WorkLogMigrationTests
             Assert.Equal(1, fleetDriver.OpenWorkCount);
             Assert.False(restartedMissingBol.HasCurrentSnapshot);
             Assert.Empty(restartedMissingBol.LoadFleetState().UnmatchedItems);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void Initialize_IncompatibleAncientDriversSchemaStopsBeforeCurrentSchemaWrites()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "WaaMigrationTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var databasePath = Path.Combine(root, "waa.db");
+
+        try
+        {
+            using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+            {
+                connection.Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    CREATE TABLE drivers (
+                        id INTEGER PRIMARY KEY,
+                        full_name TEXT NOT NULL DEFAULT 'Unknown',
+                        pta_code TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(pta_code)
+                    );
+                    CREATE TABLE settings (
+                        key TEXT PRIMARY KEY,
+                        value TEXT,
+                        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    );
+                    INSERT INTO drivers(full_name, pta_code) VALUES ('Ancient Example', 'OLD001');
+                    """;
+                command.ExecuteNonQuery();
+            }
+
+            var repository = new WaaRepository(databasePath);
+            var exception = Assert.Throws<InvalidOperationException>(repository.Initialize);
+            Assert.Contains("incompatible older schema", exception.Message, StringComparison.OrdinalIgnoreCase);
+
+            using var verify = new SqliteConnection($"Data Source={databasePath}");
+            verify.Open();
+            Assert.Equal(1L, ScalarLong(verify, "SELECT COUNT(*) FROM drivers;"));
+            Assert.Equal(0L, ScalarLong(verify, "SELECT COUNT(*) FROM pragma_table_info('drivers') WHERE name = 'driver_code';"));
+            Assert.Equal(0L, ScalarLong(verify, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'app_state';"));
+            Assert.Equal(0L, ScalarLong(verify, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'work_entries';"));
+            Assert.Equal(0L, ScalarLong(verify, "PRAGMA user_version;"));
         }
         finally
         {

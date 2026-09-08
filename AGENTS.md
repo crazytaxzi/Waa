@@ -36,11 +36,16 @@ WAA is a clean, driver-centric Windows work application. Current `main`, this fi
 - Migrations never wipe, replace, or silently recreate an existing database after failure.
 - Committed fixtures/logs must contain synthetic identities only; never commit production employee/company data.
 
+## Database compatibility safety
+
+- If an existing `drivers` table is from an incompatible pre-current WAA schema and lacks durable `driver_code`, initialization must stop before applying current schema changes. Never blend current tables into an incompatible older database or guess a migration from historical architecture.
+
 ## Handoff invariants
 
-- Handoff is generated from saved non-BOL work using the PC local-calendar-day boundary plus a transient projection of the **current Missing BOL workbook**.
+- Handoff is generated from saved non-BOL work using the PC local-calendar-day boundary, excluding completed work explicitly dismissed from Handoff, plus a transient projection of the **current Missing BOL workbook**.
 - Editing/copying the draft never mutates work, BOL, idle, reports, settings, or identity.
-- An edited draft survives in-session navigation; `Regenerate` intentionally replaces it from current saved work/current BOL rows.
+- The explicit Handoff `Remove` action is different from editing: it may persist Handoff-only dismissal metadata for a completed/resolved ordinary work entry, but must never delete or rewrite the underlying work/idle history. Open Waiting/Follow-up work and current/legacy BOL rows are not eligible for this removal path.
+- Removing a worked item intentionally regenerates the draft. Otherwise an edited draft survives in-session navigation; `Regenerate` intentionally replaces it from current saved work/current BOL rows.
 - v0.4.2+ runtime Handoff is compact, not the old three visible database-state sections.
 - The generated opening `No open ACE/ACI's` is an editable user-requested convention only. WAA does **not** model or validate ACE/ACI state; never claim otherwise.
 - v0.4.4+ runtime Handoff separates represented drivers under `Driver Leader: ...` headings. Leader headings sort alphabetically; drivers within a leader sort by Driver Name then Driver Code.

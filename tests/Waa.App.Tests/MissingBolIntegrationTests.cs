@@ -139,8 +139,9 @@ public sealed class MissingBolIntegrationTests
         Assert.Equal("In current report", item.StatusDisplay);
         Assert.Equal("Current workbook", item.PresenceDisplay);
         Assert.True(item.HasNameWarning);
-        Assert.True(item.IsResolved); // internal compatibility flag keeps report rows out of actionable-work builders
         Assert.Equal(DriverAttentionKind.MissingBol, item.AttentionItem.Kind);
+        var workspace = Assert.IsType<DriverWorkspaceViewModel>(viewModel.CurrentWorkspace);
+        Assert.DoesNotContain(workspace.NeedsAttention, attention => attention.Kind == DriverAttentionKind.MissingBol);
     }
 
     [Fact]

@@ -433,6 +433,9 @@ public sealed class MissingBolRepository
     {
         var connection = new SqliteConnection(_connectionString);
         connection.Open();
+        using var pragma = connection.CreateCommand();
+        pragma.CommandText = "PRAGMA busy_timeout = 5000;";
+        pragma.ExecuteNonQuery();
         return connection;
     }
 

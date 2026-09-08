@@ -89,7 +89,7 @@ The shell control reads `Motion off` when motion is enabled and `Motion on` when
 4. Open focused Idle/manual work tasks as needed; Missing BOL order detail is informational only.
 5. Save actual work and return to the same driver context.
 6. Use `Next Work Item` / `Next Needing Attention` to advance through actionable work.
-7. Open Handoff, edit as needed, and Copy to Clipboard. The draft survives navigation until explicit `Regenerate`.
+7. Open Handoff, edit as needed, remove any completed items you do not want carried into future regenerated Handoffs, and Copy to Clipboard. The draft survives navigation until explicit `Regenerate` or an explicit completed-item `Remove`.
 
 ## Handoff
 
@@ -104,6 +104,8 @@ Represented drivers are grouped under headings such as:
 `Driver Leader: LEADER-A`
 
 Leader headings sort alphabetically; drivers within each leader sort by Driver Name then Driver Code. Saved non-BOL work uses current fleet identity when available with historical snapshot fallback. The dedicated Missing BOL section is rebuilt from **current matched workbook rows** and uses current driver/leader context. Each represented driver appears once in that BOL section with current Order # values compactly grouped.
+
+The Handoff workspace also lists completed/resolved ordinary work currently represented in the draft. `Remove` hides that item from future regenerated Handoffs without deleting its saved work/history record. Open Waiting/Follow-up work and Missing BOL rows are not removable there. Removing an item regenerates the draft, so manual draft edits are replaced.
 
 See [`docs/WORK_LOG_HANDOFF.md`](docs/WORK_LOG_HANDOFF.md).
 

@@ -43,17 +43,19 @@ public sealed class HandoffService
 
         var needsFollowUp = uniqueEntries
             .Where(entry =>
+                IsOrdinaryWork(entry) &&
                 entry.ResolvedUtc is null &&
                 entry.Status == WorkEntryStatus.FollowUp)
             .ToArray();
         var waiting = uniqueEntries
             .Where(entry =>
+                IsOrdinaryWork(entry) &&
                 entry.ResolvedUtc is null &&
                 entry.Status == WorkEntryStatus.Waiting)
             .ToArray();
         var completedToday = uniqueEntries
             .Where(entry =>
-                entry.Source != WorkEntrySource.MissingBolTask &&
+                IsOrdinaryWork(entry) &&
                 ((entry.Status == WorkEntryStatus.Done && localDay.Contains(entry.CreatedUtc)) ||
                  (entry.ResolvedUtc is { } resolvedUtc && localDay.Contains(resolvedUtc))))
             .ToArray();
@@ -61,7 +63,7 @@ public sealed class HandoffService
         var narrativeGroups = needsFollowUp
             .Concat(waiting)
             .Concat(completedToday)
-            .Where(entry => entry.Source != WorkEntrySource.MissingBolTask)
+            .Where(IsOrdinaryWork)
             .GroupBy(entry => entry.Id)
             .Select(group => group.First())
             .GroupBy(entry => entry.DriverCode, StringComparer.OrdinalIgnoreCase)
@@ -113,55 +115,6 @@ public sealed class HandoffService
             narrativeGroups.Length,
             missingBolGroups.Length,
             missingBolGroups.Sum(group => group.Orders.Count));
-    }
-
-    // Compatibility formatter retained for repository/integration regression tests.
-    // Runtime handoff generation uses the current-driver overload above.
-    public HandoffResult Generate(
-        IEnumerable<WorkEntryRecord> workEntries,
-        LocalDayRange localDay)
-    {
-        ArgumentNullException.ThrowIfNull(workEntries);
-        ArgumentNullException.ThrowIfNull(localDay);
-
-        var uniqueEntries = workEntries
-            .GroupBy(entry => entry.Id)
-            .Select(group => group.First())
-            .ToArray();
-        var needsFollowUp = OrderLegacyUnresolved(uniqueEntries.Where(entry =>
-                entry.ResolvedUtc is null &&
-                entry.Status == WorkEntryStatus.FollowUp))
-            .ToArray();
-        var waiting = OrderLegacyUnresolved(uniqueEntries.Where(entry =>
-                entry.ResolvedUtc is null &&
-                entry.Status == WorkEntryStatus.Waiting))
-            .ToArray();
-        var completedToday = uniqueEntries
-            .Where(entry =>
-                entry.Source != WorkEntrySource.MissingBolTask &&
-                ((entry.Status == WorkEntryStatus.Done && localDay.Contains(entry.CreatedUtc)) ||
-                 (entry.ResolvedUtc is { } resolvedUtc && localDay.Contains(resolvedUtc))))
-            .OrderBy(GetCompletionTimestamp)
-            .ThenBy(entry => entry.DriverName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(entry => entry.DriverCode, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(entry => entry.Id)
-            .ToArray();
-
-        var builder = new StringBuilder();
-        AppendLegacySection(builder, "NEEDS FOLLOW-UP", needsFollowUp);
-        builder.AppendLine();
-        AppendLegacySection(builder, "WAITING / PENDING", waiting);
-        builder.AppendLine();
-        AppendLegacySection(builder, "COMPLETED TODAY", completedToday);
-
-        return new HandoffResult(
-            builder.ToString().TrimEnd(),
-            needsFollowUp.Length,
-            waiting.Length,
-            completedToday.Length,
-            0,
-            0,
-            0);
     }
 
     private static NarrativeGroup BuildNarrativeGroup(
@@ -430,13 +383,11 @@ public sealed class HandoffService
         !string.IsNullOrWhiteSpace(value) &&
         !value.Trim().Equals("*", StringComparison.Ordinal);
 
+    private static bool IsOrdinaryWork(WorkEntryRecord entry) =>
+        entry.Source is not WorkEntrySource.MissingBolTask and not WorkEntrySource.MissingBolAction;
+
     private static DateTimeOffset GetNarrativeTimestamp(WorkEntryRecord entry) =>
         entry.ResolvedUtc ?? entry.CreatedUtc;
-
-    private static DateTimeOffset GetCompletionTimestamp(WorkEntryRecord entry) =>
-        entry.Status == WorkEntryStatus.Done
-            ? entry.CreatedUtc
-            : entry.ResolvedUtc ?? entry.CreatedUtc;
 
     private static string FormatIdentity(string unitCode, string driverName, string driverCode) =>
         IsMeaningfulUnit(unitCode)
@@ -456,53 +407,6 @@ public sealed class HandoffService
                trimmed.EndsWith("?", StringComparison.Ordinal)
             ? trimmed
             : trimmed + ".";
-    }
-
-    private static IEnumerable<WorkEntryRecord> OrderLegacyUnresolved(
-        IEnumerable<WorkEntryRecord> entries) =>
-        entries
-            .GroupBy(entry => entry.DriverCode, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new
-            {
-                DriverName = group.First().DriverName,
-                DriverCode = group.Key,
-                Earliest = group.Min(entry => entry.CreatedUtc),
-                Entries = group
-                    .OrderBy(entry => entry.CreatedUtc)
-                    .ThenBy(entry => entry.Id)
-                    .ToArray()
-            })
-            .OrderBy(group => group.Earliest)
-            .ThenBy(group => group.DriverName, StringComparer.OrdinalIgnoreCase)
-            .ThenBy(group => group.DriverCode, StringComparer.OrdinalIgnoreCase)
-            .SelectMany(group => group.Entries);
-
-    private static void AppendLegacySection(
-        StringBuilder builder,
-        string heading,
-        IReadOnlyCollection<WorkEntryRecord> entries)
-    {
-        builder.AppendLine(heading);
-        builder.AppendLine();
-
-        if (entries.Count == 0)
-        {
-            builder.AppendLine("None.");
-            return;
-        }
-
-        foreach (var entry in entries)
-        {
-            builder.AppendLine(FormatLegacyLine(entry));
-        }
-    }
-
-    private static string FormatLegacyLine(WorkEntryRecord entry)
-    {
-        var identity = string.IsNullOrWhiteSpace(entry.UnitCodeSnapshot)
-            ? $"{entry.DriverName} [{entry.DriverCode}]"
-            : $"{entry.UnitCodeSnapshot} — {entry.DriverName} [{entry.DriverCode}]";
-        return $"{identity}: {CollapseWhitespace(entry.Text)}";
     }
 
     private static string CollapseWhitespace(string value) =>

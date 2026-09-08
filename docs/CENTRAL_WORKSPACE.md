@@ -103,9 +103,9 @@ Read-only saved activity/context. No edit/delete path.
 
 ## Handoff
 
-Handoff is a central full-width route with Back to Queue, Regenerate, editable draft, and Copy to Clipboard.
+Handoff is a central full-width route with Back to Queue, Regenerate, editable draft, Copy to Clipboard, and a bounded list of completed/resolved ordinary work that can be removed from future Handoffs without deleting saved history.
 
-First session visit generates from saved non-BOL work plus the current in-memory Missing BOL workbook view. Navigating away/back preserves the edited draft. Regenerate intentionally rebuilds from current saved work/current BOL rows. Editing/copying never mutates repository/source state.
+First session visit generates from saved non-BOL work that has not been dismissed from Handoff plus the current in-memory Missing BOL workbook view. Navigating away/back preserves the edited draft. Regenerate intentionally rebuilds from current saved work/current BOL rows. Editing/copying never mutates repository/source state. Removing a completed worked item persists only Handoff dismissal metadata and regenerates the draft.
 
 The draft begins with the editable convention `No open ACE/ACI's`, then compact Driver Leader-grouped saved-work narrative, then `Missing BOLs:` generated from current matched workbook Order # values. Current BOL detail is not persisted merely to produce Handoff.
 

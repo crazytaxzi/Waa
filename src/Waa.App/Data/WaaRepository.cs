@@ -517,7 +517,9 @@ public sealed class WaaRepository
         }
 
         using var connection = OpenConnection();
+        using var transaction = connection.BeginTransaction();
         using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             UPDATE work_entries
             SET resolved_utc = NULL
@@ -526,6 +528,59 @@ public sealed class WaaRepository
               AND status IN ('Waiting', 'FollowUp');
             """;
         command.Parameters.AddWithValue("$id", workEntryId);
+        var reopened = command.ExecuteNonQuery() == 1;
+        if (reopened)
+        {
+            using var restoreHandoff = connection.CreateCommand();
+            restoreHandoff.Transaction = transaction;
+            restoreHandoff.CommandText = "DELETE FROM handoff_dismissals WHERE work_entry_id = $id;";
+            restoreHandoff.Parameters.AddWithValue("$id", workEntryId);
+            restoreHandoff.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        return reopened;
+    }
+
+    public bool DismissCompletedWorkFromHandoff(
+        long workEntryId,
+        DateTimeOffset? dismissedUtc = null)
+    {
+        if (workEntryId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(workEntryId));
+        }
+
+        using var connection = OpenConnection();
+        if (TableExists(connection, "missing_bol_work_links"))
+        {
+            using var legacyCheck = connection.CreateCommand();
+            legacyCheck.CommandText = """
+                SELECT 1
+                FROM missing_bol_work_links
+                WHERE work_entry_id = $id
+                LIMIT 1;
+                """;
+            legacyCheck.Parameters.AddWithValue("$id", workEntryId);
+            if (legacyCheck.ExecuteScalar() is not null)
+            {
+                return false;
+            }
+        }
+
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO handoff_dismissals(work_entry_id, dismissed_utc)
+            SELECT work.id, $dismissedUtc
+            FROM work_entries AS work
+            WHERE work.id = $id
+              AND (work.status = 'Done' OR work.resolved_utc IS NOT NULL)
+            ON CONFLICT(work_entry_id) DO NOTHING;
+            """;
+        command.Parameters.AddWithValue("$id", workEntryId);
+        command.Parameters.AddWithValue(
+            "$dismissedUtc",
+            FormatUtc((dismissedUtc ?? DateTimeOffset.UtcNow).ToUniversalTime()));
         return command.ExecuteNonQuery() == 1;
     }
 
@@ -588,12 +643,18 @@ public sealed class WaaRepository
         using var connection = OpenConnection();
         using var command = connection.CreateCommand();
         command.CommandText = WorkEntrySelect + """
-            WHERE
-                (work.resolved_utc IS NULL AND work.status IN ('Waiting', 'FollowUp'))
-                OR
-                (work.status = 'Done' AND work.created_utc >= $startUtc AND work.created_utc < $endUtc)
-                OR
-                (work.resolved_utc >= $startUtc AND work.resolved_utc < $endUtc);
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM handoff_dismissals AS dismissal
+                WHERE dismissal.work_entry_id = work.id
+            )
+              AND (
+                    (work.resolved_utc IS NULL AND work.status IN ('Waiting', 'FollowUp'))
+                    OR
+                    (work.status = 'Done' AND work.created_utc >= $startUtc AND work.created_utc < $endUtc)
+                    OR
+                    (work.resolved_utc >= $startUtc AND work.resolved_utc < $endUtc)
+                  );
             """;
         command.Parameters.AddWithValue("$startUtc", FormatUtc(localDayStartUtc));
         command.Parameters.AddWithValue("$endUtc", FormatUtc(localDayEndUtc));
@@ -637,6 +698,7 @@ public sealed class WaaRepository
         }
 
         using var connection = OpenConnection();
+        EnsureCompatibleExistingSchema(connection);
         using (var pragmas = connection.CreateCommand())
         {
             pragmas.CommandText = "PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;";
@@ -751,6 +813,12 @@ public sealed class WaaRepository
                     FOREIGN KEY (linked_idle_contact_event_id) REFERENCES idle_contact_events(id)
                 );
 
+                CREATE TABLE IF NOT EXISTS handoff_dismissals (
+                    work_entry_id INTEGER PRIMARY KEY,
+                    dismissed_utc TEXT NOT NULL,
+                    FOREIGN KEY (work_entry_id) REFERENCES work_entries(id)
+                );
+
                 CREATE INDEX IF NOT EXISTS ix_observations_week
                     ON weekly_observations(week_date, driver_code);
                 CREATE INDEX IF NOT EXISTS ix_contacts_cycle_driver
@@ -789,7 +857,7 @@ public sealed class WaaRepository
         using (var version = connection.CreateCommand())
         {
             version.Transaction = transaction;
-            version.CommandText = "PRAGMA user_version = 2;";
+            version.CommandText = "PRAGMA user_version = 3;";
             version.ExecuteNonQuery();
         }
 
@@ -999,6 +1067,47 @@ public sealed class WaaRepository
         command.Parameters.AddWithValue("$key", key);
         command.Parameters.AddWithValue("$value", value);
         command.ExecuteNonQuery();
+    }
+
+    private static void EnsureCompatibleExistingSchema(SqliteConnection connection)
+    {
+        if (!TableExists(connection, "drivers"))
+        {
+            return;
+        }
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM pragma_table_info('drivers');";
+        using var reader = command.ExecuteReader();
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (reader.Read())
+        {
+            columns.Add(reader.GetString(0));
+        }
+
+        if (columns.Contains("driver_code"))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "The existing WAA database uses an incompatible older schema. " +
+            "Initialization stopped before applying current schema changes. " +
+            "Preserve the existing database and use an explicit migration or the intended current-generation data path.");
+    }
+
+    private static bool TableExists(SqliteConnection connection, string tableName)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT EXISTS(
+                SELECT 1
+                FROM sqlite_master
+                WHERE type = 'table' AND name = $name
+            );
+            """;
+        command.Parameters.AddWithValue("$name", tableName);
+        return Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
     }
 
     private static string? GetStateValue(SqliteConnection connection, string key)

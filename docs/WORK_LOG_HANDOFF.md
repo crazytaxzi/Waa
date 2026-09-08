@@ -34,10 +34,18 @@ Semantics:
 - Manual Done resolves at creation.
 - Waiting/FollowUp remain unresolved until explicit Resolve.
 - `resolved_utc` is authoritative; resolution never erases original status, text, creation time, or context snapshots.
-- Reopen clears only `resolved_utc` for supported ordinary Waiting/FollowUp work.
+- Reopen clears `resolved_utc` for supported ordinary Waiting/FollowUp work and also clears any Handoff dismissal for that work, because reopened unresolved work must return to Handoff.
 - timestamps are stored in UTC and displayed using the PC time zone.
 - work text is trimmed and may not be blank.
 - work entries are not destructively deleted.
+- Handoff-only dismissal is stored separately from the work entry and never changes the original status, text, timestamps, source, or snapshots.
+
+`handoff_dismissals` stores only:
+
+- `work_entry_id` (primary key / foreign key to `work_entries`)
+- `dismissed_utc`
+
+A dismissal means "do not include this completed ordinary work entry in future regenerated Handoffs." It is not work deletion and does not remove the record from Today's Activity/history. Open unresolved Waiting/Follow-up work cannot be dismissed from Handoff.
 
 Older upgraded databases may contain historical `MissingBolTask` / `MissingBolAction` work linked through legacy `missing_bol_work_links`. v0.4.6 leaves that data physically untouched for non-destructive compatibility but excludes it from current Open Work, Today’s Activity, queue priority, and current ordinary Handoff narrative.
 
@@ -132,8 +140,11 @@ Handoff is a focused full-width route in the same MainWindow. Controls remain:
 - Regenerate
 - editable multiline draft
 - Copy to Clipboard
+- a bounded `Worked items in this Handoff` list with `Remove` for completed/resolved ordinary work
 
-First Handoff entry in a session generates from saved non-BOL work plus the current in-memory Missing BOL workbook view. Navigating away/back preserves the edited draft. Regenerate intentionally replaces it from current saved work/current BOL rows. Editing/copying never mutates work, BOL, idle, reports, settings, or identity.
+First Handoff entry in a session generates from saved non-BOL work that has not been explicitly dismissed from Handoff plus the current in-memory Missing BOL workbook view. Navigating away/back preserves the edited draft. Regenerate intentionally replaces it from current saved work/current BOL rows. Editing/copying never mutates work, BOL, idle, reports, settings, or identity.
+
+`Remove` is an explicit persisted Handoff action, not text editing. It is offered only for completed/resolved ordinary work currently included in the local-day Handoff. It writes a `handoff_dismissals` row, preserves the original work/history record, and regenerates the draft immediately. Because it regenerates, unsaved manual edits in the draft are intentionally replaced. Unresolved Waiting/Follow-up work, current Missing BOL rows, and legacy BOL-linked work cannot be removed through this control.
 
 ## Compact Driver Leader-grouped Handoff format
 
@@ -210,11 +221,11 @@ All work/Handoff surfaces use dynamic Light/Dark resources.
 - no per-row Missing BOL database queries
 - current BOL detail derives from one bounded in-memory workbook snapshot
 - database/source work stays in bounded operations off the UI thread where applicable
-- Handoff generation runs only on first session entry or explicit Regenerate
+- Handoff generation runs only on first session entry, explicit Regenerate, or an explicit completed-item Remove that must refresh the draft
 - queue virtualization remains enabled
 
 Tests and fixtures use synthetic identities/data only. Never commit production reports, databases, logs, or screenshots containing operational employee/customer data.
 
 ## Validation coverage
 
-The Windows suite covers work migration/preservation, idle linkage, manual lifecycle, source-only BOL memory/restart/replacement behavior, exact-code current-roster matching, legacy BOL-work exclusion, current-file fleet/search/detail presentation, Next Work BOL exclusion, transient current-file Handoff projection, compact Driver Leader grouping, navigation/state restoration, theme/source audit, contrast, WPF/XAML compilation, and self-contained Windows x64 publishing.
+The Windows suite covers work migration/preservation, non-destructive Handoff dismissal, idle linkage, manual lifecycle, source-only BOL memory/restart/replacement behavior, exact-code current-roster matching, legacy BOL-work exclusion, current-file fleet/search/detail presentation, Next Work BOL exclusion, transient current-file Handoff projection, compact Driver Leader grouping, navigation/state restoration, theme/source audit, contrast, WPF/XAML compilation, and self-contained Windows x64 publishing.

@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+using System.Globalization;
 using Waa.App.Data;
 using Waa.App.Infrastructure;
 using Waa.App.Services;
@@ -37,11 +39,17 @@ public sealed class HandoffViewModel : ObservableObject
 
         RegenerateCommand = new AsyncRelayCommand(RegenerateAsync, () => !IsBusy);
         CopyCommand = new AsyncRelayCommand(CopyAsync, () => !IsBusy && DraftText.Length > 0);
+        DismissWorkedItemCommand = new AsyncRelayCommand<HandoffWorkedItemViewModel>(
+  DismissWorkedItemAsync,
+  item => !IsBusy && item is not null);
     }
 
+    public ObservableCollection<HandoffWorkedItemViewModel> WorkedItems { get; } = new();
     public AsyncRelayCommand RegenerateCommand { get; }
     public AsyncRelayCommand CopyCommand { get; }
+    public AsyncRelayCommand<HandoffWorkedItemViewModel> DismissWorkedItemCommand { get; }
     public bool HasGenerated => _hasGenerated;
+    public bool HasWorkedItems => WorkedItems.Count > 0;
 
     public string DraftText
     {
@@ -70,6 +78,7 @@ public sealed class HandoffViewModel : ObservableObject
             {
                 RegenerateCommand.RaiseCanExecuteChanged();
                 CopyCommand.RaiseCanExecuteChanged();
+                DismissWorkedItemCommand.RaiseCanExecuteChanged();
             }
         }
     }
@@ -94,6 +103,7 @@ public sealed class HandoffViewModel : ObservableObject
                     ?? Array.Empty<WorkEntryRecord>();
                 return (
                     Entries: currentWork.Concat(currentBol).ToArray(),
+                    CurrentWork: currentWork,
                     Drivers: fleet.Drivers);
             });
             var result = _handoffService.Generate(
@@ -101,6 +111,7 @@ public sealed class HandoffViewModel : ObservableObject
                 loaded.Drivers,
                 day);
             DraftText = result.Text;
+            ReplaceWorkedItems(loaded.CurrentWork, loaded.Drivers, day);
             SummaryText =
                 $"{result.DriverLineCount} driver notes  •  " +
                 $"{result.MissingBolDriverCount} drivers with Missing BOL  •  " +
@@ -135,4 +146,112 @@ public sealed class HandoffViewModel : ObservableObject
 
         return Task.CompletedTask;
     }
+
+    private async Task DismissWorkedItemAsync(HandoffWorkedItemViewModel? item)
+    {
+        if (item is null)
+        {
+            return;
+        }
+
+        var changed = false;
+        try
+        {
+            IsBusy = true;
+            changed = await Task.Run(() => _repository.DismissCompletedWorkFromHandoff(item.WorkEntryId));
+            if (!changed)
+            {
+                _reportStatus("That item is not eligible to be removed from Handoff, or it was already removed.");
+            }
+        }
+        catch (Exception exception)
+        {
+            AppLog.Write(exception, "Handoff completed-work dismissal failed");
+            _reportStatus($"The worked item could not be removed from Handoff: {exception.Message}");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+
+        if (!changed)
+        {
+            return;
+        }
+
+        await RegenerateAsync();
+        if (WorkedItems.Any(worked => worked.WorkEntryId == item.WorkEntryId))
+        {
+            _reportStatus(
+                $"Removed completed Handoff item for {item.DriverName} from future regenerations, " +
+                "but the draft could not be refreshed. Work history was preserved.");
+            return;
+        }
+
+        _reportStatus($"Removed completed Handoff item for {item.DriverName}. Work history was preserved.");
+    }
+
+    private void ReplaceWorkedItems(
+        IReadOnlyCollection<WorkEntryRecord> workEntries,
+        IReadOnlyCollection<FleetDriverRecord> currentDrivers,
+        LocalDayRange day)
+    {
+        var currentByCode = currentDrivers
+  .GroupBy(driver => driver.DriverCode, StringComparer.OrdinalIgnoreCase)
+  .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var completed = workEntries
+  .Where(entry =>
+      (entry.Status == WorkEntryStatus.Done && day.Contains(entry.CreatedUtc)) ||
+      (entry.ResolvedUtc is { } resolvedUtc && day.Contains(resolvedUtc)))
+  .OrderByDescending(entry => entry.ResolvedUtc ?? entry.CreatedUtc)
+  .ThenBy(entry => entry.DriverName, StringComparer.OrdinalIgnoreCase)
+  .ThenBy(entry => entry.Id)
+  .ToArray();
+
+        WorkedItems.Clear();
+        foreach (var entry in completed)
+        {
+            currentByCode.TryGetValue(entry.DriverCode, out var currentDriver);
+            WorkedItems.Add(new HandoffWorkedItemViewModel(entry, currentDriver, _timeZone));
+        }
+
+        OnPropertyChanged(nameof(HasWorkedItems));
+    }
+}
+
+public sealed class HandoffWorkedItemViewModel
+{
+    public HandoffWorkedItemViewModel(
+        WorkEntryRecord record,
+        FleetDriverRecord? currentDriver,
+        TimeZoneInfo timeZone)
+    {
+        Record = record;
+        var unitCode = IsMeaningful(currentDriver?.UnitCode)
+  ? currentDriver!.UnitCode.Trim()
+  : IsMeaningful(record.UnitCodeSnapshot)
+      ? record.UnitCodeSnapshot.Trim()
+      : string.Empty;
+        DriverName = currentDriver?.DriverName ?? record.DriverName;
+        IdentityDisplay = unitCode.Length == 0
+  ? $"{DriverName} [{record.DriverCode}]"
+  : $"{unitCode} — {DriverName} [{record.DriverCode}]";
+        TextDisplay = CollapseWhitespace(record.Text);
+        var completedUtc = record.ResolvedUtc ?? record.CreatedUtc;
+        CompletedDisplay = TimeZoneInfo.ConvertTime(completedUtc, timeZone)
+  .ToString("g", CultureInfo.CurrentCulture);
+    }
+
+    public WorkEntryRecord Record { get; }
+    public long WorkEntryId => Record.Id;
+    public string DriverName { get; }
+    public string IdentityDisplay { get; }
+    public string TextDisplay { get; }
+    public string CompletedDisplay { get; }
+
+    private static bool IsMeaningful(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && value.Trim() != "*";
+
+    private static string CollapseWhitespace(string value) =>
+        string.Join(' ', value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 }

@@ -80,8 +80,11 @@ public sealed class WorkLogRepositoryTests
             WorkEntryStatus.FollowUp,
             "Synthetic follow-up.");
         Assert.True(fixture.Repository.ResolveWorkEntry(id));
+        Assert.True(fixture.Repository.DismissCompletedWorkFromHandoff(id));
+        Assert.Equal(1, fixture.ScalarLong($"SELECT COUNT(*) FROM handoff_dismissals WHERE work_entry_id = {id};"));
 
         Assert.True(fixture.Repository.ReopenWorkEntry(id));
+        Assert.Equal(0, fixture.ScalarLong($"SELECT COUNT(*) FROM handoff_dismissals WHERE work_entry_id = {id};"));
 
         var entry = Assert.IsType<WorkEntryRecord>(fixture.Repository.GetWorkEntry(id));
         Assert.Equal(WorkEntryStatus.FollowUp, entry.Status);
@@ -250,6 +253,67 @@ public sealed class WorkLogRepositoryTests
         Assert.Equal(id, activity.Id);
         Assert.Equal(WorkEntryStatus.Waiting, activity.Status);
         Assert.Equal(day.StartUtc.AddHours(4), activity.ResolvedUtc);
+    }
+
+    [Fact]
+    public void HandoffDismissal_HidesCompletedItemButPreservesWorkHistory()
+    {
+        using var fixture = new RepositoryFixture();
+        var timeZone = TimeZoneInfo.CreateCustomTimeZone(
+            "Synthetic Handoff Time",
+            TimeSpan.FromHours(-7),
+            "Synthetic Handoff Time",
+            "Synthetic Handoff Time");
+        var now = new DateTimeOffset(2026, 8, 30, 12, 0, 0, TimeSpan.FromHours(-7));
+        var day = LocalDayRange.Create(now, timeZone);
+        var id = fixture.Repository.RecordManualWork(
+            fixture.Driver("A00001"),
+            WorkEntryStatus.Done,
+            "Completed synthetic handoff item.",
+            day.StartUtc.AddHours(3));
+
+        Assert.Contains(
+            fixture.Repository.LoadHandoffEntries(day.StartUtc, day.EndUtc),
+            entry => entry.Id == id);
+
+        Assert.True(fixture.Repository.DismissCompletedWorkFromHandoff(id, day.StartUtc.AddHours(4)));
+        Assert.False(fixture.Repository.DismissCompletedWorkFromHandoff(id, day.StartUtc.AddHours(5)));
+        Assert.DoesNotContain(
+            fixture.Repository.LoadHandoffEntries(day.StartUtc, day.EndUtc),
+            entry => entry.Id == id);
+
+        var saved = Assert.IsType<WorkEntryRecord>(fixture.Repository.GetWorkEntry(id));
+        Assert.Equal("Completed synthetic handoff item.", saved.Text);
+        Assert.Contains(
+            fixture.Repository.LoadDriverWork("A00001", day.StartUtc, day.EndUtc).TodayEntries,
+            entry => entry.Id == id);
+        Assert.Equal(1, fixture.ScalarLong($"SELECT COUNT(*) FROM handoff_dismissals WHERE work_entry_id = {id};"));
+    }
+
+    [Fact]
+    public void HandoffDismissal_RejectsOpenWaitingOrFollowUpWork()
+    {
+        using var fixture = new RepositoryFixture();
+        var day = LocalDayRange.Create(
+            new DateTimeOffset(2026, 8, 30, 12, 0, 0, TimeSpan.Zero),
+            TimeZoneInfo.Utc);
+        var waitingId = fixture.Repository.RecordManualWork(
+            fixture.Driver("B00002"),
+            WorkEntryStatus.Waiting,
+            "Still waiting.",
+            day.StartUtc.AddHours(2));
+        var followUpId = fixture.Repository.RecordManualWork(
+            fixture.Driver("C00003"),
+            WorkEntryStatus.FollowUp,
+            "Still needs follow-up.",
+            day.StartUtc.AddHours(3));
+
+        Assert.False(fixture.Repository.DismissCompletedWorkFromHandoff(waitingId));
+        Assert.False(fixture.Repository.DismissCompletedWorkFromHandoff(followUpId));
+        var handoff = fixture.Repository.LoadHandoffEntries(day.StartUtc, day.EndUtc);
+        Assert.Contains(handoff, entry => entry.Id == waitingId);
+        Assert.Contains(handoff, entry => entry.Id == followUpId);
+        Assert.Equal(0, fixture.ScalarLong("SELECT COUNT(*) FROM handoff_dismissals;"));
     }
 
     [Fact]

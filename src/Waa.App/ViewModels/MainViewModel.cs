@@ -57,7 +57,6 @@ public sealed class MainViewModel : ObservableObject
         {
             MissingBol = new MissingBolViewModel(
                 missingBolRepository,
-                OnMissingBolChangedAsync,
                 message => StatusMessage = message);
             MissingBol.PropertyChanged += OnMissingBolPropertyChanged;
         }
@@ -659,13 +658,6 @@ public sealed class MainViewModel : ObservableObject
         await RestoreLocationAsync(preserveLocation);
     }
 
-    private async Task OnMissingBolChangedAsync(string driverCode)
-    {
-        var preserveLocation = _navigator.Current;
-        await ReloadFleetAsync(driverCode);
-        await RestoreLocationAsync(preserveLocation);
-    }
-
     private async Task ReloadFleetAsync(string? preferredDriverCode = null)
     {
         var loaded = await Task.Run(() =>
@@ -908,23 +900,6 @@ public sealed class MainViewModel : ObservableObject
                     ? SemanticState.FollowUp
                     : SemanticState.Warning,
                 linkedIdle));
-        }
-
-        if (MissingBol is not null)
-        {
-            foreach (var bol in MissingBol.Items.Where(item => !item.IsResolved))
-            {
-                items.Add(new DriverAttentionItemViewModel(
-                    DriverAttentionKind.MissingBol,
-                    $"bol:{bol.Record.Id}",
-                    "MISSING BOL",
-                    $"Order {bol.OrderNumber}",
-                    bol.StatusDisplay,
-                    $"Empty call {bol.EmptyCallDateDisplay}  •  {bol.RouteDisplay}",
-                    bol.EmptyCallDateDisplay,
-                    bol.SemanticState,
-                    missingBolItem: bol));
-            }
         }
 
         foreach (var work in Work.OpenEntries

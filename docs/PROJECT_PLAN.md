@@ -16,7 +16,7 @@ Driver Code is durable identity. Unit Code and Driver Leader are context that ma
 6. An idle action creates exactly one linked saved work entry in the same transaction.
 7. Missing BOL is a read-only current-workbook view and does not own a persisted WAA work/status/action lifecycle.
 8. Missing BOL matches only exact normalized source Driver Code to exact **current** durable Driver Code.
-9. Handoff is generated from saved non-BOL work plus a transient projection of the current Missing BOL workbook; editing/copying never mutates saved/source state.
+9. Handoff is generated from saved non-BOL work that has not been explicitly dismissed plus a transient projection of the current Missing BOL workbook; editing/copying never mutates saved/source state, while explicit completed-item Remove stores only Handoff inclusion metadata and preserves the underlying work record.
 10. Reports scan once at launch and thereafter only through explicit `Update Reports`.
 11. Failed Rolling imports/migrations never silently wipe last-known-good saved state; invalid Missing BOL files never restore invented DB BOL state.
 12. Ordinary text inherits the active Light/Dark theme; fixed UI text colors outside palettes are prohibited.

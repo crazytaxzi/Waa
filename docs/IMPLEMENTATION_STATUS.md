@@ -10,6 +10,14 @@ Validated release-tree head before this status-only commit: `8deaf9f82ffa49b9bbb
 
 PR #9 Windows validation: **Windows build, test, and portable package #110**, run ID `33553531840`, September 1, 2026 — **success**.
 
+### September 8, 2026 main audit refinement
+
+Current `main` was re-audited from a fresh GamePC checkout. Baseline was clean at 211 tests. The audit refinement adds non-destructive completed-item removal from Handoff, removes the fake `IsResolved` compatibility flag from source-only BOL rows, prevents legacy BOL action/task rows from inflating ordinary Handoff metrics/narrative, adds SQLite busy-timeout parity for legacy BOL reads, and removes the obsolete alternate three-section Handoff formatter API.
+
+The refinement also adds a fail-before-write compatibility guard: if an existing `drivers` table is from the ancient pre-current schema and lacks durable `driver_code`, WAA refuses current schema initialization rather than mixing generations. This was prompted by a read-only GamePC audit that found such an older healthy database; that live database was not modified.
+
+Local Windows validation after the refinement: **24 Core + 192 App = 216 passed, 0 failed**. The new `handoff_dismissals` table stores only Handoff inclusion metadata; saved work/history remains intact and unresolved Waiting/Follow-up work is not eligible for removal.
+
 ## v0.4.6 source-only Missing BOL
 
 Current behavior:
@@ -59,6 +67,8 @@ Handoff still begins with the editable convention `No open ACE/ACI's` and retain
 The dedicated `Missing BOLs:` section now comes from the current in-memory workbook only. It uses current exact Driver Code ownership/current fleet context and groups current Order # values per represented driver. No BOL database write is performed merely to produce Handoff.
 
 Legacy BOL-generated work is filtered out before current Handoff generation.
+
+Completed/resolved ordinary work represented in the current local-day draft is listed below the editor with `Remove`. Removal stores only `handoff_dismissals` metadata, preserves work/history, and regenerates the draft. Unresolved Waiting/Follow-up work and Missing BOL rows are not eligible.
 
 ## Preserved v0.4.x behavior
 

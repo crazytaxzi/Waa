@@ -16,7 +16,6 @@ public sealed class MissingBolViewModel : ObservableObject
 
     public MissingBolViewModel(
         MissingBolRepository repository,
-        Func<string, Task> onStateChanged,
         Action<string> reportStatus)
     {
         _repository = repository;
@@ -121,11 +120,6 @@ public sealed class MissingBolItemViewModel
     public string EmptyCallDateDisplay => Record.EmptyCallDate.ToString("M/d/yyyy", CultureInfo.CurrentCulture);
     public string StatusDisplay => "In current report";
 
-    // The old Driver Workspace builder only adds BOL rows to NEEDS ATTENTION when
-    // IsResolved is false. Source-only BOL rows are information, not actionable
-    // work, so keep them out of that list (and therefore out of Next Work Item).
-    // They are displayed in their own CURRENT MISSING BOL section instead.
-    public bool IsResolved => true;
 
     public DriverAttentionItemViewModel AttentionItem => new(
         DriverAttentionKind.MissingBol,

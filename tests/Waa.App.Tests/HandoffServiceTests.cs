@@ -61,9 +61,10 @@ public sealed class HandoffServiceTests
 
         Assert.StartsWith("No open ACE/ACI's\n\n", NormalizeNewlines(result.Text), StringComparison.Ordinal);
         Assert.Contains(
-            "261535 — Alex Example [A00001]: Driver will upload it tonight. Spoke with driver regarding high idle. Discussed the rolling 7 day idle and parking in shade.",
+            "261535 — Alex Example [A00001]: Spoke with driver regarding high idle. Discussed the rolling 7 day idle and parking in shade.",
             result.Text,
             StringComparison.Ordinal);
+        Assert.DoesNotContain("Driver will upload it tonight", result.Text, StringComparison.Ordinal);
         Assert.Contains(
             "240307 — Blair Example [B00002]: Waiting on updated ETA.",
             result.Text,
@@ -74,6 +75,7 @@ public sealed class HandoffServiceTests
         Assert.DoesNotContain("WAITING / PENDING", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("COMPLETED TODAY", result.Text, StringComparison.Ordinal);
         Assert.Equal(2, result.DriverLineCount);
+        Assert.Equal(1, result.CompletedTodayCount);
         Assert.Equal(0, result.MissingBolDriverCount);
         Assert.Equal(0, result.MissingBolOrderCount);
     }
@@ -110,6 +112,9 @@ public sealed class HandoffServiceTests
         Assert.DoesNotContain("empty call", result.Text, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Boise, ID", result.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("Status:", result.Text, StringComparison.Ordinal);
+        Assert.Equal(0, result.NeedsFollowUpCount);
+        Assert.Equal(0, result.WaitingCount);
+        Assert.Equal(0, result.CompletedTodayCount);
         Assert.Equal(2, result.MissingBolDriverCount);
         Assert.Equal(3, result.MissingBolOrderCount);
     }
