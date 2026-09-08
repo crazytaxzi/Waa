@@ -48,7 +48,11 @@ jobs:
 
           git diff --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet format Waa.sln --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet format Waa.sln --verify-no-changes --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           git config user.name 'WAA Release Automation'
