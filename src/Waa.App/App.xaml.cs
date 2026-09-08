@@ -23,11 +23,28 @@ public partial class App : Application
 
             DispatcherUnhandledException += OnDispatcherUnhandledException;
 
+            var retirement = new LegacyDatabaseRetirementService()
+                .RetireIfNeeded(paths.DatabasePath, paths.DataDirectory);
+            if (retirement.Retired)
+            {
+                AppLog.Write(retirement.Message);
+            }
+
             var repository = new WaaRepository(paths.DatabasePath);
             repository.Initialize();
             var missingBolRepository = new MissingBolRepository(paths.DatabasePath);
             missingBolRepository.Initialize();
             var themePreferenceStore = new ThemePreferenceStore(paths.DatabasePath);
+            if (retirement.DarkMode is bool darkMode)
+            {
+                themePreferenceStore.SetDarkMode(darkMode);
+            }
+
+            if (retirement.AmbientMotionEnabled is bool ambientMotionEnabled)
+            {
+                themePreferenceStore.SetAmbientMotionEnabled(ambientMotionEnabled);
+            }
+
             ThemeManager.Apply(themePreferenceStore.GetDarkMode());
 
             var updateService = new ReportUpdateService(
@@ -43,6 +60,18 @@ public partial class App : Application
             var window = new MainWindow(viewModel, themePreferenceStore);
             MainWindow = window;
             window.Show();
+
+            if (retirement.Retired)
+            {
+                MessageBox.Show(
+                    "A previous-generation WAA data store was detected and archived intact before current WAA started.\n\n" +
+                    $"Archive:\n{retirement.ArchiveDirectory}\n\n" +
+                    "Current WAA is now using a fresh database. Old PTA, call-session, note, reminder, timer, " +
+                    "transition, and old Missing BOL state were preserved in the archive rather than guessed into the current workflow.",
+                    "Previous WAA Data Archived",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
         }
         catch (Exception exception)
         {
