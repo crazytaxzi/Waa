@@ -1,0 +1,174 @@
+name: Publish WAA v0.4.9 Manual Truck Assignment Exec
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/release-v0.4.9-exec.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-2025
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Recover and apply v0.4.9 source patch
+        shell: pwsh
+        run: |
+          $bootstrapCommit = '79e0162758959adba2a99fe41164a858f9111dfc'
+          $legacy = @(git show "$bootstrapCommit`:.github/workflows/release-v0.4.9.yml")
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $start = -1
+          $lastPayloadLine = -1
+          for ($i = 0; $i -lt $legacy.Count; $i++) {
+            $trimmed = $legacy[$i].Trim()
+            if ($start -lt 0 -and $trimmed -eq "@'") {
+              $start = $i
+              continue
+            }
+            if ($start -ge 0 -and $trimmed -eq "print('Applied WAA v0.4.9 manual truck assignment changes.')") {
+              $lastPayloadLine = $i
+              break
+            }
+          }
+          if ($start -lt 0 -or $lastPayloadLine -le $start) {
+            throw "Could not recover v0.4.9 Python payload. start=$start last=$lastPayloadLine"
+          }
+
+          $python = for ($i = $start + 1; $i -le $lastPayloadLine; $i++) {
+            $line = $legacy[$i]
+            if ($line.StartsWith('          ')) { $line.Substring(10) } else { $line }
+          }
+          $script = Join-Path $env:RUNNER_TEMP 'apply-waa-v0.4.9.py'
+          $python | Set-Content -Path $script -Encoding utf8
+          python $script
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore Waa.sln
+
+      - name: Format and verify
+        shell: pwsh
+        run: |
+          dotnet format Waa.sln --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet format Waa.sln --verify-no-changes --no-restore
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build
+        shell: pwsh
+        run: dotnet build Waa.sln --configuration Release --no-restore
+
+      - name: Test
+        shell: pwsh
+        run: dotnet test Waa.sln --configuration Release --no-build
+
+      - name: Audit NuGet vulnerabilities
+        shell: pwsh
+        run: dotnet list Waa.sln package --vulnerable --include-transitive
+
+      - name: Commit and push v0.4.9 product
+        shell: pwsh
+        run: |
+          git config user.name 'WAA Release Automation'
+          git config user.email 'actions@users.noreply.github.com'
+          git add AGENTS.md README.md docs src tests
+          git commit -m 'WAA v0.4.9 restore manual truck assignment'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $productSha = (git rev-parse HEAD).Trim()
+          "PRODUCT_SHA=$productSha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          git push origin HEAD:main
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publish portable win-x64 application
+        shell: pwsh
+        run: |
+          $output = Join-Path $PWD 'artifacts\WAA-Portable-win-x64'
+          New-Item -ItemType Directory -Path $output -Force | Out-Null
+          dotnet publish src\Waa.App\Waa.App.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=false `
+            -p:PublishTrimmed=false `
+            -p:PublishReadyToRun=false `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            --output $output
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item portable\README-FIRST.txt (Join-Path $output 'README-FIRST.txt')
+          @(
+            'WAA portable build',
+            'Release: v0.4.9',
+            "Product commit: $env:PRODUCT_SHA",
+            "Built UTC: $([DateTime]::UtcNow.ToString('O'))",
+            '.NET 8 Windows x64 self-contained'
+          ) | Set-Content -Path (Join-Path $output 'BUILD.txt') -Encoding UTF8
+
+      - name: Package release ZIP and checksum
+        shell: pwsh
+        run: |
+          $zip = Join-Path $PWD 'artifacts\WAA-Portable-win-x64-v0.4.9.zip'
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          Compress-Archive -Path (Join-Path $PWD 'artifacts\WAA-Portable-win-x64\*') -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  WAA-Portable-win-x64-v0.4.9.zip" | Set-Content -Path (Join-Path $PWD 'artifacts\WAA-Portable-win-x64-v0.4.9.sha256') -Encoding ascii
+          Write-Host "SHA256=$hash"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WAA-Portable-win-x64-v0.4.9
+          path: |
+            artifacts/WAA-Portable-win-x64-v0.4.9.zip
+            artifacts/WAA-Portable-win-x64-v0.4.9.sha256
+          if-no-files-found: error
+
+      - name: Write release notes
+        shell: pwsh
+        run: |
+          @(
+            'WAA v0.4.9 — Manual Truck Assignment Restored',
+            '',
+            '- Restores Assign / Change Truck in Driver Workspace.',
+            '- Manual assignment is keyed by durable Driver Code; Unit remains context, never identity.',
+            '- Manual Unit overrides survive Rolling 7 Day report refreshes.',
+            '- Use Report Assignment removes the override and immediately returns to the current report Unit.',
+            '- Fleet Queue, Driver Workspace, Handoff, idle-contact snapshots, and newly saved work use the effective Unit.',
+            '- Historical work/contact snapshots and imported report evidence are never rewritten.',
+            '- No uniqueness restriction is imposed on Unit because legitimate co-driver/shared-unit situations can exist.',
+            '- Includes v0.4.8 safe previous-generation database retirement and v0.4.7 Handoff audit hardening.',
+            '- Self-contained Windows x64 portable package.'
+          ) | Set-Content -Path release-notes.md -Encoding UTF8
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $repo = $env:GITHUB_REPOSITORY
+          $tag = 'v0.4.9'
+          $zip = 'artifacts\WAA-Portable-win-x64-v0.4.9.zip'
+          $checksum = 'artifacts\WAA-Portable-win-x64-v0.4.9.sha256'
+          gh release create $tag $zip $checksum `
+            --repo $repo `
+            --target $env:PRODUCT_SHA `
+            --title 'WAA v0.4.9 — Manual Truck Assignment Restored' `
+            --notes-file release-notes.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
